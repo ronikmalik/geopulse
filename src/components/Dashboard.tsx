@@ -4,6 +4,7 @@ import FeedPanel from "./FeedPanel";
 import CountryRiskPanel from "./CountryRiskPanel";
 import LayersDashboard from "./LayersDashboard";
 import LiveWirePanel from "./LiveWirePanel";
+import TrendsPanel from "./TrendsPanel";
 import ConnectionStatus from "./ConnectionStatus";
 import type { ConnectionState } from "@/lib/useEventStream";
 import type { GeoEvent } from "@/lib/types";
@@ -21,7 +22,7 @@ import type {
   CyberResponse,
 } from "@/lib/dataLayerTypes";
 
-export type DashboardTab = "feed" | "risk" | "layers" | "forex";
+export type DashboardTab = "feed" | "risk" | "layers" | "forex" | "trends";
 
 const regionNames =
   typeof Intl !== "undefined"
@@ -72,6 +73,7 @@ const TAB_META: { id: DashboardTab; label: string; dot: string }[] = [
   { id: "risk", label: "Pulse", dot: "bg-orange-500" },
   { id: "layers", label: "Layers", dot: "bg-sky-400" },
   { id: "forex", label: "Live Wire", dot: "bg-emerald-500" },
+  { id: "trends", label: "Trends", dot: "bg-violet-400" },
 ];
 
 export default function Dashboard(props: DashboardProps) {
@@ -82,6 +84,7 @@ export default function Dashboard(props: DashboardProps) {
     risk: props.countryScores.length,
     layers: props.activeDataLayers.size,
     forex: props.forex?.rates.length ?? 0,
+    trends: 0,
   };
 
   return (
@@ -177,6 +180,9 @@ export default function Dashboard(props: DashboardProps) {
             forex={props.forex}
             cftc={props.cftc}
           />
+        )}
+        {activeTab === "trends" && (
+          <TrendsPanel countryScores={props.countryScores} />
         )}
       </div>
     </div>
