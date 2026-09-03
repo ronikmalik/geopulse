@@ -60,6 +60,16 @@ export default function Home() {
     [events, activeCategories],
   );
 
+  // Clicking a country on the globe shows its own breaking-news feed —
+  // every category for that country, not just whichever ones happen to be
+  // toggled on in the main view — rather than the pillar/threat-level
+  // breakdown (that view still exists under the Risk tab, just no longer
+  // the default click destination).
+  const feedEvents = useMemo(
+    () => (selectedCountry ? events.filter((e) => e.country === selectedCountry) : filtered),
+    [events, filtered, selectedCountry],
+  );
+
   const toggleCategory = (cat: Category) => {
     setActiveCategories((prev) => {
       const next = new Set(prev);
@@ -164,7 +174,7 @@ export default function Home() {
   ]);
 
   const dashboardProps = {
-    events: filtered,
+    events: feedEvents,
     selectedEventId: selected?.id ?? null,
     onSelectEvent: (event: GeoEvent) => {
       setSelected(event);
@@ -199,6 +209,7 @@ export default function Home() {
           events={filtered}
           onSelect={(event) => {
             setSelected(event);
+            setSelectedCountry(null);
             setActiveTab("feed");
             setMobileOpen(false);
           }}
@@ -207,7 +218,7 @@ export default function Home() {
           selectedCountry={selectedCountry}
           onCountryClick={(country) => {
             setSelectedCountry(country);
-            setActiveTab("risk");
+            setActiveTab("feed");
             setMobileOpen(true);
           }}
           extraPoints={extraPoints}
@@ -238,6 +249,7 @@ export default function Home() {
             onDismiss={() => dismissIncoming(event.id)}
             onFocus={() => {
               setSelected(event);
+              setSelectedCountry(null);
               setActiveTab("feed");
               setMobileOpen(false);
             }}

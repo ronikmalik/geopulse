@@ -27,6 +27,19 @@ import type {
 
 export type DashboardTab = "feed" | "risk" | "layers" | "forex";
 
+const regionNames =
+  typeof Intl !== "undefined"
+    ? new Intl.DisplayNames(["en"], { type: "region" })
+    : null;
+
+function countryName(code: string): string {
+  try {
+    return regionNames?.of(code) ?? code;
+  } catch {
+    return code;
+  }
+}
+
 interface DashboardProps {
   activeTab: DashboardTab;
   onTabChange: (tab: DashboardTab) => void;
@@ -119,11 +132,29 @@ export default function Dashboard(props: DashboardProps) {
       )}
       <div className="min-h-0 flex-1">
         {activeTab === "feed" && (
-          <FeedPanel
-            events={props.events}
-            selectedId={props.selectedEventId}
-            onSelect={props.onSelectEvent}
-          />
+          <div className="flex h-full flex-col">
+            {props.selectedCountry && (
+              <div className="flex shrink-0 items-center justify-between border-b border-red-950/70 bg-red-950/20 px-4 py-2">
+                <span className="font-mono text-[11px] uppercase tracking-wider text-red-300">
+                  Showing: {countryName(props.selectedCountry)}
+                </span>
+                <button
+                  onClick={() => props.onSelectCountry(null)}
+                  className="font-mono text-[11px] text-neutral-500 hover:text-red-400"
+                  aria-label="Clear country filter"
+                >
+                  ✕ clear
+                </button>
+              </div>
+            )}
+            <div className="min-h-0 flex-1">
+              <FeedPanel
+                events={props.events}
+                selectedId={props.selectedEventId}
+                onSelect={props.onSelectEvent}
+              />
+            </div>
+          </div>
         )}
         {activeTab === "risk" && (
           <CountryRiskPanel
