@@ -21,6 +21,7 @@ import type {
   GdpResponse,
   PopulationResponse,
   MacroResponse,
+  CyberResponse,
 } from "@/lib/dataLayerTypes";
 
 interface LayersDashboardProps {
@@ -37,12 +38,20 @@ interface LayersDashboardProps {
   gdp: GdpResponse | null;
   population: PopulationResponse | null;
   macro: MacroResponse | null;
+  cyber: CyberResponse | null;
 }
 
 const LAYER_DESCRIPTIONS: Partial<Record<Category, string>> = {
+  "political-instability":
+    "GDELT — coups, contested elections, martial law, government collapse.",
+  humanitarian:
+    "GDELT — famine, displacement, refugee flows, disease outbreaks.",
   earthquake: "USGS — magnitude 4.5+ seismic events, refreshed every ingest cycle.",
   "natural-disaster":
-    "NASA EONET + GDACS — wildfires, storms, volcanoes, floods, cyclones.",
+    "NASA EONET + GDACS — cyclones, volcanoes, tsunamis, severe storms.",
+  "climate-hazard": "NASA EONET + GDACS — floods, wildfires, drought.",
+  "infrastructure-outage":
+    "IODA (Georgia Tech) — country-level internet connectivity disruptions.",
 };
 
 function formatUsd(value: number): string {
@@ -77,6 +86,7 @@ export default function LayersDashboard({
   gdp,
   population,
   macro,
+  cyber,
 }: LayersDashboardProps) {
   function renderPreview(id: DataLayerId) {
     if (id === "flights" && flights) {
@@ -180,6 +190,23 @@ export default function LayersDashboard({
         <div className="mt-1.5 space-y-0.5 text-[11px] text-neutral-500">
           {rows.map((row) => (
             <div key={row}>{row}</div>
+          ))}
+        </div>
+      );
+    }
+    if (id === "cyber" && cyber) {
+      return (
+        <div className="mt-1.5 space-y-1 text-[11px] text-neutral-500">
+          {cyber.vulnerabilities.slice(0, 5).map((v) => (
+            <div key={v.cveId} className="flex items-start justify-between gap-2">
+              <span className="truncate">
+                {v.cveId} — {v.product}
+                {v.knownRansomwareUse && (
+                  <span className="ml-1 text-red-500">⚠ ransomware</span>
+                )}
+              </span>
+              <span className="shrink-0">{v.dateAdded}</span>
+            </div>
           ))}
         </div>
       );

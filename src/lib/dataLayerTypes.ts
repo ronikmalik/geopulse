@@ -8,6 +8,7 @@ import type { CryptoMarketSnapshot } from "@/lib/sources/coingecko";
 import type { RepoSignal } from "@/lib/sources/github";
 import type { WorldBankObservation } from "@/lib/sources/worldbank";
 import type { CftcPosition } from "@/lib/sources/cftc";
+import type { KevEntry } from "@/lib/sources/cisakev";
 
 export interface FlightsResponse {
   aircraft: TrackedAircraft[];
@@ -60,4 +61,8 @@ export interface ForexResponse {
 
 export interface CftcResponse {
   positions: CftcPosition[];
+}
+
+export interface CyberResponse {
+  vulnerabilities: KevEntry[];
 }

@@ -75,6 +75,9 @@ export default function GlobeView({
   const onSelectRef = useRef(onSelect);
   const onCountryClickRef = useRef(onCountryClick);
   const scoreByCountryRef = useRef<Record<string, number>>({});
+  const threatByCountryRef = useRef<
+    Record<string, { threatLabel: string; momentum: number }>
+  >({});
   const selectedCountryRef = useRef(selectedCountry);
   const [ready, setReady] = useState(false);
 
@@ -93,8 +96,13 @@ export default function GlobeView({
 
   useEffect(() => {
     const map: Record<string, number> = {};
-    for (const s of countryScores) map[s.country] = s.score;
+    const threatMap: Record<string, { threatLabel: string; momentum: number }> = {};
+    for (const s of countryScores) {
+      map[s.country] = s.score;
+      threatMap[s.country] = { threatLabel: s.threatLabel, momentum: s.momentum };
+    }
     scoreByCountryRef.current = map;
+    threatByCountryRef.current = threatMap;
     refreshPolygons();
   }, [countryScores]);
 
@@ -187,10 +195,14 @@ export default function GlobeView({
         .polygonLabel((d) => {
           const code = polygonCountryCode(d);
           const score = code ? scoreByCountryRef.current[code] : undefined;
+          const threat = code ? threatByCountryRef.current[code] : undefined;
           const name =
             (d as { properties?: { name?: string } }).properties?.name ?? "";
+          const threatLine = threat
+            ? `<br/>threat level: ${threat.threatLabel} · momentum ${threat.momentum}`
+            : "";
           return `<div style="font-family:monospace;color:#ff5555;background:#0a0000;border:1px solid #ff2d2d;padding:6px 8px;border-radius:2px">
-              <b>${name}</b>${score ? `<br/>risk score: ${score.toFixed(1)}` : ""}
+              <b>${name}</b>${score ? threatLine : ""}
             </div>`;
         })
         .onPolygonClick((d) => {

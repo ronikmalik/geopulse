@@ -32,6 +32,14 @@ function categorySeverity(categoryTitle: string): number {
   return 1;
 }
 
+// Wildfires/floods/drought -> Climate & Environment pillar; volcanoes and
+// severe storms -> Natural & Biological Hazards pillar. See gdacs.ts for
+// the same split and src/lib/pillars.ts for the pillar definitions.
+function categoryBucket(categoryTitle: string): "climate-hazard" | "natural-disaster" {
+  if (/wildfires|floods|drought/i.test(categoryTitle)) return "climate-hazard";
+  return "natural-disaster";
+}
+
 export async function fetchNasaEonet(): Promise<DirectItem[]> {
   let res: Response;
   try {
@@ -65,7 +73,7 @@ export async function fetchNasaEonet(): Promise<DirectItem[]> {
         url: ev.link || `https://eonet.gsfc.nasa.gov/api/v3/events/${ev.id}`,
         title: ev.title,
         summary: `${categoryTitle}: ${ev.title}`,
-        category: "natural-disaster",
+        category: categoryBucket(categoryTitle),
         location: ev.title,
         country: resolveCountryFromText(ev.title),
         lat,

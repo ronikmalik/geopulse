@@ -27,6 +27,7 @@ import type {
   MacroResponse,
   ForexResponse,
   CftcResponse,
+  CyberResponse,
 } from "@/lib/dataLayerTypes";
 import type { GeoEvent } from "@/lib/types";
 
@@ -122,6 +123,11 @@ export default function Home() {
     DATA_LAYER_POLL_MS.macro,
     activeDataLayers.has("macro"),
   );
+  const cyberLayer = useLiveLayer<CyberResponse>(
+    "/api/layers/cyber",
+    DATA_LAYER_POLL_MS.cyber,
+    activeDataLayers.has("cyber"),
+  );
 
   // Forex is the app's headline feature, not an opt-in layer — it polls
   // continuously rather than gating behind a checkbox.
@@ -180,6 +186,7 @@ export default function Home() {
     gdp: gdpLayer.data,
     population: populationLayer.data,
     macro: macroLayer.data,
+    cyber: cyberLayer.data,
     forex: forexLayer.data,
     cftc: cftcLayer.data,
     connectionStatus: status,

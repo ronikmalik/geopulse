@@ -15,6 +15,7 @@ export const TICKER_DATA_LAYERS = [
   "gdp",
   "population",
   "macro",
+  "cyber",
 ] as const;
 
 export const DATA_LAYERS = [...GLOBE_DATA_LAYERS, ...TICKER_DATA_LAYERS] as const;
@@ -37,6 +38,7 @@ export const DATA_LAYER_LABELS: Record<DataLayerId, string> = {
   gdp: "Top Economies (GDP)",
   population: "Population Ranking",
   macro: "Macro Indicators",
+  cyber: "Actively Exploited Vulnerabilities",
 };
 
 export const DATA_LAYER_DESCRIPTIONS: Record<DataLayerId, string> = {
@@ -50,6 +52,7 @@ export const DATA_LAYER_DESCRIPTIONS: Record<DataLayerId, string> = {
   gdp: "World Bank — countries ranked by GDP (current US$).",
   population: "World Bank — most populous countries.",
   macro: "ECB EUR/USD, BIS US policy rate, Eurostat EU unemployment.",
+  cyber: "CISA KEV — vulnerabilities with confirmed active exploitation, most recent first.",
 };
 
 // Poll intervals per layer — long enough to respect free-tier rate limits
@@ -65,4 +68,5 @@ export const DATA_LAYER_POLL_MS: Record<DataLayerId, number> = {
   gdp: 60 * 60_000,
   population: 60 * 60_000,
   macro: 15 * 60_000,
+  cyber: 30 * 60_000,
 };

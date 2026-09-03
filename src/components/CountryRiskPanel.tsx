@@ -3,6 +3,14 @@
 import { useEffect, useState } from "react";
 import { useWatchlist } from "@/lib/useWatchlist";
 import type { CountryRiskScore } from "@/lib/useCountryRisk";
+import {
+  THREAT_COLORS,
+  momentumArrow,
+  momentumBucketLabel,
+  type ThreatLevel,
+  type MomentumDirection,
+} from "@/lib/threat";
+import { CATEGORY_LABELS, type Category } from "@/lib/categories";
 
 interface CountryRiskEvent {
   id: number;
@@ -10,9 +18,34 @@ interface CountryRiskEvent {
   summary: string;
   url: string;
   source: string;
+  category: string;
   severity: number;
   publishedAt: string;
   weight: number;
+}
+
+interface PillarBreakdownEntry {
+  pillarId: string;
+  label: string;
+  shortLabel: string;
+  color: string;
+  threatLevel: ThreatLevel;
+  threatLabel: string;
+  momentum: number;
+  momentumDirection: MomentumDirection;
+  eventCount: number;
+  lastEventAt: string | null;
+  covered: boolean;
+}
+
+interface CountryThreatDetail {
+  country: string;
+  threatLevel: ThreatLevel;
+  threatLabel: string;
+  momentum: number;
+  momentumDirection: MomentumDirection;
+  pillars: PillarBreakdownEntry[];
+  events: CountryRiskEvent[];
 }
 
 interface CountrySnapshot {
@@ -61,33 +94,61 @@ function timeAgo(iso: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+function ThreatBadge({ level, label }: { level: ThreatLevel; label: string }) {
+  return (
+    <span
+      className="rounded-sm px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-black"
+      style={{ backgroundColor: THREAT_COLORS[level] }}
+      title={`Threat Level ${level}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function MomentumTag({
+  magnitude,
+  direction,
+}: {
+  magnitude: number;
+  direction: MomentumDirection;
+}) {
+  const color =
+    direction > 0 ? "text-red-400" : direction < 0 ? "text-emerald-500" : "text-neutral-500";
+  return (
+    <span className={`font-mono text-[10px] ${color}`} title={momentumBucketLabel(magnitude)}>
+      {momentumArrow(direction)} {magnitude}
+    </span>
+  );
+}
+
 export default function CountryRiskPanel({
   scores,
   selectedCountry,
   onSelectCountry,
 }: CountryRiskPanelProps) {
-  const [provenance, setProvenance] = useState<CountryRiskEvent[]>([]);
-  const [loadingProvenance, setLoadingProvenance] = useState(false);
+  const [detail, setDetail] = useState<CountryThreatDetail | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
   const [snapshot, setSnapshot] = useState<CountrySnapshot | null>(null);
   const { watchlist, toggle } = useWatchlist();
 
   useEffect(() => {
     if (!selectedCountry) {
-      setProvenance([]);
+      setDetail(null);
       return;
     }
     let cancelled = false;
-    setLoadingProvenance(true);
+    setLoadingDetail(true);
     fetch(`/api/risk?country=${selectedCountry}`)
       .then((res) => res.json())
       .then((data) => {
-        if (!cancelled) setProvenance(data.events ?? []);
+        if (!cancelled) setDetail(data);
       })
       .catch(() => {
-        if (!cancelled) setProvenance([]);
+        if (!cancelled) setDetail(null);
       })
       .finally(() => {
-        if (!cancelled) setLoadingProvenance(false);
+        if (!cancelled) setLoadingDetail(false);
       });
     return () => {
       cancelled = true;
@@ -126,12 +187,13 @@ export default function CountryRiskPanel({
     const aWatched = watchlist.has(a.country);
     const bWatched = watchlist.has(b.country);
     if (aWatched !== bWatched) return aWatched ? -1 : 1;
+    const aLevel = "threatLevel" in a ? a.threatLevel : 0;
+    const bLevel = "threatLevel" in b ? b.threatLevel : 0;
+    if (aLevel !== bLevel) return bLevel - aLevel;
     const aScore = "score" in a ? a.score : -1;
     const bScore = "score" in b ? b.score : -1;
     return bScore - aScore;
   });
-
-  const maxScore = Math.max(...scores.map((r) => r.score), 1);
 
   return (
     <div className="flex h-full flex-col">
@@ -145,7 +207,13 @@ export default function CountryRiskPanel({
           const isWatched = watchlist.has(r.country);
           const isExpanded = selectedCountry === r.country;
           const isPlaceholder = "placeholder" in r;
-          const score = "score" in r ? r.score : 0;
+          const threatLevel: ThreatLevel = "threatLevel" in r ? r.threatLevel : 1;
+          const threatLabel = "threatLabel" in r ? r.threatLabel : "";
+          const momentum = "momentum" in r ? r.momentum : 0;
+          const momentumDirection: MomentumDirection =
+            "momentumDirection" in r ? r.momentumDirection : 0;
+          const eventCount = "eventCount" in r ? r.eventCount : 0;
+          const lastEventAt = "lastEventAt" in r ? r.lastEventAt : "";
           return (
             <div key={r.country} className="border-b border-red-950">
               <div className="flex items-center gap-2 px-4 py-2.5">
@@ -168,107 +236,152 @@ export default function CountryRiskPanel({
                     <span className="font-mono text-xs text-red-300">
                       {countryName(r.country)}
                     </span>
+                    {!isPlaceholder && (
+                      <div className="flex items-center gap-2">
+                        <MomentumTag magnitude={momentum} direction={momentumDirection} />
+                        <ThreatBadge level={threatLevel} label={threatLabel} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-1 flex items-center justify-between gap-2">
                     <span className="font-mono text-[10px] text-neutral-600">
                       {isPlaceholder
                         ? "no recent events"
-                        : `${r.eventCount} events · ${timeAgo(r.lastEventAt)}`}
+                        : `${eventCount} events · ${timeAgo(lastEventAt)}`}
                     </span>
                   </div>
-                  {!isPlaceholder && (
-                    <div className="mt-1 h-1 w-full overflow-hidden rounded-sm bg-red-950">
-                      <div
-                        className="h-full bg-red-600"
-                        style={{ width: `${(score / maxScore) * 100}%` }}
-                      />
-                    </div>
-                  )}
                 </button>
               </div>
               {isExpanded && (
                 <div className="border-t border-red-950/70 bg-black/40 px-4 py-2">
-                  {snapshot?.country === r.country &&
-                    (snapshot.currency || snapshot.index) && (
-                      <div className="mb-2 grid grid-cols-2 gap-2 border-b border-red-950/70 pb-2">
-                        {snapshot.currency && (
-                          <div>
-                            <div className="font-mono text-[9px] uppercase tracking-wider text-neutral-500">
-                              USD/{snapshot.currency.currency}
+                  {loadingDetail && (
+                    <p className="font-mono text-[10px] text-neutral-600">
+                      loading threat assessment…
+                    </p>
+                  )}
+                  {!loadingDetail && detail && detail.country === r.country && (
+                    <>
+                      <div className="mb-2 grid grid-cols-2 gap-1.5 border-b border-red-950/70 pb-2">
+                        {detail.pillars.map((p) => (
+                          <div
+                            key={p.pillarId}
+                            className={`rounded-sm border px-1.5 py-1 ${
+                              p.covered
+                                ? "border-neutral-800"
+                                : "border-neutral-900 opacity-50"
+                            }`}
+                            title={p.label}
+                          >
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="truncate font-mono text-[9px] uppercase tracking-wider text-neutral-500">
+                                {p.shortLabel}
+                              </span>
+                              {p.covered ? (
+                                <ThreatBadge level={p.threatLevel} label={String(p.threatLevel)} />
+                              ) : (
+                                <span className="font-mono text-[8px] text-neutral-700">
+                                  n/a
+                                </span>
+                              )}
                             </div>
-                            <div className="font-mono text-xs text-red-300">
-                              {snapshot.currency.rate < 1
-                                ? snapshot.currency.rate.toFixed(4)
-                                : snapshot.currency.rate.toFixed(2)}
-                            </div>
-                            {snapshot.currency.changePct != null && (
-                              <div
-                                className={`font-mono text-[10px] ${
-                                  snapshot.currency.changePct >= 0
-                                    ? "text-emerald-500"
-                                    : "text-red-500"
-                                }`}
-                              >
-                                {snapshot.currency.changePct >= 0 ? "+" : ""}
-                                {snapshot.currency.changePct.toFixed(2)}%
+                            {p.covered && (
+                              <div className="mt-0.5 flex items-center justify-between">
+                                <span className="font-mono text-[9px] text-neutral-600">
+                                  {p.eventCount} evt
+                                </span>
+                                <MomentumTag
+                                  magnitude={p.momentum}
+                                  direction={p.momentumDirection}
+                                />
+                              </div>
+                            )}
+                            {!p.covered && (
+                              <div className="mt-0.5 font-mono text-[8px] text-neutral-700">
+                                not yet tracked
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {snapshot?.country === r.country &&
+                        (snapshot.currency || snapshot.index) && (
+                          <div className="mb-2 grid grid-cols-2 gap-2 border-b border-red-950/70 pb-2">
+                            {snapshot.currency && (
+                              <div>
+                                <div className="font-mono text-[9px] uppercase tracking-wider text-neutral-500">
+                                  USD/{snapshot.currency.currency}
+                                </div>
+                                <div className="font-mono text-xs text-red-300">
+                                  {snapshot.currency.rate < 1
+                                    ? snapshot.currency.rate.toFixed(4)
+                                    : snapshot.currency.rate.toFixed(2)}
+                                </div>
+                                {snapshot.currency.changePct != null && (
+                                  <div
+                                    className={`font-mono text-[10px] ${
+                                      snapshot.currency.changePct >= 0
+                                        ? "text-emerald-500"
+                                        : "text-red-500"
+                                    }`}
+                                  >
+                                    {snapshot.currency.changePct >= 0 ? "+" : ""}
+                                    {snapshot.currency.changePct.toFixed(2)}%
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {snapshot.index && (
+                              <div>
+                                <div className="truncate font-mono text-[9px] uppercase tracking-wider text-neutral-500">
+                                  {snapshot.index.name}
+                                </div>
+                                <div className="font-mono text-xs text-red-300">
+                                  {snapshot.index.price.toLocaleString()}
+                                </div>
+                                <div
+                                  className={`font-mono text-[10px] ${
+                                    snapshot.index.changePct >= 0
+                                      ? "text-emerald-500"
+                                      : "text-red-500"
+                                  }`}
+                                >
+                                  {snapshot.index.changePct >= 0 ? "+" : ""}
+                                  {snapshot.index.changePct.toFixed(2)}%
+                                </div>
                               </div>
                             )}
                           </div>
                         )}
-                        {snapshot.index && (
-                          <div>
-                            <div className="truncate font-mono text-[9px] uppercase tracking-wider text-neutral-500">
-                              {snapshot.index.name}
-                            </div>
-                            <div className="font-mono text-xs text-red-300">
-                              {snapshot.index.price.toLocaleString()}
-                            </div>
-                            <div
-                              className={`font-mono text-[10px] ${
-                                snapshot.index.changePct >= 0
-                                  ? "text-emerald-500"
-                                  : "text-red-500"
-                              }`}
-                            >
-                              {snapshot.index.changePct >= 0 ? "+" : ""}
-                              {snapshot.index.changePct.toFixed(2)}%
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  {loadingProvenance && (
-                    <p className="font-mono text-[10px] text-neutral-600">
-                      loading source events…
-                    </p>
-                  )}
-                  {!loadingProvenance && provenance.length === 0 && (
-                    <p className="font-mono text-[10px] text-neutral-600">
-                      No tracked events for this country in the last 30 days.
-                      Historical country risk ratings compiled over time are
-                      coming soon.
-                    </p>
-                  )}
-                  {!loadingProvenance &&
-                    provenance.map((e) => (
-                      <a
-                        key={e.id}
-                        href={e.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block border-b border-red-950/50 py-1.5 last:border-b-0 hover:bg-red-950/20"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-mono text-[9px] uppercase tracking-wider text-red-700">
-                            {e.source} · sev {e.severity}
-                          </span>
-                          <span className="font-mono text-[9px] text-neutral-600">
-                            {timeAgo(e.publishedAt)}
-                          </span>
-                        </div>
-                        <p className="mt-0.5 line-clamp-2 text-[11px] text-neutral-300">
-                          {e.summary}
+
+                      {detail.events.length === 0 && (
+                        <p className="font-mono text-[10px] text-neutral-600">
+                          No tracked events for this country in the last 30 days.
                         </p>
-                      </a>
-                    ))}
+                      )}
+                      {detail.events.map((e) => (
+                        <a
+                          key={e.id}
+                          href={e.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block border-b border-red-950/50 py-1.5 last:border-b-0 hover:bg-red-950/20"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-[9px] uppercase tracking-wider text-red-700">
+                              {CATEGORY_LABELS[e.category as Category] ?? e.category} · sev {e.severity}
+                            </span>
+                            <span className="font-mono text-[9px] text-neutral-600">
+                              {timeAgo(e.publishedAt)}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 line-clamp-2 text-[11px] text-neutral-300">
+                            {e.summary}
+                          </p>
+                        </a>
+                      ))}
+                    </>
+                  )}
                 </div>
               )}
             </div>

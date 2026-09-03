@@ -18,6 +18,13 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
 
 const EXCLUDED_EVENT_TYPES = new Set(["EQ"]);
 
+// Flood/drought/wildfire are climate-pillar hazards (per the blueprint's
+// Climate & Environment pillar); cyclone/volcano/tsunami are physical
+// hazard-pillar events (Natural & Biological Hazards) — see
+// src/lib/pillars.ts. Anything not listed here defaults to the hazards
+// pillar via "natural-disaster".
+const CLIMATE_EVENT_TYPES = new Set(["FL", "DR", "WF"]);
+
 interface GdacsFeature {
   geometry: { type: string; coordinates: [number, number] } | null;
   properties: {
@@ -79,7 +86,9 @@ export async function fetchGdacsAlerts(): Promise<DirectItem[]> {
         url: reportUrl,
         title: p.name,
         summary: `${typeLabel} (${p.alertlevel} alert): ${p.description || p.name}`,
-        category: "natural-disaster",
+        category: CLIMATE_EVENT_TYPES.has(p.eventtype)
+          ? "climate-hazard"
+          : "natural-disaster",
         location: p.name,
         country,
         lat,

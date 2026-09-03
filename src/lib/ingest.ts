@@ -7,6 +7,7 @@ import { fetchAllRssFeeds } from "./sources/rss";
 import { fetchUsgsEarthquakes } from "./sources/usgs";
 import { fetchNasaEonet } from "./sources/eonet";
 import { fetchGdacsAlerts } from "./sources/gdacs";
+import { fetchIodaOutages } from "./sources/ioda";
 import type { DirectItem } from "./sources/direct";
 import { classifyBatch, isLikelyGeopolitical } from "./classify";
 
@@ -48,7 +49,7 @@ export async function runIngest(): Promise<IngestResult> {
     return [] as RawItem[];
   });
 
-  const [usgsResults, eonetResults, gdacsResults] = await Promise.all([
+  const [usgsResults, eonetResults, gdacsResults, iodaResults] = await Promise.all([
     fetchUsgsEarthquakes().catch((err) => {
       errors.push(`usgs: ${err}`);
       return [] as DirectItem[];
@@ -61,6 +62,10 @@ export async function runIngest(): Promise<IngestResult> {
       errors.push(`gdacs: ${err}`);
       return [] as DirectItem[];
     }),
+    fetchIodaOutages().catch((err) => {
+      errors.push(`ioda: ${err}`);
+      return [] as DirectItem[];
+    }),
   ]);
 
   const all = dedupeByUrl([...gdeltResults.flat(), ...rssResults]);
@@ -71,6 +76,7 @@ export async function runIngest(): Promise<IngestResult> {
     ...usgsResults,
     ...eonetResults,
     ...gdacsResults,
+    ...iodaResults,
   ]);
 
   if (candidates.length === 0 && direct.length === 0) {
