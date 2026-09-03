@@ -30,14 +30,17 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Bounded so 5 sequential category queries in ingest.ts, each retried once
-// on network failure, can never exceed the ingest route's overall budget.
-const REQUEST_TIMEOUT_MS = 12_000;
+// Bounded so the category queries in ingest.ts (run in parallel, one
+// retry each on network failure) can't stall the whole ingest run for
+// long if GDELT is slow or unreachable — a dead endpoint should fail
+// fast enough that RSS and everything else still gets a fair chance to
+// run within the ingest route's overall budget.
+const REQUEST_TIMEOUT_MS = 7_000;
 
 export async function fetchGdelt(
   query: string,
   maxRecords = 20,
-  retries = 2,
+  retries = 1,
 ): Promise<RawItem[]> {
   const params = new URLSearchParams({
     query,

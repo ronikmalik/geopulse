@@ -9,9 +9,7 @@ import { fetchNasaEonet } from "./sources/eonet";
 import { fetchGdacsAlerts } from "./sources/gdacs";
 import { fetchIodaOutages } from "./sources/ioda";
 import type { DirectItem } from "./sources/direct";
-import { classifyBatch, isLikelyGeopolitical } from "./classify";
-
-const BATCH_SIZE = 15;
+import { classifyByKeywords, isLikelyGeopolitical } from "./classify";
 
 function dedupeByUrl(items: RawItem[]): RawItem[] {
   const seen = new Map<string, RawItem>();
@@ -35,38 +33,43 @@ export interface IngestResult {
 export async function runIngest(): Promise<IngestResult> {
   const errors: string[] = [];
 
-  const gdeltResults: RawItem[][] = [];
-  for (const q of Object.values(CATEGORY_QUERIES)) {
-    try {
-      gdeltResults.push(await fetchGdelt(q, 15));
-    } catch (err) {
-      errors.push(`gdelt(${q}): ${err}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-  }
-  const rssResults = await fetchAllRssFeeds().catch((err) => {
-    errors.push(`rss: ${err}`);
-    return [] as RawItem[];
-  });
-
-  const [usgsResults, eonetResults, gdacsResults, iodaResults] = await Promise.all([
-    fetchUsgsEarthquakes().catch((err) => {
-      errors.push(`usgs: ${err}`);
-      return [] as DirectItem[];
-    }),
-    fetchNasaEonet().catch((err) => {
-      errors.push(`eonet: ${err}`);
-      return [] as DirectItem[];
-    }),
-    fetchGdacsAlerts().catch((err) => {
-      errors.push(`gdacs: ${err}`);
-      return [] as DirectItem[];
-    }),
-    fetchIodaOutages().catch((err) => {
-      errors.push(`ioda: ${err}`);
-      return [] as DirectItem[];
-    }),
-  ]);
+  // All sources are independent of each other, so they all run
+  // concurrently rather than in sequential stages — a slow or unreachable
+  // source (each still retries once internally) can't stall the ones that
+  // are working. This is what keeps the feed "live": a full ingest cycle
+  // takes roughly as long as its single slowest source, not the sum of
+  // all of them.
+  const [gdeltResults, rssResults, usgsResults, eonetResults, gdacsResults, iodaResults] =
+    await Promise.all([
+      Promise.all(
+        Object.values(CATEGORY_QUERIES).map((q) =>
+          fetchGdelt(q, 15).catch((err) => {
+            errors.push(`gdelt(${q}): ${err}`);
+            return [] as RawItem[];
+          }),
+        ),
+      ),
+      fetchAllRssFeeds().catch((err) => {
+        errors.push(`rss: ${err}`);
+        return [] as RawItem[];
+      }),
+      fetchUsgsEarthquakes().catch((err) => {
+        errors.push(`usgs: ${err}`);
+        return [] as DirectItem[];
+      }),
+      fetchNasaEonet().catch((err) => {
+        errors.push(`eonet: ${err}`);
+        return [] as DirectItem[];
+      }),
+      fetchGdacsAlerts().catch((err) => {
+        errors.push(`gdacs: ${err}`);
+        return [] as DirectItem[];
+      }),
+      fetchIodaOutages().catch((err) => {
+        errors.push(`ioda: ${err}`);
+        return [] as DirectItem[];
+      }),
+    ]);
 
   const all = dedupeByUrl([...gdeltResults.flat(), ...rssResults]);
   const candidates = all.filter(
@@ -103,42 +106,40 @@ export async function runIngest(): Promise<IngestResult> {
 
   let inserted = 0;
 
-  for (let i = 0; i < fresh.length; i += BATCH_SIZE) {
-    const batch = fresh.slice(i, i + BATCH_SIZE);
-    try {
-      const classified = await classifyBatch(batch);
-      const rows = batch
-        .map((item, idx) => {
-          const c = classified.get(idx);
-          if (!c || !c.relevant) return null;
-          return {
-            source: item.source,
-            url: item.url,
-            title: item.title,
-            summary: c.summary,
-            category: c.category,
-            location: c.location,
-            country: c.country.toUpperCase(),
-            lat: c.lat,
-            lon: c.lon,
-            severity: c.severity,
-            publishedAt: item.publishedAt,
-          };
-        })
-        .filter((r): r is NonNullable<typeof r> => r !== null);
+  // classifyByKeywords is a pure, synchronous, local function (no external
+  // API), so unlike the old LLM-based classifyBatch this needs no batching
+  // or rate-limit pacing between calls.
+  try {
+    const rows = fresh
+      .map((item) => {
+        const c = classifyByKeywords(item);
+        if (!c) return null;
+        return {
+          source: item.source,
+          url: item.url,
+          title: item.title,
+          summary: c.summary,
+          category: c.category,
+          location: c.location,
+          country: c.country.toUpperCase(),
+          lat: c.lat,
+          lon: c.lon,
+          severity: c.severity,
+          publishedAt: item.publishedAt,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
 
-      if (rows.length > 0) {
-        const result = await db
-          .insert(events)
-          .values(rows)
-          .onConflictDoNothing({ target: events.url })
-          .returning({ id: events.id });
-        inserted += result.length;
-      }
-    } catch (err) {
-      errors.push(`classify batch ${i}: ${err}`);
+    if (rows.length > 0) {
+      const result = await db
+        .insert(events)
+        .values(rows)
+        .onConflictDoNothing({ target: events.url })
+        .returning({ id: events.id });
+      inserted += result.length;
     }
-    await new Promise((resolve) => setTimeout(resolve, 800));
+  } catch (err) {
+    errors.push(`classify: ${err}`);
   }
 
   if (freshDirect.length > 0) {

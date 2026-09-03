@@ -1,7 +1,9 @@
 import { generateObject } from "ai";
 import { z } from "zod";
-import { NEWS_CATEGORIES } from "./categories";
+import { NEWS_CATEGORIES, type NewsCategory } from "./categories";
 import type { RawItem } from "./sources/gdelt";
+import { resolveCountryFromText } from "./countryNames";
+import { COUNTRY_CENTROIDS } from "./countryCentroids";
 
 // LLM classification only ever assigns news-query-driven categories (plus
 // "other") — the feed-driven categories (earthquake, natural-disaster) are
@@ -81,4 +83,83 @@ export async function classifyBatch(
     map.set(item.id, item);
   }
   return map;
+}
+
+// Free, no-API-key fallback classifier. classifyBatch (above) needs a
+// Vercel AI Gateway account with a payment method on file even to use free
+// credits — not something to assume the deployer wants — so this is the
+// default path: no LLM, no summary generation, but it doesn't depend on
+// anything beyond the category keyword patterns already used to build the
+// GDELT queries in categories.ts. Trade-off: the "summary" is just the raw
+// title, and location resolution is best-effort text matching rather than
+// an LLM's judgment, but it costs nothing and has no external dependency
+// beyond the news source itself.
+const CATEGORY_MATCHERS: [NewsCategory, RegExp][] = [
+  ["us-iran", /\biran\b/i],
+  ["russia-ukraine", /\brussia\b|\bkremlin\b|\bputin\b/i],
+  ["israel-palestine", /\bisrael\b|\bgaza\b|\bpalestin|\bhamas\b|\bhezbollah\b/i],
+  ["china-taiwan", /\btaiwan\b/i],
+  ["north-korea", /north korea|pyongyang|kim jong/i],
+  [
+    "political-instability",
+    /\bcoup\b|martial law|state of emergency|election fraud|government collapse|ousted|overthrown/i,
+  ],
+  [
+    "humanitarian",
+    /famine|food insecurity|malnutrition|refugee|displaced|displacement|humanitarian crisis|humanitarian emergency|disease outbreak|epidemic/i,
+  ],
+];
+
+// A flashpoint category is thematically tied to a specific country even
+// when the article text doesn't happen to name it in a form
+// resolveCountryFromText recognizes (e.g. "Tehran" without "Iran").
+const CATEGORY_FALLBACK_COUNTRY: Partial<Record<NewsCategory, string>> = {
+  "us-iran": "IR",
+  "russia-ukraine": "UA",
+  "israel-palestine": "IL",
+  "china-taiwan": "TW",
+  "north-korea": "KP",
+};
+
+const HIGH_SEVERITY = /nuclear|invasion|massacre|genocide|declared war/i;
+const MODERATE_SEVERITY =
+  /strike|missile|airstrike|attack|killed|dead|casualties|explosion|bombing|offensive/i;
+
+function keywordSeverity(text: string): number {
+  if (HIGH_SEVERITY.test(text)) return 4;
+  if (MODERATE_SEVERITY.test(text)) return 3;
+  return 2;
+}
+
+function categorizeByKeywords(text: string): NewsCategory | "other" {
+  for (const [category, pattern] of CATEGORY_MATCHERS) {
+    if (pattern.test(text)) return category;
+  }
+  return "other";
+}
+
+export function classifyByKeywords(item: RawItem): ClassifiedItem | null {
+  const text = `${item.title} ${item.snippet}`;
+  const category = categorizeByKeywords(text);
+
+  const resolvedCountry = resolveCountryFromText(text);
+  const country =
+    resolvedCountry ??
+    (category !== "other" ? CATEGORY_FALLBACK_COUNTRY[category] : undefined);
+  if (!country) return null;
+
+  const centroid = COUNTRY_CENTROIDS[country];
+  if (!centroid) return null;
+
+  return {
+    id: 0, // overwritten by the caller, which tracks items by array index
+    relevant: true,
+    summary: item.title,
+    category,
+    location: centroid.name,
+    country,
+    lat: centroid.lat,
+    lon: centroid.lon,
+    severity: keywordSeverity(text),
+  };
 }
