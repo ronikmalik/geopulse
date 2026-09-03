@@ -13,7 +13,7 @@ import {
   commercialFlightsToPoints,
   weatherToPoints,
 } from "@/lib/mapPoints";
-import { CORE_CATEGORIES, type Category } from "@/lib/categories";
+import { CATEGORIES, type Category } from "@/lib/categories";
 import { DATA_LAYER_POLL_MS, type DataLayerId } from "@/lib/dataLayers";
 import type {
   FlightsResponse,
@@ -40,8 +40,12 @@ const MOBILE_TABS: { id: DashboardTab; label: string }[] = [
 export default function Home() {
   const { events, status, incoming, dismissIncoming } = useEventStream();
   const countryScores = useCountryRisk();
+  // All eight pillars' event categories are on by default — this is a
+  // global risk platform, not a conflict-theater tracker. The five
+  // flashpoint pills in the top bar (CategoryFilter) let a user narrow
+  // down; the Layers tab lets them broaden back out if they narrow too far.
   const [activeCategories, setActiveCategories] = useState<Set<Category>>(
-    new Set(CORE_CATEGORIES),
+    new Set(CATEGORIES),
   );
   const [selected, setSelected] = useState<GeoEvent | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);

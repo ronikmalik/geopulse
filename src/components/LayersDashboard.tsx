@@ -146,7 +146,7 @@ export default function LayersDashboard({
           Event Layers
         </h2>
         <p className="mb-2 font-mono text-[10px] text-red-800">
-          Opt in to widen the feed beyond the five default flashpoints.
+          All eight pillars are on by default. Untick to narrow the feed to specific categories.
         </p>
         {LAYER_CATEGORIES.map((cat) => {
           const isActive = active.has(cat);
