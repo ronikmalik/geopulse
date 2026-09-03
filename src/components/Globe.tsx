@@ -79,6 +79,7 @@ export default function GlobeView({
     Record<string, { threatLabel: string; momentum: number }>
   >({});
   const selectedCountryRef = useRef(selectedCountry);
+  const refreshScheduledRef = useRef(false);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -106,12 +107,24 @@ export default function GlobeView({
     refreshPolygons();
   }, [countryScores]);
 
+  // Selecting a country and a countryScores refresh can each ask for a
+  // polygon repaint within the same tick. Firing .polygonsData() twice in
+  // quick succession raced three-globe's mesh rebuild — country A's border
+  // white-highlight would sometimes only partially apply (some ring
+  // segments still red) because a second rebuild interrupted the first
+  // mid-flight. Coalescing to one rAF-deferred call per frame means only
+  // the latest ref values ever get applied, and only once.
   function refreshPolygons() {
-    const globeExt = globeRef.current as unknown as {
-      polygonsData?: (d: unknown[]) => void;
-    } | null;
-    // New array reference forces three-globe to re-evaluate every accessor.
-    globeExt?.polygonsData?.([...countryFeatures]);
+    if (refreshScheduledRef.current) return;
+    refreshScheduledRef.current = true;
+    requestAnimationFrame(() => {
+      refreshScheduledRef.current = false;
+      const globeExt = globeRef.current as unknown as {
+        polygonsData?: (d: unknown[]) => void;
+      } | null;
+      // New array reference forces three-globe to re-evaluate every accessor.
+      globeExt?.polygonsData?.([...countryFeatures]);
+    });
   }
 
   useEffect(() => {
