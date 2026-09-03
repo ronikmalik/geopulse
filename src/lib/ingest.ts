@@ -11,6 +11,7 @@ import { fetchIodaOutages } from "./sources/ioda";
 import type { DirectItem } from "./sources/direct";
 import { classifyByKeywords, isLikelyGeopolitical } from "./classify";
 import { trackFetch, recordSourceHealth } from "./sourceHealth";
+import { correlationGroupId } from "./correlation";
 
 function dedupeByUrl(items: RawItem[]): RawItem[] {
   const seen = new Map<string, RawItem>();
@@ -137,6 +138,7 @@ export async function runIngest(): Promise<IngestResult> {
       .map((item) => {
         const c = classifyByKeywords(item);
         if (!c) return null;
+        const country = c.country.toUpperCase();
         return {
           source: item.source,
           url: item.url,
@@ -144,11 +146,12 @@ export async function runIngest(): Promise<IngestResult> {
           summary: c.summary,
           category: c.category,
           location: c.location,
-          country: c.country.toUpperCase(),
+          country,
           lat: c.lat,
           lon: c.lon,
           severity: c.severity,
           publishedAt: item.publishedAt,
+          correlationGroupId: correlationGroupId(country, c.category, item.publishedAt),
         };
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
@@ -167,19 +170,25 @@ export async function runIngest(): Promise<IngestResult> {
 
   if (freshDirect.length > 0) {
     try {
-      const rows = freshDirect.map((item) => ({
-        source: item.source,
-        url: item.url,
-        title: item.title,
-        summary: item.summary,
-        category: item.category,
-        location: item.location,
-        country: item.country ? item.country.toUpperCase() : null,
-        lat: item.lat,
-        lon: item.lon,
-        severity: item.severity,
-        publishedAt: item.publishedAt,
-      }));
+      const rows = freshDirect.map((item) => {
+        const country = item.country ? item.country.toUpperCase() : null;
+        return {
+          source: item.source,
+          url: item.url,
+          title: item.title,
+          summary: item.summary,
+          category: item.category,
+          location: item.location,
+          country,
+          lat: item.lat,
+          lon: item.lon,
+          severity: item.severity,
+          publishedAt: item.publishedAt,
+          correlationGroupId: country
+            ? correlationGroupId(country, item.category, item.publishedAt)
+            : null,
+        };
+      });
       const result = await db
         .insert(events)
         .values(rows)

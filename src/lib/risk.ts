@@ -13,6 +13,7 @@ import {
   type Momentum,
   type MomentumDirection,
 } from "@/lib/threat";
+import { classifyConfidence, type ConfidenceTier } from "@/lib/correlation";
 
 // Half-life for the decay: a severity-5 event contributes half its weight
 // to a country's score after this many days, and is effectively negligible
@@ -278,6 +279,9 @@ export interface CountryRiskEvent {
   severity: number;
   publishedAt: string;
   weight: number;
+  correlationGroupId: string | null;
+  confidence: ConfidenceTier | null;
+  clusterSize: number;
 }
 
 export async function getCountryRiskEvents(
@@ -294,6 +298,7 @@ export async function getCountryRiskEvents(
       category: events.category,
       severity: events.severity,
       publishedAt: events.publishedAt,
+      correlationGroupId: events.correlationGroupId,
       weight: sql<number>`${events.severity} * exp(-${sql.raw(String(DECAY_RATE))} * extract(epoch from (now() - ${events.publishedAt})) / 86400)`,
     })
     .from(events)
@@ -303,9 +308,29 @@ export async function getCountryRiskEvents(
     .orderBy(sql`${events.publishedAt} desc`)
     .limit(50);
 
-  return rows.map((r) => ({
-    ...r,
-    publishedAt: r.publishedAt.toISOString(),
-    weight: Number(r.weight),
-  }));
+  // Confidence is computed from this same 50-row page's source diversity
+  // per cluster — see src/lib/correlation.ts. A cluster's true size can be
+  // larger than what's visible on this page, but the ladder only needs
+  // "more than one independent source," not an exact count, to move a
+  // tier.
+  const sourcesByCluster = new Map<string, string[]>();
+  for (const r of rows) {
+    if (!r.correlationGroupId) continue;
+    const list = sourcesByCluster.get(r.correlationGroupId) ?? [];
+    list.push(r.source);
+    sourcesByCluster.set(r.correlationGroupId, list);
+  }
+
+  return rows.map((r) => {
+    const clusterSources = r.correlationGroupId
+      ? (sourcesByCluster.get(r.correlationGroupId) ?? [r.source])
+      : [r.source];
+    return {
+      ...r,
+      publishedAt: r.publishedAt.toISOString(),
+      weight: Number(r.weight),
+      confidence: r.correlationGroupId ? classifyConfidence(clusterSources) : null,
+      clusterSize: clusterSources.length,
+    };
+  });
 }

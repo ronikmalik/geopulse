@@ -12,6 +12,8 @@ import {
 } from "@/lib/threat";
 import { CATEGORY_LABELS, type Category } from "@/lib/categories";
 
+type ConfidenceTier = "single-source" | "corroborated" | "cross-confirmed";
+
 interface CountryRiskEvent {
   id: number;
   title: string;
@@ -22,6 +24,9 @@ interface CountryRiskEvent {
   severity: number;
   publishedAt: string;
   weight: number;
+  correlationGroupId: string | null;
+  confidence: ConfidenceTier | null;
+  clusterSize: number;
 }
 
 interface PillarBreakdownEntry {
@@ -378,6 +383,20 @@ export default function CountryRiskPanel({
                           <p className="mt-0.5 line-clamp-2 text-[11px] text-neutral-300">
                             {e.summary}
                           </p>
+                          {e.clusterSize > 1 && (
+                            <span
+                              className={`mt-1 inline-block font-mono text-[9px] uppercase tracking-wider ${
+                                e.confidence === "cross-confirmed"
+                                  ? "text-emerald-500"
+                                  : "text-amber-500"
+                              }`}
+                              title="Same country, pillar, and day as other tracked reports"
+                            >
+                              {e.confidence === "cross-confirmed" ? "✓✓" : "✓"}{" "}
+                              {e.confidence === "cross-confirmed" ? "Cross-confirmed" : "Corroborated"} ·{" "}
+                              {e.clusterSize} reports
+                            </span>
+                          )}
                         </a>
                       ))}
                     </>

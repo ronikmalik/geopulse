@@ -27,11 +27,17 @@ export const events = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    // Deterministic clustering key — see src/lib/correlation.ts. Events
+    // sharing a key are treated as reports of the same developing story
+    // rather than independent signals; nullable because it's computed at
+    // ingest time and pre-existing rows predate it.
+    correlationGroupId: text("correlation_group_id"),
   },
   (table) => [
     index("events_created_at_idx").on(table.createdAt),
     index("events_category_idx").on(table.category),
     index("events_country_idx").on(table.country),
+    index("events_correlation_group_idx").on(table.correlationGroupId),
   ],
 );
 
