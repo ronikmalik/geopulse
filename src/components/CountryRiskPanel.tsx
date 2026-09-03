@@ -104,7 +104,7 @@ function ThreatBadge({ level, label }: { level: ThreatLevel; label: string }) {
     <span
       className="rounded-sm px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-black"
       style={{ backgroundColor: THREAT_COLORS[level] }}
-      title={`Threat Level ${level}`}
+      title={`Pulse Level ${level}`}
     >
       {label}
     </span>
@@ -250,7 +250,7 @@ export default function CountryRiskPanel({
                   </div>
                   <div className="mt-1 flex items-center justify-between gap-2">
                     <span className="font-mono text-[10px] text-neutral-600">
-                      {isPlaceholder
+                      {isPlaceholder || eventCount === 0
                         ? "no recent events"
                         : `${eventCount} events · ${timeAgo(lastEventAt)}`}
                     </span>
@@ -261,7 +261,7 @@ export default function CountryRiskPanel({
                 <div className="border-t border-red-950/70 bg-black/40 px-4 py-2">
                   {loadingDetail && (
                     <p className="font-mono text-[10px] text-neutral-600">
-                      loading threat assessment…
+                      loading pulse…
                     </p>
                   )}
                   {!loadingDetail && detail && detail.country === r.country && (

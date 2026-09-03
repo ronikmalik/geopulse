@@ -212,7 +212,7 @@ export default function GlobeView({
           const name =
             (d as { properties?: { name?: string } }).properties?.name ?? "";
           const threatLine = threat
-            ? `<br/>threat level: ${threat.threatLabel} · momentum ${threat.momentum}`
+            ? `<br/>pulse: ${threat.threatLabel} · momentum ${threat.momentum}`
             : "";
           return `<div style="font-family:monospace;color:#ff5555;background:#0a0000;border:1px solid #ff2d2d;padding:6px 8px;border-radius:2px">
               <b>${name}</b>${score ? threatLine : ""}

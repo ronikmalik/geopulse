@@ -69,7 +69,7 @@ interface DashboardProps {
 
 const TAB_META: { id: DashboardTab; label: string; dot: string }[] = [
   { id: "feed", label: "Feed", dot: "bg-red-500" },
-  { id: "risk", label: "Risk", dot: "bg-orange-500" },
+  { id: "risk", label: "Pulse", dot: "bg-orange-500" },
   { id: "layers", label: "Layers", dot: "bg-sky-400" },
   { id: "forex", label: "Live Wire", dot: "bg-emerald-500" },
 ];

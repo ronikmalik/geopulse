@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { events, type EventRow } from "@/db/schema";
-import { pillarForCategory, PILLAR_LIST, COVERED_PILLARS, type PillarId } from "@/lib/pillars";
+import { pillarForCategory, PILLAR_LIST, PILLAR_WEIGHT, COVERED_PILLARS, type PillarId } from "@/lib/pillars";
 import type { Category } from "@/lib/categories";
 import {
   weightToThreatLevel,
@@ -14,6 +14,7 @@ import {
   type MomentumDirection,
 } from "@/lib/threat";
 import { classifyConfidence, type ConfidenceTier } from "@/lib/correlation";
+import { ALPHA2_TO_ALPHA3 } from "@/lib/iso3";
 
 // Half-life for the decay: a severity-5 event contributes half its weight
 // to a country's score after this many days, and is effectively negligible
@@ -111,7 +112,10 @@ function aggregateByCountryAndPillar(
     const pillars = byCountry.get(row.country)!;
     const agg = pillars.get(pillarId) ?? emptyAgg();
 
-    agg.decayedWeight += row.decayedWeight;
+    // Pillar weight applies to the Pulse Level input only — recent/prior
+    // (momentum's inputs) are left unweighted since a constant multiplier
+    // cancels out of a percentage-change ratio anyway.
+    agg.decayedWeight += row.decayedWeight * PILLAR_WEIGHT[pillarId];
     agg.recent24h += row.recent24h;
     agg.prior24h += row.prior24h;
     agg.recent7d += row.recent7d;
@@ -193,6 +197,28 @@ export async function getCountryThreatSummaries(): Promise<CountryThreatSummary[
   }
 
   for (const s of summaries) s.threatLabel = THREAT_LABELS[s.threatLevel];
+
+  // A country with zero events in the lookback window is a real, honest
+  // "Low" reading, not "we have no idea" — but it still needs to actually
+  // appear (Chad, and most of the world most days, would otherwise be
+  // silently absent from both the country list and the globe's coverage,
+  // which reads as "we don't track this country" rather than "this country
+  // is quiet right now"). Every recognized country gets a baseline row;
+  // countries with real signal above still sort to the top.
+  const covered = new Set(summaries.map((s) => s.country));
+  for (const country of Object.keys(ALPHA2_TO_ALPHA3).sort()) {
+    if (covered.has(country)) continue;
+    summaries.push({
+      country,
+      score: 0,
+      eventCount: 0,
+      lastEventAt: "",
+      threatLevel: 1,
+      threatLabel: THREAT_LABELS[1],
+      momentum: 0,
+      momentumDirection: 0,
+    });
+  }
 
   return summaries.sort((a, b) => b.score - a.score);
 }

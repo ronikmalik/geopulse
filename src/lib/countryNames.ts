@@ -289,6 +289,80 @@ const NAMES_BY_LENGTH_DESC = Object.keys(COUNTRY_NAME_TO_ALPHA2).sort(
   (a, b) => b.length - a.length,
 );
 
+// Case-sensitive institutional signals, checked against the ORIGINAL text
+// before the general lowercase scan runs. Two things live here for the
+// same reason: they're too short/collision-prone to be safe as plain
+// lowercase substrings, but unambiguous once case is respected.
+//
+// "US" is the big one — deliberately excluded from the general map because
+// the pronoun "us" ("tells us", "let us know") would match constantly
+// case-insensitively. But English convention writes the country in full
+// caps specifically to disambiguate from the pronoun (which, even in
+// title-cased headlines, only ever gets its first letter capitalized: "Us"
+// not "US") — so a case-sensitive \bUS\b is safe. The agency acronyms
+// (all federal, all unambiguous once case-sensitive) exist because a huge
+// share of US-relevant stories — ICE enforcement actions, DHS/FBI/CIA
+// operations — never spell out "United States" at all.
+//
+// Guarded by requiring at least one lowercase letter elsewhere in the
+// text: an all-caps wire-style headline ("TELLS US WHAT HAPPENED") would
+// make "US" indistinguishable from the pronoun again, so this whole check
+// is skipped for shouty all-caps text rather than risk a false positive.
+const INSTITUTION_ACRONYM_TO_ALPHA2: [RegExp, string][] = [
+  [/\bU\.S\.?\b/, "US"],
+  [/\bUS\b/, "US"],
+  [/\bICE\b/, "US"],
+  [/\bDHS\b/, "US"],
+  [/\bFBI\b/, "US"],
+  [/\bCIA\b/, "US"],
+  [/\bPentagon\b/, "US"],
+  [/\bWhite House\b/, "US"],
+  [/\bDowning Street\b/, "GB"],
+  [/\bKremlin\b/, "RU"],
+];
+
+// A demonym directly modifying a person noun ("Venezuelan man",
+// "Iranian national", "Chinese student") describes that PERSON's
+// nationality — it is not a signal about where the event happened. Without
+// this, "Venezuelan man shot by ICE in the US" would resolve to Venezuela
+// just because "Venezuelan" is the first recognized token, even though the
+// story is a US law-enforcement event.
+const PERSON_NOUNS = new Set([
+  "man", "woman", "boy", "girl", "teen", "teenager", "teens", "child",
+  "children", "kid", "migrant", "migrants", "immigrant", "immigrants",
+  "national", "nationals", "citizen", "citizens", "driver", "worker",
+  "workers", "student", "students", "tourist", "tourists", "refugee",
+  "refugees", "couple", "family", "suspect", "gunman", "soldier",
+  "soldiers", "officer", "diplomat", "businessman", "businesswoman",
+  "detainee", "detainees", "asylum-seeker", "national's",
+]);
+
+function wordAfter(lowerText: string, index: number): string {
+  const m = lowerText.slice(index).match(/^[\s,'-]*([a-z]+)/);
+  return m ? m[1] : "";
+}
+
+// A country appearing as the object of a targeting preposition — sanctions
+// ON a country, tariffs AGAINST it, capital moving AWAY FROM it — is who
+// the story's risk is actually about, even when a different country is the
+// grammatical actor named earlier in the sentence ("Norway moves pension
+// fund money away from the US" is a US risk, not a Norway one: Norway is
+// just who's doing the moving). Checked before the general earliest-match
+// scan, which would otherwise pick the actor purely because it's mentioned
+// first.
+const TARGETING_PATTERNS: RegExp[] = [
+  /\b(?:pulls?|pulling|pulled|withdraws?|withdrawing|withdrew|moves?|moving|moved|shifts?|shifting|shifted|divests?|divesting|divested|sells?|selling|sold|dumps?|dumping|dumped)\b[^.]{0,60}\b(?:money|funds?|assets?|investments?|holdings?|capital|reserves|stakes?)\b[^.]{0,40}\b(?:away from|out of|from)\s+(?:the\s+)?([a-zA-Z][a-zA-Z .]{2,40}?)(?=[\s,.]|$)/i,
+  /\b(?:sanctions?|tariffs?|embargo(?:es)?|export controls?|trade restrictions?|travel ban)\b[^.]{0,25}\b(?:on|against)\s+(?:the\s+)?([a-zA-Z][a-zA-Z .]{2,40}?)(?=[\s,.]|$)/i,
+];
+
+function resolveNameInPhrase(phrase: string): string | null {
+  const lower = phrase.toLowerCase();
+  for (const name of NAMES_BY_LENGTH_DESC) {
+    if (lower.includes(name)) return COUNTRY_NAME_TO_ALPHA2[name];
+  }
+  return null;
+}
+
 // Picks whichever recognized name appears EARLIEST in the text, not the
 // longest one — a headline's subject/actor is almost always named first
 // ("Dutch bank moves gold from UK to Canada" is a Netherlands story, not a
@@ -297,15 +371,37 @@ const NAMES_BY_LENGTH_DESC = Object.keys(COUNTRY_NAME_TO_ALPHA2).sort(
 // same position, which is when one is a genuine substring/qualifier of the
 // other (e.g. "south korea" containing "korea") — the pre-sorted, longer
 // name wins that comparison so the more specific match takes it.
+//
+// Three checks run first, each because "earliest mention" gets the wrong
+// answer in a specific, common way: TARGETING_PATTERNS (the actor named
+// first isn't who the risk is about), INSTITUTION_ACRONYM_TO_ALPHA2 (short
+// tokens the general scan can't safely handle case-insensitively), and —
+// inline in the scan below — PERSON_NOUNS (a demonym describing a person
+// isn't a location).
 export function resolveCountryFromText(text: string): string | null {
-  const lower = text.toLowerCase();
-  let best: { name: string; index: number } | null = null;
-  for (const name of NAMES_BY_LENGTH_DESC) {
-    const index = lower.indexOf(name);
-    if (index === -1) continue;
-    if (!best || index < best.index) {
-      best = { name, index };
+  for (const pattern of TARGETING_PATTERNS) {
+    const m = text.match(pattern);
+    if (m) {
+      const resolved = resolveNameInPhrase(m[1]);
+      if (resolved) return resolved;
     }
   }
-  return best ? COUNTRY_NAME_TO_ALPHA2[best.name] : null;
+
+  if (/[a-z]/.test(text)) {
+    for (const [pattern, alpha2] of INSTITUTION_ACRONYM_TO_ALPHA2) {
+      if (pattern.test(text)) return alpha2;
+    }
+  }
+
+  const lower = text.toLowerCase();
+  const candidates = NAMES_BY_LENGTH_DESC
+    .map((name) => ({ name, index: lower.indexOf(name) }))
+    .filter((c) => c.index !== -1)
+    .sort((a, b) => a.index - b.index || b.name.length - a.name.length);
+
+  for (const c of candidates) {
+    if (PERSON_NOUNS.has(wordAfter(lower, c.index + c.name.length))) continue;
+    return COUNTRY_NAME_TO_ALPHA2[c.name];
+  }
+  return null;
 }

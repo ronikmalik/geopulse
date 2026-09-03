@@ -32,7 +32,7 @@ const CFTC_POLL_MS = 60 * 60_000;
 
 const MOBILE_TABS: { id: DashboardTab; label: string }[] = [
   { id: "feed", label: "Feed" },
-  { id: "risk", label: "Risk" },
+  { id: "risk", label: "Pulse" },
   { id: "layers", label: "Layers" },
   { id: "forex", label: "Live Wire" },
 ];

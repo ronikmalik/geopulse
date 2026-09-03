@@ -93,6 +93,28 @@ export const PILLARS: Record<PillarId, PillarDef> = {
 
 export const PILLAR_LIST: PillarDef[] = PILLAR_IDS.map((id) => PILLARS[id]);
 
+// Not every pillar's events carry the same real-world consequence at the
+// same reported severity — an active-war event and a routine-protest event
+// can both get tagged severity 3 by the keyword classifier, but they are
+// not equally dangerous. Without this, a country generating a high volume
+// of ordinary political-governance coverage (heavily English-language-media
+// countries especially) could out-rank a country with fewer but far more
+// consequential geopolitical-security events. This multiplies each
+// pillar's contribution to a country's decayed-weight total (see
+// aggregateByCountryAndPillar in src/lib/risk.ts) — it does not touch
+// per-event severity or momentum (a pctChange ratio, which is scale-
+// invariant to a constant multiplier applied to both sides of it).
+export const PILLAR_WEIGHT: Record<PillarId, number> = {
+  "geopolitical-security": 1.5,
+  "natural-biological-hazards": 1.3,
+  "human-social": 1.1,
+  "climate-environment": 1.0,
+  "infrastructure-connectivity": 0.9,
+  "supply-chain-resource": 1.0,
+  "cyber-technology": 0.9,
+  "political-governance": 0.75,
+};
+
 // Every event category maps to exactly one pillar. This is the single
 // source of truth the risk model uses to roll category-level events up
 // into pillar-level Threat Level + Momentum (see src/lib/risk.ts).
