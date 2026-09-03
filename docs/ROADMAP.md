@@ -1,104 +1,94 @@
-# GeoPulse → Global Risk Intelligence Platform: roadmap
+# GeoPulse: Roadmap
 
-This document captures the full blueprint GeoPulse is evolving toward —
-"real-time global non-financial risk intelligence" across eight risk
-pillars, not just the five geopolitical flashpoints the app started with —
-and tracks what's implemented vs. still ahead. It's derived from a working
-blueprint the project owner supplied; treat it as living design doc, not a
-spec frozen in time.
+Status tracker and phased build order. For the *how it fits together* view, see
+`docs/ARCHITECTURE.md`; for the full source table and licensing detail, see
+`docs/API_SOURCES.md`. This file stays short and current — it points at those
+documents rather than repeating them.
 
-## What's implemented (Phase 1)
+## MVP acceptance criteria — status
 
-- **Eight-pillar taxonomy** (`src/lib/pillars.ts`): Geopolitical & Security,
-  Political & Governance, Climate & Environment, Natural & Biological
-  Hazards, Human & Social, Infrastructure & Connectivity, Supply Chain &
-  Resource Security, Cyber & Technology. Every event category maps to
-  exactly one pillar.
-- **Threat Level (1–5) + Momentum (0–100, directional) model**
-  (`src/lib/threat.ts`, `src/lib/risk.ts`) replacing the old single
-  continuous "risk score" the UI showed. Computed per pillar per country,
-  then rolled up to an overall country Threat Level via an **escalation**
-  rule (max of pillar levels, +1 if two or more pillars are independently
-  Elevated+) rather than an average — a catastrophic single-pillar event
-  isn't diluted by calm conditions elsewhere.
-- **Momentum across two horizons** (24h and 7d, blended, weighted toward
-  the shorter horizon) — the blueprint calls for 1h/24h/7d/30d; this build
-  covers the two that matter most at current event volumes. See "Not yet
-  implemented" below for closing the gap.
-- **New event categories** feeding previously-uncovered pillars:
-  `political-instability` and `humanitarian` (GDELT queries), `climate-hazard`
-  (split out of GDACS/EONET flood/wildfire/drought events, previously lumped
-  into `natural-disaster`), `infrastructure-outage` (IODA country-level
-  internet outage detection).
-- **New live sources**: IODA (internet outages, feeds the events table) and
-  CISA KEV (actively-exploited vulnerabilities, surfaced as a global
-  "Cyber & Technology" ticker layer since it has no country attribution).
-- **Licensing/commercial-use registry** (`src/lib/sourceRegistry.ts`) for
-  every integrated source.
-- **Country pillar breakdown UI** (`CountryRiskPanel.tsx`): expanding a
-  country now shows all eight pillars with their own Threat Level +
-  Momentum, with uncovered pillars honestly marked "not yet tracked"
-  rather than showing a fabricated score.
-- **Fixed the live event stream** getting stuck on "RECONNECTING": the SSE
-  connection now self-closes every ~45s (well under serverless duration
-  limits) and the client reconnects from the last event id within ~1s,
-  instead of risking an abrupt platform kill with no clean signal to react
-  to quickly.
+Checked against the platform brief's own §23 acceptance list:
 
-## Not yet implemented
+| # | Criterion | Status |
+|---|---|---|
+| 1 | Global map loads with real live events | ✅ |
+| 2 | 10–15 reliable sources actively ingesting | ✅ 6 event sources (GDELT, RSS×9, USGS, EONET, GDACS, IODA) + 12 standalone context/ticker sources — see `docs/API_SOURCES.md` |
+| 3 | Events normalized into one common schema | ✅ `events` table, one shape regardless of source — see gaps in ARCHITECTURE.md §3 for the fuller schema not yet needed |
+| 4 | Events mapped to countries and risk pillars | ✅ every category → exactly one pillar (`src/lib/pillars.ts`) |
+| 5 | Duplicate events substantially reduced | ⚠️ Partial — URL-uniqueness + 24h recency filter; no cross-source semantic dedup (needs the correlation engine) |
+| 6 | Country Threat Level + Momentum | ✅ |
+| 7 | Each pillar has Threat Level + Momentum + recent events + drivers | ✅ 6 of 8 pillars covered by a live source; Supply Chain and Cyber (country-attributed) honestly show "not tracked" |
+| 8 | Click a country → what changed, why, evidence | ✅ Feed tab filtered to that country; Risk tab has the pillar breakdown |
+| 9 | Click an event → source, timestamp, location, severity, confidence, related events | ⚠️ Partial — source/timestamp/location/severity/category all shown; no confidence score or "related events" (needs correlation engine) |
+| 10 | API failures visible internally | ✅ `GET /api/admin/health`, this session — no UI page rendering it yet |
+| 11 | Source licensing documented | ✅ `src/lib/sourceRegistry.ts` + `docs/API_SOURCES.md` |
+| 12 | Deployed and publicly accessible | ✅ https://geopulse-green.vercel.app |
 
-Roughly in priority order:
+**9 of 12 fully met, 2 partial, all partials tied to the same missing piece: the event
+correlation engine.**
 
-1. **Supply Chain & Resource Security and Cyber & Technology pillars have
-   no country-attributed event source yet.** CISA KEV covers part of the
-   cyber story but isn't geolocated. Candidates: IMF PortWatch (port
-   congestion/chokepoints) for supply chain; Cloudflare Radar or a country-
-   level CVE/attack-traffic feed for cyber. Both need real evaluation of
-   auth requirements and licensing before wiring in.
-2. **1h and 30d momentum horizons.** Currently 24h/7d only. Adding 1h needs
-   a source with genuinely sub-hourly update cadence to be meaningful (most
-   current sources update every ~15 min at best); 30d is a straightforward
-   SQL addition to `getCountryCategoryRows` in `risk.ts`.
-3. **Cross-risk cascade engine** (blueprint section 8: cyclone → port closes
-   → LNG exports stop → energy shortages → political pressure, etc.). Not
-   started. This needs: (a) enough source coverage in Supply Chain/Energy to
-   have something to cascade through, and (b) an actual correlation engine
-   (geographic + temporal + semantic proximity → event clusters,
-   `correlation_group_id`). Substantial standalone effort — don't bolt this
-   on incrementally without designing the clustering approach first.
-4. **Exposure/vulnerability modeling** (blueprint section 5: Severity ×
-   Exposure × Vulnerability × Confidence). Today, Threat Level is driven
-   purely by decayed event severity — a severity-5 earthquake in an empty
-   region scores the same as one hitting a capital. Closing this gap needs
-   population/infrastructure exposure data (WorldPop, port/energy
-   infrastructure datasets) joined against event geometry.
-5. **Broader V1 source list** from the blueprint (section 9) not yet
-   integrated: ACLED, UCDP, ReliefWeb (blocked on an API key — see
-   `src/lib/sources/README.md`), OCHA HAPI, IMF, WGI, UN Comtrade, WTO, EIA,
-   Cloudflare Radar, RIPE Atlas/RIPEstat, OpenSky (already integrated as a
-   standalone flights layer, not events), sanctions feeds (OFAC/EU/UK/UN/
-   OpenSanctions).
-6. **Normalized event object fields** from blueprint section 10 not in the
-   current schema: `event_subtype`, `admin1`, `confidence`,
-   `population_exposed`, `correlation_group_id`. Deferred rather than added
-   speculatively — `confidence` and `correlation_group_id` in particular
-   only earn their place once there's a real confidence model and the
-   cascade engine (items 3–4) to populate them.
-7. **Climate-risk depth** (blueprint section 11): heat anomaly, river-
-   discharge percentile, flood probability, soil moisture, SST, wave
-   conditions, etc. Currently the Climate & Environment pillar only sees
-   discrete flood/wildfire/drought alerts from GDACS/EONET, not continuous
-   anomaly series. ERA5/CHIRPS/GloFAS would be the next sources to evaluate.
+## Phased build order (brief §18, reconciled against what's actually built)
 
-## Design principles carried over from the blueprint
+- **Phase 1–2** (schema, country metadata, USGS/EONET/GDACS/GDELT): done.
+- **Phase 3** (ACLED, UCDP, ReliefWeb, UNHCR/OCHA, Cloudflare/RIPE): not started.
+  ReliefWeb specifically blocked (see API_SOURCES.md); the rest need API key
+  registration decisions from the account owner or further endpoint verification.
+- **Phase 4** (structural country context — World Bank, WGI, IMF, Comtrade, WTO, EIA,
+  FAOSTAT): World Bank GDP/population wired as standalone tickers only, not joined to
+  the risk model. WGI specifically blocked (dead indicator codes on the live API —
+  see API_SOURCES.md). Rest not started.
+- **Phase 5** (event clustering, pillar mapping, Threat Level engine, Momentum
+  engine): pillar mapping + Threat Level + Momentum engines are **done**. Event
+  clustering is **not started** — this is the single highest-leverage remaining piece,
+  since acceptance criteria 5 and 9 both trace back to it.
+- **Phase 6** (frontend — global map, country cards, country pages, event detail,
+  source transparency): done, modulo "related events" on event detail (blocked on
+  clustering).
+- **Phase 7** (cross-risk relationships, alerts, historical charts, search,
+  filtering): not started. Historical charts additionally need a
+  `country_state_history` snapshot table that doesn't exist yet (ARCHITECTURE.md §6.3).
 
-- **No falsely precise single score.** Threat Level (categorical, 1–5) and
-  Momentum (0–100 + direction) stay separate, and a pillar with no wired
-  source shows as "not tracked," never a fabricated Low.
+## Immediate next priorities, in order
+
+1. **Event correlation engine.** Unblocks two acceptance criteria at once (dedup
+   quality, "related events" on event detail) and is the prerequisite for the cascade
+   model. Design the clustering approach (geographic + temporal + semantic proximity,
+   confidence ladder per brief §5) before writing code — this is standalone work, not
+   an incremental bolt-on.
+2. **Supply Chain & Resource Security pillar coverage.** Currently the only pillar
+   with zero signal of any kind. IMF PortWatch is the most promising unverified
+   candidate.
+3. **`country_state_history` snapshot table.** Needed for any historical charting and
+   for country-relative Momentum baselining (ARCHITECTURE.md §5).
+4. **Real scheduled ingestion**, decoupled from site visits. The self-triggering
+   stream-based ingest (ARCHITECTURE.md §7) is a working mitigation, not the intended
+   long-term mechanism — the originally-intended GitHub Actions cron has never fired
+   once, root cause undiagnosed. Fixing that, or standing up a dedicated worker
+   service (Railway/Fly.io/Render per the brief), is the top infrastructure item.
+5. **Admin health panel UI.** The data exists (`GET /api/admin/health`); it just
+   isn't rendered anywhere yet.
+6. **Broader source coverage** per `docs/API_SOURCES.md`'s prioritized candidate list
+   — ACLED/UCDP for conflict depth, Cloudflare Radar/RIPE/FIRMS for infrastructure
+   and climate depth, sanctions feeds for Political & Governance.
+
+## Design principles (unchanged, worth restating)
+
+- **No falsely precise single score.** Threat Level (categorical, 1–5) and Momentum
+  (0–100 + direction) stay separate; a pillar with no wired source shows "not
+  tracked," never a fabricated Low.
 - **Escalation, not averaging**, when rolling pillars up to a country level.
-- **Severity vs. consequence are conceptually distinct** even before full
-  exposure/vulnerability modeling lands — this is why item 4 above matters
-  and shouldn't be skipped indefinitely.
-- **Public accessibility ≠ commercial redistribution rights** — every
-  source gets a licensing entry before being trusted for anything beyond
-  this app's own non-commercial display.
+- **News classification errs toward under-claiming risk, not over-claiming it.**
+  Explainer/retrospective headlines, routine diplomacy (state visits, signed
+  agreements, joint exercises), and passing mentions are filtered before they ever
+  reach the severity model — severity defaults to 1 (Low), rising only on actual
+  escalation language.
+- **Country attribution follows the article's actual subject**, not just any country
+  name that happens to appear in the text — resolved by earliest mention in the
+  headline first, recognizing demonyms and major cities/leaders, falling back to the
+  snippet only when the headline itself names nothing.
+- **Public accessibility ≠ commercial redistribution rights** — every source gets a
+  licensing entry (`docs/API_SOURCES.md`) before being trusted for anything beyond
+  this app's own display.
+- **Don't build ahead of a consumer.** Schema fields, tables, and integrations are
+  added when something reads them, not speculatively — see ARCHITECTURE.md §3 for
+  why the event schema is smaller than the brief's full normalized model.
