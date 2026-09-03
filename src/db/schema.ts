@@ -4,6 +4,7 @@ import {
   text,
   doublePrecision,
   smallint,
+  integer,
   timestamp,
   index,
 } from "drizzle-orm/pg-core";
@@ -36,3 +37,20 @@ export const events = pgTable(
 
 export type EventRow = typeof events.$inferSelect;
 export type NewEventRow = typeof events.$inferInsert;
+
+// One row per source (e.g. "gdelt", "rss:bbc-world", "usgs", "ioda"),
+// upserted on every ingest run — not a log, a current-state snapshot. This
+// is what answers "did an upstream source silently stop working" without
+// having to manually trigger ingest and read through error arrays; see
+// getSourceHealth() in src/lib/ingest.ts and GET /api/admin/health.
+export const sourceHealth = pgTable("source_health", {
+  source: text("source").primaryKey(),
+  lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }).notNull(),
+  lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
+  lastItemCount: integer("last_item_count"),
+  lastLatencyMs: integer("last_latency_ms"),
+  lastError: text("last_error"),
+  lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+});
+
+export type SourceHealthRow = typeof sourceHealth.$inferSelect;

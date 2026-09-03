@@ -10,6 +10,7 @@ import { fetchGdacsAlerts } from "./sources/gdacs";
 import { fetchIodaOutages } from "./sources/ioda";
 import type { DirectItem } from "./sources/direct";
 import { classifyByKeywords, isLikelyGeopolitical } from "./classify";
+import { trackFetch, recordSourceHealth } from "./sourceHealth";
 
 function dedupeByUrl(items: RawItem[]): RawItem[] {
   const seen = new Map<string, RawItem>();
@@ -31,45 +32,57 @@ export interface IngestResult {
 }
 
 export async function runIngest(): Promise<IngestResult> {
-  const errors: string[] = [];
-
   // All sources are independent of each other, so they all run
   // concurrently rather than in sequential stages — a slow or unreachable
   // source (each still retries once internally) can't stall the ones that
   // are working. This is what keeps the feed "live": a full ingest cycle
   // takes roughly as long as its single slowest source, not the sum of
-  // all of them.
-  const [gdeltResults, rssResults, usgsResults, eonetResults, gdacsResults, iodaResults] =
-    await Promise.all([
-      Promise.all(
+  // all of them. Each fetch is wrapped in trackFetch so a per-source
+  // success/failure/latency/count gets recorded to source_health
+  // regardless of how this particular run turns out overall — see
+  // GET /api/admin/health.
+  // GDELT fans out into one query per news category; a single failing
+  // query must not abort the other six via Promise.all's fail-fast
+  // behavior, so each is caught individually and its error collected here
+  // — trackFetch's own catch only fires if every single query failed
+  // (nothing at all came back), which is the meaningful "is GDELT down"
+  // signal for source_health, while the per-query detail still surfaces
+  // in this run's error list either way.
+  const gdeltQueryErrors: string[] = [];
+
+  const [gdelt, rss, usgs, eonet, gdacs, ioda] = await Promise.all([
+    trackFetch("gdelt", async () => {
+      const perQuery = await Promise.all(
         Object.values(CATEGORY_QUERIES).map((q) =>
           fetchGdelt(q, 15).catch((err) => {
-            errors.push(`gdelt(${q}): ${err}`);
+            gdeltQueryErrors.push(`gdelt(${q}): ${err}`);
             return [] as RawItem[];
           }),
         ),
-      ),
-      fetchAllRssFeeds().catch((err) => {
-        errors.push(`rss: ${err}`);
-        return [] as RawItem[];
-      }),
-      fetchUsgsEarthquakes().catch((err) => {
-        errors.push(`usgs: ${err}`);
-        return [] as DirectItem[];
-      }),
-      fetchNasaEonet().catch((err) => {
-        errors.push(`eonet: ${err}`);
-        return [] as DirectItem[];
-      }),
-      fetchGdacsAlerts().catch((err) => {
-        errors.push(`gdacs: ${err}`);
-        return [] as DirectItem[];
-      }),
-      fetchIodaOutages().catch((err) => {
-        errors.push(`ioda: ${err}`);
-        return [] as DirectItem[];
-      }),
-    ]);
+      );
+      const flat = perQuery.flat();
+      if (flat.length === 0 && gdeltQueryErrors.length > 0) {
+        throw new Error(gdeltQueryErrors.join("; "));
+      }
+      return flat;
+    }),
+    trackFetch("rss", fetchAllRssFeeds),
+    trackFetch("usgs", fetchUsgsEarthquakes),
+    trackFetch("eonet", fetchNasaEonet),
+    trackFetch("gdacs", fetchGdacsAlerts),
+    trackFetch("ioda", fetchIodaOutages),
+  ]);
+
+  const errors = [rss, usgs, eonet, gdacs, ioda]
+    .filter((r) => r.error)
+    .map((r) => `${r.source}: ${r.error}`);
+  // gdelt.error is only set when every query failed (see above) — in that
+  // case gdeltQueryErrors already has the same detail, so use it instead
+  // of the single collapsed trackFetch error to keep per-query visibility
+  // either way.
+  errors.push(...gdeltQueryErrors);
+
+  await recordSourceHealth([gdelt, rss, usgs, eonet, gdacs, ioda]);
 
   // RSS "world news" feeds carry a rolling window that isn't necessarily
   // all breaking — a general feed can still list something from a couple
@@ -80,16 +93,16 @@ export async function runIngest(): Promise<IngestResult> {
   const isRecent = (item: RawItem) =>
     Date.now() - item.publishedAt.getTime() < RECENT_WINDOW_MS;
 
-  const all = dedupeByUrl([...gdeltResults.flat(), ...rssResults]);
+  const all = dedupeByUrl([...gdelt.items, ...rss.items]);
   const candidates = all.filter(
     (item) =>
       isRecent(item) && (item.source === "gdelt" || isLikelyGeopolitical(item)),
   );
   const direct = dedupeDirectByUrl([
-    ...usgsResults,
-    ...eonetResults,
-    ...gdacsResults,
-    ...iodaResults,
+    ...usgs.items,
+    ...eonet.items,
+    ...gdacs.items,
+    ...ioda.items,
   ]);
 
   if (candidates.length === 0 && direct.length === 0) {
