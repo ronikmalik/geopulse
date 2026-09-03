@@ -183,7 +183,13 @@ export function classifyByKeywords(item: RawItem): ClassifiedItem | null {
 
   const category = categorizeByKeywords(text);
 
-  const resolvedCountry = resolveCountryFromText(text);
+  // The title is far more likely to name the actual subject of the story
+  // than the snippet is — RSS snippets often carry source attribution or
+  // secondary quotes ("...said the British ambassador") that can outrank
+  // the real subject if the whole text is searched as one blob. Only fall
+  // back to the snippet when the title itself names no recognized country.
+  const resolvedCountry =
+    resolveCountryFromText(item.title) ?? resolveCountryFromText(item.snippet);
   const country =
     resolvedCountry ??
     (category !== "other" ? CATEGORY_FALLBACK_COUNTRY[category] : undefined);

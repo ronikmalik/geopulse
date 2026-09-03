@@ -179,17 +179,113 @@ const COUNTRY_NAME_TO_ALPHA2: Record<string, string> = {
   "republic of the congo": "CG",
   "cabo verde": "CV",
   "cape verde": "CV",
+
+  // Demonyms/nationality adjectives — news headlines usually name the actor
+  // this way ("Dutch central bank...", "Ukrainian officials...") rather
+  // than the country noun itself. Ambiguous ones (e.g. bare "korean") are
+  // deliberately omitted rather than guessing.
+  dutch: "NL",
+  british: "GB",
+  russian: "RU",
+  ukrainian: "UA",
+  iranian: "IR",
+  israeli: "IL",
+  palestinian: "PS",
+  chinese: "CN",
+  taiwanese: "TW",
+  american: "US",
+  french: "FR",
+  german: "DE",
+  japanese: "JP",
+  "south korean": "KR",
+  "north korean": "KP",
+  indian: "IN",
+  pakistani: "PK",
+  turkish: "TR",
+  saudi: "SA",
+  egyptian: "EG",
+  syrian: "SY",
+  iraqi: "IQ",
+  lebanese: "LB",
+  yemeni: "YE",
+  afghan: "AF",
+  emirati: "AE",
+  qatari: "QA",
+  polish: "PL",
+  italian: "IT",
+  spanish: "ES",
+  brazilian: "BR",
+  mexican: "MX",
+  canadian: "CA",
+  australian: "AU",
+  indonesian: "ID",
+  vietnamese: "VN",
+  filipino: "PH",
+  thai: "TH",
+  nigerian: "NG",
+  ethiopian: "ET",
+  sudanese: "SD",
+  somali: "SO",
+  venezuelan: "VE",
+
+  // Major conflict/politics-relevant cities — an article naming a city but
+  // never the country by name (very common: "Kyiv", "Tehran", "Gaza")
+  // otherwise fails to resolve at all.
+  kyiv: "UA",
+  kiev: "UA",
+  moscow: "RU",
+  tehran: "IR",
+  "tel aviv": "IL",
+  jerusalem: "IL",
+  gaza: "PS",
+  ramallah: "PS",
+  beijing: "CN",
+  taipei: "TW",
+  pyongyang: "KP",
+  seoul: "KR",
+  damascus: "SY",
+  baghdad: "IQ",
+  kabul: "AF",
+  islamabad: "PK",
+  "new delhi": "IN",
+  tokyo: "JP",
+  london: "GB",
+  washington: "US",
+  paris: "FR",
+  berlin: "DE",
+  brussels: "BE",
+  ankara: "TR",
+  istanbul: "TR",
+  riyadh: "SA",
+  cairo: "EG",
+  beirut: "LB",
+  sanaa: "YE",
+  khartoum: "SD",
+  mogadishu: "SO",
+  caracas: "VE",
 };
 
-// Longest names first so "south korea" matches before a bare "korea" would.
 const NAMES_BY_LENGTH_DESC = Object.keys(COUNTRY_NAME_TO_ALPHA2).sort(
   (a, b) => b.length - a.length,
 );
 
+// Picks whichever recognized name appears EARLIEST in the text, not the
+// longest one — a headline's subject/actor is almost always named first
+// ("Dutch bank moves gold from UK to Canada" is a Netherlands story, not a
+// UK or Canada one just because those names are longer or happen to match
+// too). Length only breaks a tie between two names starting at the exact
+// same position, which is when one is a genuine substring/qualifier of the
+// other (e.g. "south korea" containing "korea") — the pre-sorted, longer
+// name wins that comparison so the more specific match takes it.
 export function resolveCountryFromText(text: string): string | null {
   const lower = text.toLowerCase();
+  let best: { name: string; index: number } | null = null;
   for (const name of NAMES_BY_LENGTH_DESC) {
-    if (lower.includes(name)) return COUNTRY_NAME_TO_ALPHA2[name];
+    const index = lower.indexOf(name);
+    if (index === -1) continue;
+    if (!best || index < best.index) {
+      best = { name, index };
+    }
   }
-  return null;
+  return best ? COUNTRY_NAME_TO_ALPHA2[best.name] : null;
 }
