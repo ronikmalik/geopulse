@@ -34,7 +34,7 @@ const MOBILE_TABS: { id: DashboardTab; label: string }[] = [
   { id: "feed", label: "Feed" },
   { id: "risk", label: "Risk" },
   { id: "layers", label: "Layers" },
-  { id: "forex", label: "Forex" },
+  { id: "forex", label: "Live Wire" },
 ];
 
 export default function Home() {

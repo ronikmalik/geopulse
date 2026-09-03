@@ -3,7 +3,7 @@
 import FeedPanel from "./FeedPanel";
 import CountryRiskPanel from "./CountryRiskPanel";
 import LayersDashboard from "./LayersDashboard";
-import ForexPanel from "./ForexPanel";
+import LiveWirePanel from "./LiveWirePanel";
 import ConnectionStatus from "./ConnectionStatus";
 import type { ConnectionState } from "@/lib/useEventStream";
 import type { GeoEvent } from "@/lib/types";
@@ -70,7 +70,7 @@ const TAB_META: { id: DashboardTab; label: string; dot: string }[] = [
   { id: "feed", label: "Feed", dot: "bg-red-500" },
   { id: "risk", label: "Risk", dot: "bg-orange-500" },
   { id: "layers", label: "Layers", dot: "bg-sky-400" },
-  { id: "forex", label: "Forex", dot: "bg-emerald-500" },
+  { id: "forex", label: "Live Wire", dot: "bg-emerald-500" },
 ];
 
 export default function Dashboard(props: DashboardProps) {
@@ -170,7 +170,11 @@ export default function Dashboard(props: DashboardProps) {
           />
         )}
         {activeTab === "forex" && (
-          <ForexPanel data={props.forex} cftc={props.cftc} />
+          <LiveWirePanel
+            selectedCountry={props.selectedCountry}
+            forex={props.forex}
+            cftc={props.cftc}
+          />
         )}
       </div>
     </div>
