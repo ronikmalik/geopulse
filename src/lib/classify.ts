@@ -135,7 +135,7 @@ const CATEGORY_FALLBACK_COUNTRY: Partial<Record<NewsCategory, string>> = {
 // mentions Israel. Matched against the title only: these phrasings are a
 // headline convention, not something that shows up mid-article.
 const NON_EVENT_TITLE_PATTERNS =
-  /^(what to know|explainer|analysis|opinion|q&a|in pictures|in photos|photos:|the backstory|timeline:|explained:)\b|: what to know$|: explained$|explainer$|^(who is|who are|why is|why did|why does|how is|how did|how does|what happened)\b/i;
+  /^(what to know|explainer|analysis|opinion|q&a|in pictures|in photos|photos:|the backstory|timeline:|explained:)\b|explainer$|^(who is|who are|why is|why did|why does|how is|how did|how does|what happened)\b|:\s*(what to know|what happened|explained|explainer|analysis|q&a)\b/i;
 
 // Routine, expected, or de-escalatory activity that the topical KEYWORDS
 // filter above will still catch (a port call by a US carrier mentions
