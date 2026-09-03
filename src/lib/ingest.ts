@@ -71,9 +71,19 @@ export async function runIngest(): Promise<IngestResult> {
       }),
     ]);
 
+  // RSS "world news" feeds carry a rolling window that isn't necessarily
+  // all breaking — a general feed can still list something from a couple
+  // days ago. GDELT's own timespan filter already keeps its results within
+  // the last 3h, so this mainly bounds RSS to genuinely recent items,
+  // matching the "live/breaking, not background" framing this feed is for.
+  const RECENT_WINDOW_MS = 24 * 60 * 60_000;
+  const isRecent = (item: RawItem) =>
+    Date.now() - item.publishedAt.getTime() < RECENT_WINDOW_MS;
+
   const all = dedupeByUrl([...gdeltResults.flat(), ...rssResults]);
   const candidates = all.filter(
-    (item) => item.source === "gdelt" || isLikelyGeopolitical(item),
+    (item) =>
+      isRecent(item) && (item.source === "gdelt" || isLikelyGeopolitical(item)),
   );
   const direct = dedupeDirectByUrl([
     ...usgsResults,

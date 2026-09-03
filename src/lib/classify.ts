@@ -10,8 +10,15 @@ import { COUNTRY_CENTROIDS } from "./countryCentroids";
 // pre-classified by their own source modules and never routed through here.
 const CLASSIFIABLE_CATEGORIES = [...NEWS_CATEGORIES, "other"] as const;
 
+// Deliberately broad — this is just the topical net (does the article touch
+// international security/politics/instability at all?), not a judgment
+// about whether it describes an actual notable development. That judgment
+// happens in classifyByKeywords below, via NON_EVENT_PATTERNS and
+// BENIGN_PATTERNS, so widening this list to cover more of "all relevant
+// live news" (not just the five original flashpoints) doesn't by itself
+// let routine/non-threat items through as risk signals.
 const KEYWORDS =
-  /iran|israel|gaza|palestin|hamas|hezbollah|lebanon|russia|ukraine|kremlin|putin|zelensk|taiwan|beijing|china.*military|north korea|kim jong|pyongyang|missile|airstrike|nuclear|sanctions|troops|invasion|ceasefire|drone strike/i;
+  /iran|israel|gaza|palestin|hamas|hezbollah|lebanon|russia|ukraine|kremlin|putin|zelensk|taiwan|beijing|china.*military|north korea|kim jong|pyongyang|missile|airstrike|nuclear|sanctions|troops|invasion|ceasefire|drone strike|coup|martial law|insurgency|rebel|militia|terroris|extremis|uprising|unrest|crackdown|junta|regime|embargo|blockade|airspace violation|border clash|skirmish|mobiliz|annex|separatist|secession|genocide|war crime|refugee crisis|mass displacement|cyberattack|state-sponsored hacking/i;
 
 export function isLikelyGeopolitical(item: RawItem): boolean {
   return KEYWORDS.test(item.title) || KEYWORDS.test(item.snippet);
@@ -121,14 +128,39 @@ const CATEGORY_FALLBACK_COUNTRY: Partial<Record<NewsCategory, string>> = {
   "north-korea": "KP",
 };
 
-const HIGH_SEVERITY = /nuclear|invasion|massacre|genocide|declared war/i;
-const MODERATE_SEVERITY =
-  /strike|missile|airstrike|attack|killed|dead|casualties|explosion|bombing|offensive/i;
+// Explainers, retrospectives, and analysis pieces routinely reuse the same
+// vocabulary as breaking news (they're often ABOUT a real conflict) without
+// describing a new development themselves — "Who are the 'Hilltop Girls'
+// behind Israel's settlement strategy?" is not a risk event just because it
+// mentions Israel. Matched against the title only: these phrasings are a
+// headline convention, not something that shows up mid-article.
+const NON_EVENT_TITLE_PATTERNS =
+  /^(what to know|explainer|analysis|opinion|q&a|in pictures|in photos|photos:|the backstory|timeline:|explained:)\b|: what to know$|: explained$|explainer$|^(who is|who are|why is|why did|why does|how is|how did|how does|what happened)\b/i;
 
+// Routine, expected, or de-escalatory activity that the topical KEYWORDS
+// filter above will still catch (a port call by a US carrier mentions
+// "troops"/a country by name, a peace summit mentions the same countries
+// as the conflict it's resolving) but that isn't itself a threat — this is
+// the layer that actually decides "is this worth reporting as risk," not
+// just "does this article touch the topic."
+const BENIGN_PATTERNS =
+  /port call|goodwill visit|routine (patrol|visit|deployment)|arrives (in|for)|(joint|annual|routine) (exercise|drill|training)(?!.*(warn|threat|escalat|tension|provoc))|peace talks|peace deal|ceasefire (holds|agreed|announced)|signs? (a |an )?(deal|agreement|treaty)|trade deal|summit|diplomatic visit|meets with|holds talks|anniversary|marks \d+ years?|art (festival|exhibition)|film festival|sporting event|championship/i;
+
+const HIGH_SEVERITY = /nuclear (test|strike|weapon)|invasion|massacre|genocide|declared war/i;
+const MODERATE_SEVERITY =
+  /\bstrike\b|missile (launch|fired|strike)|airstrike|\battack(ed|s)?\b|killed|\bdead\b|casualties|explosion|bombing|offensive|clashes?|\bcoup\b|martial law/i;
+const MILD_SEVERITY =
+  /warns?|threatens?|escalat|tension|sanctions? (imposed|announced)|protest|unrest|mobiliz|border incident/i;
+
+// Severity defaults low (1 = Low) rather than moderate — an article merely
+// touching a topic shouldn't read as meaningful risk on its own. Only
+// explicit escalation language moves it up; nothing here defaults to
+// "Elevated" or above without a real signal for it.
 function keywordSeverity(text: string): number {
   if (HIGH_SEVERITY.test(text)) return 4;
   if (MODERATE_SEVERITY.test(text)) return 3;
-  return 2;
+  if (MILD_SEVERITY.test(text)) return 2;
+  return 1;
 }
 
 function categorizeByKeywords(text: string): NewsCategory | "other" {
@@ -139,7 +171,16 @@ function categorizeByKeywords(text: string): NewsCategory | "other" {
 }
 
 export function classifyByKeywords(item: RawItem): ClassifiedItem | null {
+  if (NON_EVENT_TITLE_PATTERNS.test(item.title)) return null;
+
   const text = `${item.title} ${item.snippet}`;
+  const hasEscalation = HIGH_SEVERITY.test(text) || MODERATE_SEVERITY.test(text);
+
+  // A benign/routine signal only suppresses the item if nothing in it also
+  // reads as an actual escalation — "joint exercise" is routine on its own,
+  // but "joint exercise cancelled after strikes" is not.
+  if (BENIGN_PATTERNS.test(text) && !hasEscalation) return null;
+
   const category = categorizeByKeywords(text);
 
   const resolvedCountry = resolveCountryFromText(text);

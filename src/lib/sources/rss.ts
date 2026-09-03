@@ -14,6 +14,14 @@ export const RSS_FEEDS: { name: string; url: string }[] = [
     name: "nyt-world",
     url: "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
   },
+  { name: "npr-world", url: "https://feeds.npr.org/1004/rss.xml" },
+  { name: "dw-world", url: "https://rss.dw.com/xml/rss-en-world" },
+  { name: "france24-world", url: "https://www.france24.com/en/rss" },
+  {
+    name: "cna-world",
+    url: "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml",
+  },
+  { name: "cbs-world", url: "https://www.cbsnews.com/latest/rss/world" },
 ];
 
 export async function fetchRssFeed(feed: {
