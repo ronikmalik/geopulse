@@ -19,12 +19,8 @@ import type {
   FlightsResponse,
   CommercialFlightsResponse,
   WeatherResponse,
-  SatellitesResponse,
-  CryptoResponse,
-  GithubResponse,
   GdpResponse,
   PopulationResponse,
-  MacroResponse,
   ForexResponse,
   CftcResponse,
   CyberResponse,
@@ -103,21 +99,6 @@ export default function Home() {
     DATA_LAYER_POLL_MS.weather,
     activeDataLayers.has("weather"),
   );
-  const satellitesLayer = useLiveLayer<SatellitesResponse>(
-    "/api/layers/satellites",
-    DATA_LAYER_POLL_MS.satellites,
-    activeDataLayers.has("satellites"),
-  );
-  const cryptoLayer = useLiveLayer<CryptoResponse>(
-    "/api/layers/crypto",
-    DATA_LAYER_POLL_MS.crypto,
-    activeDataLayers.has("crypto"),
-  );
-  const githubLayer = useLiveLayer<GithubResponse>(
-    "/api/layers/github",
-    DATA_LAYER_POLL_MS.github,
-    activeDataLayers.has("github"),
-  );
   const gdpLayer = useLiveLayer<GdpResponse>(
     "/api/layers/gdp",
     DATA_LAYER_POLL_MS.gdp,
@@ -127,11 +108,6 @@ export default function Home() {
     "/api/layers/population",
     DATA_LAYER_POLL_MS.population,
     activeDataLayers.has("population"),
-  );
-  const macroLayer = useLiveLayer<MacroResponse>(
-    "/api/layers/macro",
-    DATA_LAYER_POLL_MS.macro,
-    activeDataLayers.has("macro"),
   );
   const cyberLayer = useLiveLayer<CyberResponse>(
     "/api/layers/cyber",
@@ -190,12 +166,8 @@ export default function Home() {
     flights: flightsLayer.data,
     commercialFlights: commercialFlightsLayer.data,
     weather: weatherLayer.data,
-    satellites: satellitesLayer.data,
-    crypto: cryptoLayer.data,
-    github: githubLayer.data,
     gdp: gdpLayer.data,
     population: populationLayer.data,
-    macro: macroLayer.data,
     cyber: cyberLayer.data,
     forex: forexLayer.data,
     cftc: cftcLayer.data,
@@ -232,7 +204,7 @@ export default function Home() {
             GEOPULSE
           </h1>
           <p className="font-mono text-[9px] tracking-widest text-red-800 sm:text-[10px]">
-            LIVE GEOPOLITICAL SIGNAL MAP
+            GLOBAL RISK INTELLIGENCE
           </p>
           <div className="mt-2 -ml-1 max-w-[calc(100vw-1.5rem)] overflow-x-auto pl-1 pb-1 sm:max-w-none sm:overflow-visible">
             <CategoryFilter active={activeCategories} onToggle={toggleCategory} />

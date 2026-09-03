@@ -3,7 +3,7 @@
 // catalog, no API key required. This is a global feed (vendor/product, not
 // a country), so it can't be geolocated for the country risk model the way
 // the other sources are — it's surfaced instead as a "Cyber & Technology"
-// ticker layer, the same treatment as github.ts/coingecko.ts.
+// ticker layer alongside worldbank.ts's GDP/population layers.
 // https://www.cisa.gov/known-exploited-vulnerabilities-catalog
 const CISA_KEV_ENDPOINT =
   "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";

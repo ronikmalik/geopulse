@@ -14,12 +14,8 @@ import type {
   FlightsResponse,
   CommercialFlightsResponse,
   WeatherResponse,
-  SatellitesResponse,
-  CryptoResponse,
-  GithubResponse,
   GdpResponse,
   PopulationResponse,
-  MacroResponse,
   ForexResponse,
   CftcResponse,
   CyberResponse,
@@ -60,12 +56,8 @@ interface DashboardProps {
   flights: FlightsResponse | null;
   commercialFlights: CommercialFlightsResponse | null;
   weather: WeatherResponse | null;
-  satellites: SatellitesResponse | null;
-  crypto: CryptoResponse | null;
-  github: GithubResponse | null;
   gdp: GdpResponse | null;
   population: PopulationResponse | null;
-  macro: MacroResponse | null;
   cyber: CyberResponse | null;
 
   forex: ForexResponse | null;
@@ -172,12 +164,8 @@ export default function Dashboard(props: DashboardProps) {
             flights={props.flights}
             commercialFlights={props.commercialFlights}
             weather={props.weather}
-            satellites={props.satellites}
-            crypto={props.crypto}
-            github={props.github}
             gdp={props.gdp}
             population={props.population}
-            macro={props.macro}
             cyber={props.cyber}
           />
         )}

@@ -26,11 +26,8 @@ limitations.
 | Frankfurter (ECB rates) | `api.frankfurter.app` | none | MIT-licensed wrapper over ECB reference rates | 5 min | `src/lib/sources/forex.ts` | ECB business days only |
 | fawazahmed0/exchange-api | jsDelivr CDN | none | Unlicense (public domain) | 5 min | `src/lib/sources/forex.ts` | RUB/UAH fallback only, ECB doesn't carry them |
 | World Bank Indicators | `api.worldbank.org/v2/country/.../indicator/...` | none | CC BY 4.0 | hourly | `src/lib/sources/worldbank.ts` | GDP/population only — standalone ticker, not joined to risk model; see WGI note below for what does NOT work on this same API family |
-| ECB SDW, Eurostat, BIS | per-provider | none | Free reuse w/ attribution | 15 min | `src/lib/sources/ecb.ts`, `eurostat.ts`, `bis.ts` | Macro tickers, informational only |
 | CFTC Commitments of Traders | cftc.gov reports | none | US government work, public domain | hourly | `src/lib/sources/cftc.ts` | Weekly-published data (Fridays) |
-| CoinGecko | `api.coingecko.com` | none | Free-tier terms — non-commercial redistribution restriction flagged | 1 min | `src/lib/sources/coingecko.ts` | Ticker only |
-| GitHub Search | `api.github.com/search/repositories` | none (10 req/min unauth) | GitHub ToS | 10 min | `src/lib/sources/github.ts` | Ticker only, not risk-relevant |
-| CelesTrak, adsb.lol, OpenSky | per-provider | none | CelesTrak/adsb.lol: unclear commercial terms, flagged. OpenSky: non-commercial research use only without a data agreement | 20s–5 min | `src/lib/sources/celestrak.ts`, `adsblol.ts`, `opensky.ts` | Map overlay layers, opt-in, not part of the risk model |
+| adsb.lol, OpenSky | per-provider | none | adsb.lol: unclear commercial terms, flagged. OpenSky: non-commercial research use only without a data agreement | 20s | `src/lib/sources/adsblol.ts`, `opensky.ts` | Map overlay layers, opt-in, not part of the risk model |
 | Open-Meteo | `api.open-meteo.com` | none | CC BY 4.0 non-commercial; paid plan required above free-tier volume — flagged | 5 min | `src/lib/sources/openmeteo.ts` | 12 fixed monitored capitals, current conditions only, not joined to Climate pillar scoring |
 | Finnhub | `finnhub.io` | API key (free tier) | Commercial terms unclear, flagged | on-demand | `src/lib/sources/finnhub.ts` | Optional — country-snapshot stock index only, degrades silently without a key |
 
@@ -41,6 +38,7 @@ limitations.
 | ReliefWeb | **Blocked** | v1 API decommissioned; v2 requires a registered `appname` (functions as an API key). Human & Social pillar covered via GDELT instead. |
 | World Bank Worldwide Governance Indicators (WGI) | **Blocked** | Brief's suggested codes (`CC.EST`, `PV.EST`, control/political-stability/rule-of-law estimates) resolve to an archived data source (`WDI Database Archives`) on the standard Indicators API and return "not found" on live query, despite the indicator existing in WGI source id 3. No working query path found without further investigation — possibly requires the World Bank's separate governance data portal rather than the indicators REST API this app already uses. |
 | gpsjam.org | **Blocked** | No documented public endpoint; fetched server-side by their own frontend only. |
+| CoinGecko, GitHub Search, CelesTrak, ECB SDW, Eurostat, BIS | **Removed** | Integrated earlier, then removed — none fed a risk pillar or told an analyst anything about country risk (crypto prices, trending repos, satellite orbits, Eurozone macro indicators). Scope creep from an earlier "everything dashboard" phase; see `src/lib/dataLayers.ts`. |
 
 ## Candidates not yet attempted (roadmap, prioritized)
 

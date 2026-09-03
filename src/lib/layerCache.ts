@@ -1,7 +1,7 @@
 // Small in-memory TTL cache shared by the /api/layers/* routes. These proxy
-// external APIs with tight free-tier rate limits (CoinGecko, GitHub) or
-// slow-changing data (GDP, macro indicators) — caching per warm serverless
-// instance avoids re-fetching upstream on every client poll.
+// external APIs with tight free-tier rate limits (CISA KEV, OpenSky) or
+// slow-changing data (World Bank GDP/population) — caching per warm
+// serverless instance avoids re-fetching upstream on every client poll.
 const store = new Map<string, { data: unknown; expiresAt: number }>();
 
 export async function withCache<T>(

@@ -5,6 +5,7 @@ import {
   CATEGORY_LABELS,
   type Category,
 } from "@/lib/categories";
+import { PILLARS, pillarForCategory } from "@/lib/pillars";
 import {
   DATA_LAYERS,
   DATA_LAYER_LABELS,
@@ -15,12 +16,8 @@ import type {
   FlightsResponse,
   CommercialFlightsResponse,
   WeatherResponse,
-  SatellitesResponse,
-  CryptoResponse,
-  GithubResponse,
   GdpResponse,
   PopulationResponse,
-  MacroResponse,
   CyberResponse,
 } from "@/lib/dataLayerTypes";
 
@@ -32,12 +29,8 @@ interface LayersDashboardProps {
   flights: FlightsResponse | null;
   commercialFlights: CommercialFlightsResponse | null;
   weather: WeatherResponse | null;
-  satellites: SatellitesResponse | null;
-  crypto: CryptoResponse | null;
-  github: GithubResponse | null;
   gdp: GdpResponse | null;
   population: PopulationResponse | null;
-  macro: MacroResponse | null;
   cyber: CyberResponse | null;
 }
 
@@ -46,7 +39,7 @@ const LAYER_DESCRIPTIONS: Partial<Record<Category, string>> = {
     "GDELT — coups, contested elections, martial law, government collapse.",
   humanitarian:
     "GDELT — famine, displacement, refugee flows, disease outbreaks.",
-  earthquake: "USGS — magnitude 4.5+ seismic events, refreshed every ingest cycle.",
+  earthquake: "USGS — magnitude 4.5+ seismic events, last 30 days.",
   "natural-disaster":
     "NASA EONET + GDACS — cyclones, volcanoes, tsunamis, severe storms.",
   "climate-hazard": "NASA EONET + GDACS — floods, wildfires, drought.",
@@ -59,10 +52,6 @@ function formatUsd(value: number): string {
   if (value >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
   if (value >= 1e6) return `$${(value / 1e6).toFixed(2)}M`;
   return `$${value.toFixed(0)}`;
-}
-
-function formatPrice(value: number): string {
-  return value >= 1 ? `$${value.toFixed(2)}` : `$${value.toFixed(4)}`;
 }
 
 function formatCount(value: number): string {
@@ -80,12 +69,8 @@ export default function LayersDashboard({
   flights,
   commercialFlights,
   weather,
-  satellites,
-  crypto,
-  github,
   gdp,
   population,
-  macro,
   cyber,
 }: LayersDashboardProps) {
   function renderPreview(id: DataLayerId) {
@@ -110,49 +95,6 @@ export default function LayersDashboard({
         </span>
       );
     }
-    if (id === "satellites" && satellites) {
-      return (
-        <div className="mt-1.5 space-y-0.5 text-[11px] text-neutral-500">
-          <div>{satellites.satellites.length} tracked</div>
-          {satellites.satellites.slice(0, 4).map((sat) => (
-            <div key={sat.noradCatId} className="truncate">
-              {sat.name} — {sat.orbitalPeriodMin.toFixed(0)} min orbit
-            </div>
-          ))}
-        </div>
-      );
-    }
-    if (id === "crypto" && crypto) {
-      return (
-        <div className="mt-1.5 space-y-0.5 text-[11px]">
-          {crypto.markets.slice(0, 5).map((m) => (
-            <div key={m.id} className="flex justify-between gap-2 text-neutral-500">
-              <span>{m.symbol}</span>
-              <span>{formatPrice(m.priceUsd)}</span>
-              <span className={m.change24hPct >= 0 ? "text-emerald-500" : "text-red-500"}>
-                {m.change24hPct >= 0 ? "+" : ""}
-                {m.change24hPct.toFixed(1)}%
-              </span>
-            </div>
-          ))}
-        </div>
-      );
-    }
-    if (id === "github" && github) {
-      return (
-        <div className="mt-1.5 space-y-0.5 text-[11px] text-neutral-500">
-          {github.repos.slice(0, 4).map((repo) => (
-            <div key={repo.fullName} className="flex justify-between gap-2">
-              <span className="truncate">{repo.fullName}</span>
-              <span className="shrink-0">
-                ★{repo.stars.toLocaleString()}
-                {repo.language ? ` · ${repo.language}` : ""}
-              </span>
-            </div>
-          ))}
-        </div>
-      );
-    }
     if (id === "gdp" && gdp) {
       return (
         <div className="mt-1.5 space-y-0.5 text-[11px] text-neutral-500">
@@ -173,23 +115,6 @@ export default function LayersDashboard({
               <span className="truncate">{c.countryName}</span>
               <span className="shrink-0">{c.value != null ? formatCount(c.value) : "—"}</span>
             </div>
-          ))}
-        </div>
-      );
-    }
-    if (id === "macro" && macro) {
-      const rows = [
-        macro.eurUsd && `EUR/USD  ${macro.eurUsd.value.toFixed(4)} (${macro.eurUsd.date})`,
-        macro.usPolicyRate &&
-          `US Policy Rate  ${macro.usPolicyRate.value.toFixed(3)}% (${macro.usPolicyRate.date})`,
-        macro.euUnemploymentPct &&
-          `EU Unemployment  ${macro.euUnemploymentPct.value.toFixed(1)}% (${macro.euUnemploymentPct.period})`,
-      ].filter((r): r is string => Boolean(r));
-      if (rows.length === 0) return null;
-      return (
-        <div className="mt-1.5 space-y-0.5 text-[11px] text-neutral-500">
-          {rows.map((row) => (
-            <div key={row}>{row}</div>
           ))}
         </div>
       );
@@ -220,8 +145,12 @@ export default function LayersDashboard({
         <h2 className="mb-2 font-mono text-xs uppercase tracking-[0.2em] text-red-500">
           Event Layers
         </h2>
+        <p className="mb-2 font-mono text-[10px] text-red-800">
+          Opt in to widen the feed beyond the five default flashpoints.
+        </p>
         {LAYER_CATEGORIES.map((cat) => {
           const isActive = active.has(cat);
+          const pillar = PILLARS[pillarForCategory(cat)];
           return (
             <button
               key={cat}
@@ -242,12 +171,20 @@ export default function LayersDashboard({
                 ✓
               </span>
               <span className="min-w-0">
-                <span
-                  className={`block font-mono text-xs uppercase tracking-wider ${
-                    isActive ? "text-red-300" : "text-neutral-400"
-                  }`}
-                >
-                  {CATEGORY_LABELS[cat]}
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className={`block font-mono text-xs uppercase tracking-wider ${
+                      isActive ? "text-red-300" : "text-neutral-400"
+                    }`}
+                  >
+                    {CATEGORY_LABELS[cat]}
+                  </span>
+                  <span
+                    className="rounded-sm px-1 py-0.5 font-mono text-[8px] uppercase tracking-wider text-black"
+                    style={{ backgroundColor: pillar.color }}
+                  >
+                    {pillar.shortLabel}
+                  </span>
                 </span>
                 {LAYER_DESCRIPTIONS[cat] && (
                   <span className="mt-0.5 block text-[11px] text-neutral-500">
@@ -260,10 +197,10 @@ export default function LayersDashboard({
         })}
 
         <h2 className="mb-2 mt-4 font-mono text-xs uppercase tracking-[0.2em] text-red-500">
-          Live Data Layers
+          Context Layers
         </h2>
         <p className="mb-2 font-mono text-[10px] text-red-800">
-          Flights/weather render on the globe; the rest preview here.
+          Structural and situational context, not scored events. Flights/weather render on the globe; the rest preview here.
         </p>
         {DATA_LAYERS.map((id) => {
           const isActive = activeDataLayers.has(id);

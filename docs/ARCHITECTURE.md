@@ -92,8 +92,7 @@ expensive to backfill later — flagged as a fast-follow in the roadmap.
 `src/lib/sourceRegistry.ts` is a typed, in-code provider table (not yet a DB table —
 see Gap analysis) covering every source currently wired: GDELT, RSS wires, USGS, NASA
 EONET, GDACS, IODA, CISA KEV, Frankfurter/ECB, the community currency CDN, World Bank,
-ECB SDW, Eurostat, BIS, CFTC, CoinGecko, GitHub, CelesTrak, OpenSky, adsb.lol,
-Open-Meteo, Finnhub. Each row records provider, license, `commercial_use`,
+CFTC, OpenSky, adsb.lol, Open-Meteo, Finnhub. Each row records provider, license, `commercial_use`,
 `redistribution_allowed`, `attribution_required`, `caching_allowed`, rate limit,
 `api_key_required`, and `terms_last_checked` — the exact field set the brief specifies,
 implemented as TypeScript types rather than a DB schema for now (no UI currently reads
