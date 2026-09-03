@@ -60,3 +60,34 @@ export const sourceHealth = pgTable("source_health", {
 });
 
 export type SourceHealthRow = typeof sourceHealth.$inferSelect;
+
+// One row per country per daily snapshot (see src/lib/history.ts and the
+// /api/admin/snapshot cron) — a running record of each country's Pulse
+// Level/momentum over time, independent of the events table's 30-day
+// scoring lookback. This is what lets "current pulse" eventually be
+// compared against a country's own trailing baseline instead of a flat
+// global threshold, and is the honest version of "let signals build on
+// each other over time": real historical data, not a black-box model
+// retrained on its own output.
+export const countryStateHistory = pgTable(
+  "country_state_history",
+  {
+    id: serial("id").primaryKey(),
+    country: text("country").notNull(),
+    snapshotAt: timestamp("snapshot_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    score: doublePrecision("score").notNull(),
+    threatLevel: smallint("threat_level").notNull(),
+    momentum: smallint("momentum").notNull(),
+    momentumDirection: smallint("momentum_direction").notNull(),
+    eventCount: integer("event_count").notNull(),
+  },
+  (table) => [
+    index("country_state_history_country_idx").on(table.country),
+    index("country_state_history_snapshot_at_idx").on(table.snapshotAt),
+  ],
+);
+
+export type CountryStateHistoryRow = typeof countryStateHistory.$inferSelect;
+export type NewCountryStateHistoryRow = typeof countryStateHistory.$inferInsert;
