@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { events } from "@/db/schema";
+import { events, type EventRow } from "@/db/schema";
 import { pillarForCategory, PILLAR_LIST, COVERED_PILLARS, type PillarId } from "@/lib/pillars";
 import type { Category } from "@/lib/categories";
 import {
@@ -267,6 +267,29 @@ export async function getCountryThreatDetail(country: string): Promise<CountryTh
     momentumDirection: driver?.momentumDirection ?? 0,
     pillars,
   };
+}
+
+// Full event rows (map coordinates included) for a country's Feed view.
+// Deliberately separate from getCountryRiskEvents below, which returns a
+// lighter shape for the Risk tab's list — this one matches GeoEvent so the
+// same FeedPanel/AlertToast components used for the live stream can render
+// it without a shape adapter. The client-side event stream only ever holds
+// the most recent ~100 rows across ALL countries combined (see
+// api/stream/route.ts's INITIAL_BACKFILL_LIMIT), so filtering that buffer
+// by country — the previous approach — silently came up empty for any
+// country whose events had aged out of that shared window. This queries
+// the DB directly instead, scoped to one country.
+export async function getEventsByCountry(country: string): Promise<EventRow[]> {
+  const db = getDb();
+  const iso2 = country.toUpperCase();
+  return db
+    .select()
+    .from(events)
+    .where(
+      sql`${events.country} = ${iso2} and ${events.publishedAt} > now() - interval '${sql.raw(String(LOOKBACK_DAYS))} days'`,
+    )
+    .orderBy(sql`${events.publishedAt} desc`)
+    .limit(100);
 }
 
 export interface CountryRiskEvent {

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import GlobeView from "@/components/Globe";
 import CategoryFilter from "@/components/CategoryFilter";
 import AlertToast from "@/components/AlertToast";
@@ -49,6 +49,8 @@ export default function Home() {
   );
   const [selected, setSelected] = useState<GeoEvent | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const [countryFeed, setCountryFeed] = useState<GeoEvent[]>([]);
+  const [countryFeedLoading, setCountryFeedLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<DashboardTab>("feed");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeDataLayers, setActiveDataLayers] = useState<Set<DataLayerId>>(
@@ -65,9 +67,39 @@ export default function Home() {
   // toggled on in the main view — rather than the pillar/threat-level
   // breakdown (that view still exists under the Risk tab, just no longer
   // the default click destination).
+  //
+  // This fetches from the DB (via /api/events) instead of filtering the
+  // live SSE buffer: that buffer only ever holds the ~100 most recently
+  // inserted events across ALL countries combined (see useEventStream.ts /
+  // api/stream/route.ts), so a country whose events had aged out of that
+  // shared window would filter to nothing and show "Listening for
+  // signals…" even with real history in the DB.
+  useEffect(() => {
+    if (!selectedCountry) {
+      setCountryFeed([]);
+      return;
+    }
+    let cancelled = false;
+    setCountryFeedLoading(true);
+    fetch(`/api/events?country=${selectedCountry}`)
+      .then((res) => res.json())
+      .then((data: { events: GeoEvent[] }) => {
+        if (!cancelled) setCountryFeed(data.events ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setCountryFeed([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCountryFeedLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCountry]);
+
   const feedEvents = useMemo(
-    () => (selectedCountry ? events.filter((e) => e.country === selectedCountry) : filtered),
-    [events, filtered, selectedCountry],
+    () => (selectedCountry ? countryFeed : filtered),
+    [countryFeed, filtered, selectedCountry],
   );
 
   const toggleCategory = (cat: Category) => {
@@ -155,6 +187,7 @@ export default function Home() {
 
   const dashboardProps = {
     events: feedEvents,
+    feedLoading: Boolean(selectedCountry) && countryFeedLoading,
     selectedEventId: selected?.id ?? null,
     onSelectEvent: (event: GeoEvent) => {
       setSelected(event);
@@ -218,10 +251,11 @@ export default function Home() {
 
       {/* Incoming alert toasts */}
       <div className="pointer-events-none absolute inset-x-3 top-24 z-20 flex flex-col gap-2 sm:inset-x-auto sm:right-[26rem] sm:w-80">
-        {incoming.slice(-4).map((event) => (
+        {incoming.slice(-4).map((event, i) => (
           <AlertToast
             key={event.id}
             event={event}
+            index={i}
             onDismiss={() => dismissIncoming(event.id)}
             onFocus={() => {
               setSelected(event);

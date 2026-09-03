@@ -5,6 +5,7 @@ import { CATEGORY_LABELS, type Category } from "@/lib/categories";
 
 interface FeedPanelProps {
   events: GeoEvent[];
+  loading?: boolean;
   selectedId: number | null;
   onSelect: (event: GeoEvent) => void;
 }
@@ -22,6 +23,7 @@ function timeAgo(iso: string | Date): string {
 
 export default function FeedPanel({
   events,
+  loading,
   selectedId,
   onSelect,
 }: FeedPanelProps) {
@@ -32,7 +34,12 @@ export default function FeedPanel({
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto">
-        {sorted.length === 0 && (
+        {loading && (
+          <p className="p-4 font-mono text-xs text-neutral-600">
+            Loading feed…
+          </p>
+        )}
+        {!loading && sorted.length === 0 && (
           <p className="p-4 font-mono text-xs text-neutral-600">
             Listening for signals…
           </p>

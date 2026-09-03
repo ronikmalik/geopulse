@@ -42,6 +42,7 @@ interface DashboardProps {
   showTabBar?: boolean;
 
   events: GeoEvent[];
+  feedLoading?: boolean;
   selectedEventId: number | null;
   onSelectEvent: (event: GeoEvent) => void;
 
@@ -142,6 +143,7 @@ export default function Dashboard(props: DashboardProps) {
             <div className="min-h-0 flex-1">
               <FeedPanel
                 events={props.events}
+                loading={props.feedLoading}
                 selectedId={props.selectedEventId}
                 onSelect={props.onSelectEvent}
               />
