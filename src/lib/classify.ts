@@ -172,7 +172,16 @@ function keywordSeverity(text: string): number {
   return 1;
 }
 
-function categorizeByKeywords(text: string): NewsCategory | "other" {
+// Title-first, same reasoning as country resolution below: a snippet
+// mentioning Iran in passing (a related-coverage teaser, a source's other
+// headlines) shouldn't file an unrelated UK-politics story under us-iran.
+// Only falls back to scanning the full text when the title alone doesn't
+// match any specific category, so a real category-relevant detail that's
+// in the body but not the headline still gets caught.
+function categorizeByKeywords(title: string, text: string): NewsCategory | "other" {
+  for (const [category, pattern] of CATEGORY_MATCHERS) {
+    if (pattern.test(title)) return category;
+  }
   for (const [category, pattern] of CATEGORY_MATCHERS) {
     if (pattern.test(text)) return category;
   }
@@ -191,7 +200,7 @@ export function classifyByKeywords(item: RawItem): ClassifiedItem | null {
   if (BENIGN_PATTERNS.test(text) && !hasEscalation) return null;
   if (ONGOING_COVERAGE_PATTERNS.test(text) && !hasEscalation) return null;
 
-  const category = categorizeByKeywords(text);
+  const category = categorizeByKeywords(item.title, text);
 
   // The title is far more likely to name the actual subject of the story
   // than the snippet is — RSS snippets often carry source attribution or
