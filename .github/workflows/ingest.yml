@@ -15,7 +15,7 @@ jobs:
       - name: Call /api/ingest
         run: |
           status=$(curl -sS -o /tmp/body.txt -w "%{http_code}" \
-            -X GET "https://geopulse-peach-eight.vercel.app/api/ingest" \
+            -X GET "https://geopulse-green.vercel.app/api/ingest" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
           echo "HTTP $status"
           cat /tmp/body.txt
