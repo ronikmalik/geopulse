@@ -12,11 +12,18 @@ const IODA_ENDPOINT = "https://api.ioda.inetintel.cc.gatech.edu/v2/outages/summa
 // traffic is a fraction of a large one's) — so severity here is driven by
 // `event_cnt` (the count of distinct detected outage events in the
 // window), a discrete, source-attested number, rather than the raw score.
+// Thresholds are deliberately high: IODA flags routine background noise
+// (an ISP maintenance window, a transient BGP blip) as an "event" far more
+// readily than it flags an actual government-imposed shutdown or targeted
+// disruption, and this pillar was drowning out real signal from the other
+// pillars by reporting on nearly every country nearly every day at a
+// nonzero severity for exactly that reason.
+const MIN_REPORTABLE_EVENT_COUNT = 5;
+
 function eventCountSeverity(eventCount: number): number {
-  if (eventCount >= 8) return 4;
-  if (eventCount >= 4) return 3;
-  if (eventCount >= 2) return 2;
-  return 1;
+  if (eventCount >= 20) return 4;
+  if (eventCount >= 10) return 3;
+  return 2;
 }
 
 interface IodaEntity {
@@ -66,16 +73,21 @@ export async function fetchIodaOutages(): Promise<DirectItem[]> {
   const data = (await res.json()) as IodaSummaryResponse;
   if (data.error || !data.data) return [];
 
-  // Ingest runs every ~15 minutes (see ingest.ts) but this is a rolling
-  // 24h summary, not a discrete new event each time — without a stable
-  // dedup key, a single ongoing outage would re-insert as a "new" row
-  // every cycle and blow up a country's decayed risk score. Bucketing
-  // the dedup URL by UTC day caps it at one row per country per day;
-  // `events.url` is the unique constraint ingest.ts dedupes on.
+  // Ingest can now run every ~10 minutes (see the stream route's
+  // background trigger) but this is a rolling 24h summary, not a discrete
+  // new event each time. The dedup key MUST be stable across calls within
+  // the same day — it previously embedded `from`/`until`, which change on
+  // every single call (they're derived from Date.now() above), so despite
+  // intending a once-per-day cap, every ingest run was generating a
+  // "new" URL and re-inserting the same ongoing signal, compounding a
+  // country's decayed risk score upward indefinitely. The dedup URL now
+  // carries nothing but the country and the UTC day, so it's byte-for-byte
+  // identical across every call on the same day and `onConflictDoNothing`
+  // (on `events.url`, see ingest.ts) actually catches the repeat.
   const dayBucket = new Date().toISOString().slice(0, 10);
 
   return data.data
-    .filter((row) => row.event_cnt > 0)
+    .filter((row) => row.event_cnt >= MIN_REPORTABLE_EVENT_COUNT)
     .map((row): DirectItem | null => {
       const code = row.entity.code?.toUpperCase();
       const centroid = code ? COUNTRY_CENTROIDS[code] : undefined;
@@ -85,8 +97,9 @@ export async function fetchIodaOutages(): Promise<DirectItem[]> {
       return {
         source: "ioda",
         // IODA has no per-event permalink; link to the country's live
-        // dashboard page, which shows exactly the events this summarizes.
-        url: `https://ioda.inetintel.cc.gatech.edu/country/${code}?from=${from}&until=${until}#${dayBucket}`,
+        // dashboard page. Deliberately excludes `from`/`until` — see the
+        // dedup-stability comment above.
+        url: `https://ioda.inetintel.cc.gatech.edu/country/${code}?date=${dayBucket}`,
         title: `${row.entity.name}: internet connectivity disruption`,
         summary: `IODA detected ${row.event_cnt} distinct outage signal${row.event_cnt === 1 ? "" : "s"} for ${row.entity.name} in the last 24h (BGP/active-probing/darknet traffic anomaly).`,
         category: "infrastructure-outage",
