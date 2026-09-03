@@ -67,7 +67,7 @@ export async function fetchGdacsAlerts(): Promise<DirectItem[]> {
   const data = (await res.json()) as GdacsResponse;
 
   return data.features
-    .map((f) => {
+    .map((f): DirectItem | null => {
       const p = f.properties;
       if (EXCLUDED_EVENT_TYPES.has(p.eventtype)) return null;
       if (!f.geometry || f.geometry.type !== "Point") return null;

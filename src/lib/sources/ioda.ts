@@ -76,7 +76,7 @@ export async function fetchIodaOutages(): Promise<DirectItem[]> {
 
   return data.data
     .filter((row) => row.event_cnt > 0)
-    .map((row) => {
+    .map((row): DirectItem | null => {
       const code = row.entity.code?.toUpperCase();
       const centroid = code ? COUNTRY_CENTROIDS[code] : undefined;
       if (!centroid) return null;
@@ -89,7 +89,7 @@ export async function fetchIodaOutages(): Promise<DirectItem[]> {
         url: `https://ioda.inetintel.cc.gatech.edu/country/${code}?from=${from}&until=${until}#${dayBucket}`,
         title: `${row.entity.name}: internet connectivity disruption`,
         summary: `IODA detected ${row.event_cnt} distinct outage signal${row.event_cnt === 1 ? "" : "s"} for ${row.entity.name} in the last 24h (BGP/active-probing/darknet traffic anomaly).`,
-        category: "infrastructure-outage" as const,
+        category: "infrastructure-outage",
         location: row.entity.name,
         country: code,
         lat: centroid.lat,

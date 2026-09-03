@@ -1,4 +1,5 @@
 import { resolveCountryFromText } from "@/lib/countryNames";
+import type { Category } from "@/lib/categories";
 import type { DirectItem } from "./direct";
 
 // NASA EONET v3 — open natural-hazard events, no API key required.
@@ -35,7 +36,7 @@ function categorySeverity(categoryTitle: string): number {
 // Wildfires/floods/drought -> Climate & Environment pillar; volcanoes and
 // severe storms -> Natural & Biological Hazards pillar. See gdacs.ts for
 // the same split and src/lib/pillars.ts for the pillar definitions.
-function categoryBucket(categoryTitle: string): "climate-hazard" | "natural-disaster" {
+function categoryBucket(categoryTitle: string): Category {
   if (/wildfires|floods|drought/i.test(categoryTitle)) return "climate-hazard";
   return "natural-disaster";
 }
@@ -59,7 +60,7 @@ export async function fetchNasaEonet(): Promise<DirectItem[]> {
   const data = (await res.json()) as EonetResponse;
 
   return data.events
-    .map((ev) => {
+    .map((ev): DirectItem | null => {
       const geom = ev.geometry[ev.geometry.length - 1];
       if (!geom || geom.type !== "Point" || !Array.isArray(geom.coordinates)) {
         return null;
