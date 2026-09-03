@@ -137,14 +137,23 @@ const CATEGORY_FALLBACK_COUNTRY: Partial<Record<NewsCategory, string>> = {
 const NON_EVENT_TITLE_PATTERNS =
   /^(what to know|explainer|analysis|opinion|q&a|in pictures|in photos|photos:|the backstory|timeline:|explained:)\b|explainer$|^(who is|who are|why is|why did|why does|how is|how did|how does|what happened)\b|:\s*(what to know|what happened|explained|explainer|analysis|q&a)\b/i;
 
+// Coverage of an ongoing/pre-existing situation rather than a fresh
+// development — "years after the invasion, X still..." reads as current
+// (mentions the invasion) but isn't reporting anything new today.
+const ONGOING_COVERAGE_PATTERNS =
+  /\bamid ongoing\b|as .* continues\b|years? after\b|decades? after\b|since the .* (war|conflict|invasion) began\b|still reeling\b|\banniversary of\b/i;
+
 // Routine, expected, or de-escalatory activity that the topical KEYWORDS
 // filter above will still catch (a port call by a US carrier mentions
 // "troops"/a country by name, a peace summit mentions the same countries
 // as the conflict it's resolving) but that isn't itself a threat — this is
 // the layer that actually decides "is this worth reporting as risk," not
-// just "does this article touch the topic."
+// just "does this article touch the topic." "X visits Y" is deliberately
+// here too: a state visit reads as belonging to the visitor's country (the
+// leader's name/demonym is usually what the headline leads with) but a
+// routine visit is not a risk event for either country on its own.
 const BENIGN_PATTERNS =
-  /port call|goodwill visit|routine (patrol|visit|deployment)|arrives (in|for)|(joint|annual|routine) (exercise|drill|training)(?!.*(warn|threat|escalat|tension|provoc))|peace talks|peace deal|ceasefire (holds|agreed|announced)|signs? (a |an )?(deal|agreement|treaty)|trade deal|summit|diplomatic visit|meets with|holds talks|anniversary|marks \d+ years?|art (festival|exhibition)|film festival|sporting event|championship/i;
+  /port call|goodwill visit|routine (patrol|visit|deployment)|arrives? (in|for)|\bvisits?\b|\bvisiting\b|state visit|travels? to|heads? to|trip to|(joint|annual|routine) (exercise|drill|training)(?!.*(warn|threat|escalat|tension|provoc))|peace talks|peace deal|ceasefire (holds|agreed|announced)|signs? (a |an )?(deal|agreement|treaty)|trade deal|summit|diplomatic visit|meets with|holds talks|anniversary|marks \d+ years?|art (festival|exhibition)|film festival|sporting event|championship/i;
 
 const HIGH_SEVERITY = /nuclear (test|strike|weapon)|invasion|massacre|genocide|declared war/i;
 const MODERATE_SEVERITY =
@@ -180,6 +189,7 @@ export function classifyByKeywords(item: RawItem): ClassifiedItem | null {
   // reads as an actual escalation — "joint exercise" is routine on its own,
   // but "joint exercise cancelled after strikes" is not.
   if (BENIGN_PATTERNS.test(text) && !hasEscalation) return null;
+  if (ONGOING_COVERAGE_PATTERNS.test(text) && !hasEscalation) return null;
 
   const category = categorizeByKeywords(text);
 

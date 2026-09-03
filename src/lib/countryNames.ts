@@ -263,6 +263,26 @@ const COUNTRY_NAME_TO_ALPHA2: Record<string, string> = {
   khartoum: "SD",
   mogadishu: "SO",
   caracas: "VE",
+
+  // Heads of state/government for countries this app tracks closely — a
+  // headline naming the leader ("Putin warns NATO...") but not the country
+  // or a demonym is common and otherwise resolves to nothing. Full
+  // names/surnames only, never a bare first name or short token, so
+  // there's no risk of matching as a substring inside an unrelated word
+  // (see resolveCountryFromText below, which does a plain substring
+  // search). This list drifts out of date as leadership changes — it's a
+  // bonus signal, not load-bearing, since the demonym/country/city
+  // matches above already cover the common case.
+  "xi jinping": "CN",
+  putin: "RU",
+  zelensky: "UA",
+  zelenskyy: "UA",
+  netanyahu: "IL",
+  "kim jong un": "KP",
+  khamenei: "IR",
+  pezeshkian: "IR",
+  erdogan: "TR",
+  "mohammed bin salman": "SA",
 };
 
 const NAMES_BY_LENGTH_DESC = Object.keys(COUNTRY_NAME_TO_ALPHA2).sort(
