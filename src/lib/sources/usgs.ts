@@ -6,6 +6,12 @@ import type { DirectItem } from "./direct";
 const USGS_FEED =
   "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson";
 
+// FDSN Event Web Service — the same underlying catalog, queryable over an
+// arbitrary historical date range rather than just "last N days". Used for
+// backfill (src/lib/backfill.ts), not live ingestion.
+// https://earthquake.usgs.gov/fdsnws/event/1/
+const USGS_FDSN_ENDPOINT = "https://earthquake.usgs.gov/fdsnws/event/1/query";
+
 interface UsgsFeature {
   id: string;
   properties: {
@@ -31,25 +37,8 @@ function magnitudeSeverity(mag: number): number {
   return 1;
 }
 
-export async function fetchUsgsEarthquakes(): Promise<DirectItem[]> {
-  let res: Response;
-  try {
-    res = await fetch(USGS_FEED, {
-      headers: { "User-Agent": "geopulse-globe/1.0" },
-      signal: AbortSignal.timeout(12_000),
-    });
-  } catch (err) {
-    throw new Error(`USGS request failed: ${err}`);
-  }
-
-  if (!res.ok) {
-    console.error(`USGS fetch failed: ${res.status}`);
-    return [];
-  }
-
-  const data = (await res.json()) as UsgsResponse;
-
-  return data.features
+function mapFeatures(features: UsgsFeature[]): DirectItem[] {
+  return features
     .filter(
       (f): f is UsgsFeature & { geometry: NonNullable<UsgsFeature["geometry"]> } =>
         f.properties.mag != null && f.geometry != null,
@@ -75,4 +64,58 @@ export async function fetchUsgsEarthquakes(): Promise<DirectItem[]> {
         publishedAt: new Date(f.properties.time),
       };
     });
+}
+
+export async function fetchUsgsEarthquakes(): Promise<DirectItem[]> {
+  let res: Response;
+  try {
+    res = await fetch(USGS_FEED, {
+      headers: { "User-Agent": "geopulse-globe/1.0" },
+      signal: AbortSignal.timeout(12_000),
+    });
+  } catch (err) {
+    throw new Error(`USGS request failed: ${err}`);
+  }
+
+  if (!res.ok) {
+    console.error(`USGS fetch failed: ${res.status}`);
+    return [];
+  }
+
+  const data = (await res.json()) as UsgsResponse;
+  return mapFeatures(data.features);
+}
+
+// Backfill only — pulls the full M4.5+ catalog for an arbitrary window
+// (verified against the live FDSN endpoint: ~600+ events for a 30-day
+// global window, well within one response with no pagination needed).
+export async function fetchUsgsEarthquakesHistorical(
+  daysBack: number,
+): Promise<DirectItem[]> {
+  const end = new Date();
+  const start = new Date(end.getTime() - daysBack * 86_400_000);
+  const params = new URLSearchParams({
+    format: "geojson",
+    starttime: start.toISOString().slice(0, 10),
+    endtime: end.toISOString().slice(0, 10),
+    minmagnitude: "4.5",
+  });
+
+  let res: Response;
+  try {
+    res = await fetch(`${USGS_FDSN_ENDPOINT}?${params.toString()}`, {
+      headers: { "User-Agent": "geopulse-globe/1.0" },
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (err) {
+    throw new Error(`USGS historical request failed: ${err}`);
+  }
+
+  if (!res.ok) {
+    console.error(`USGS historical fetch failed: ${res.status}`);
+    return [];
+  }
+
+  const data = (await res.json()) as UsgsResponse;
+  return mapFeatures(data.features);
 }

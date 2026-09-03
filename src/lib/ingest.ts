@@ -32,6 +32,60 @@ export interface IngestResult {
   errors: string[];
 }
 
+// Used by src/lib/backfill.ts — dedupes against already-stored URLs,
+// computes each item's correlation group, and inserts. runIngest below
+// has its own inline version of this same DirectItem -> row mapping
+// (deliberately not refactored to share this helper — that logic is
+// already live and verified, and this session's hard-won lesson is not to
+// touch working, tested code paths under time pressure for a pure
+// refactor with no behavior change).
+export async function insertDirectItems(
+  itemsIn: DirectItem[],
+): Promise<{ inserted: number; error: string | null }> {
+  const items = dedupeDirectByUrl(itemsIn);
+  if (items.length === 0) return { inserted: 0, error: null };
+
+  const db = getDb();
+  try {
+    const existing = await db
+      .select({ url: events.url })
+      .from(events)
+      .where(inArray(events.url, items.map((i) => i.url)))
+      .catch(() => []);
+    const existingUrls = new Set(existing.map((e) => e.url));
+    const fresh = items.filter((i) => !existingUrls.has(i.url));
+    if (fresh.length === 0) return { inserted: 0, error: null };
+
+    const rows = fresh.map((item) => {
+      const country = item.country ? item.country.toUpperCase() : null;
+      return {
+        source: item.source,
+        url: item.url,
+        title: item.title,
+        summary: item.summary,
+        category: item.category,
+        location: item.location,
+        country,
+        lat: item.lat,
+        lon: item.lon,
+        severity: item.severity,
+        publishedAt: item.publishedAt,
+        correlationGroupId: country
+          ? correlationGroupId(country, item.category, item.publishedAt)
+          : null,
+      };
+    });
+    const result = await db
+      .insert(events)
+      .values(rows)
+      .onConflictDoNothing({ target: events.url })
+      .returning({ id: events.id });
+    return { inserted: result.length, error: null };
+  } catch (err) {
+    return { inserted: 0, error: String(err) };
+  }
+}
+
 export async function runIngest(): Promise<IngestResult> {
   // All sources are independent of each other, so they all run
   // concurrently rather than in sequential stages — a slow or unreachable

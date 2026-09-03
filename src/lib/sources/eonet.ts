@@ -4,8 +4,7 @@ import type { DirectItem } from "./direct";
 
 // NASA EONET v3 — open natural-hazard events, no API key required.
 // https://eonet.gsfc.nasa.gov/docs/v3
-const EONET_FEED =
-  "https://eonet.gsfc.nasa.gov/api/v3/events?status=open&days=3&limit=100";
+const EONET_ENDPOINT = "https://eonet.gsfc.nasa.gov/api/v3/events";
 
 interface EonetGeometry {
   date: string;
@@ -41,25 +40,8 @@ function categoryBucket(categoryTitle: string): Category {
   return "natural-disaster";
 }
 
-export async function fetchNasaEonet(): Promise<DirectItem[]> {
-  let res: Response;
-  try {
-    res = await fetch(EONET_FEED, {
-      headers: { "User-Agent": "geopulse-globe/1.0" },
-      signal: AbortSignal.timeout(12_000),
-    });
-  } catch (err) {
-    throw new Error(`NASA EONET request failed: ${err}`);
-  }
-
-  if (!res.ok) {
-    console.error(`NASA EONET fetch failed: ${res.status}`);
-    return [];
-  }
-
-  const data = (await res.json()) as EonetResponse;
-
-  return data.events
+function mapEvents(events: EonetEvent[]): DirectItem[] {
+  return events
     .map((ev): DirectItem | null => {
       const geom = ev.geometry[ev.geometry.length - 1];
       if (!geom || geom.type !== "Point" || !Array.isArray(geom.coordinates)) {
@@ -84,4 +66,46 @@ export async function fetchNasaEonet(): Promise<DirectItem[]> {
       };
     })
     .filter((item): item is DirectItem => item !== null);
+}
+
+export async function fetchNasaEonet(): Promise<DirectItem[]> {
+  let res: Response;
+  try {
+    res = await fetch(`${EONET_ENDPOINT}?status=open&days=3&limit=100`, {
+      headers: { "User-Agent": "geopulse-globe/1.0" },
+      signal: AbortSignal.timeout(12_000),
+    });
+  } catch (err) {
+    throw new Error(`NASA EONET request failed: ${err}`);
+  }
+
+  if (!res.ok) {
+    console.error(`NASA EONET fetch failed: ${res.status}`);
+    return [];
+  }
+
+  const data = (await res.json()) as EonetResponse;
+  return mapEvents(data.events);
+}
+
+// Backfill only — includes closed (resolved) events too, not just
+// currently-open ones, over an arbitrary historical window.
+export async function fetchEonetHistorical(daysBack: number): Promise<DirectItem[]> {
+  let res: Response;
+  try {
+    res = await fetch(`${EONET_ENDPOINT}?status=all&days=${daysBack}&limit=300`, {
+      headers: { "User-Agent": "geopulse-globe/1.0" },
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (err) {
+    throw new Error(`NASA EONET historical request failed: ${err}`);
+  }
+
+  if (!res.ok) {
+    console.error(`NASA EONET historical fetch failed: ${res.status}`);
+    return [];
+  }
+
+  const data = (await res.json()) as EonetResponse;
+  return mapEvents(data.events);
 }
