@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
 import { getDb } from "@/db";
 import { events } from "@/db/schema";
 import { desc, gt } from "drizzle-orm";
+import { runIngest } from "@/lib/ingest";
+import { withCache } from "@/lib/layerCache";
 
 // Vercel Hobby-tier serverless functions hard-cap at 60s regardless of this
 // export; Pro/Enterprise allow more. Set to the safe lowest common
@@ -19,6 +21,33 @@ const INITIAL_BACKFILL_LIMIT = 100;
 // resumed stream, not a real disconnect.
 const MAX_STREAM_MS = 45_000;
 
+// The intended external cron (GitHub Actions, .github/workflows/ingest.yml)
+// is not reliably driving ingestion — this app has gone stale without it.
+// Rather than depend entirely on infrastructure outside this repo, every
+// new stream connection opportunistically kicks off an ingest run in the
+// background if the feed looks stale. withCache gates this to at most once
+// per this interval per warm serverless instance, so an actively-watched
+// page (which reconnects roughly every 45s, see MAX_STREAM_MS) doesn't
+// trigger overlapping ingest runs. This makes "someone has the site open"
+// sufficient to keep the feed live, with the daily Vercel cron and the
+// GitHub Actions workflow as additional (if unreliable) backups.
+const BACKGROUND_INGEST_INTERVAL_MS = 10 * 60_000;
+
+function triggerBackgroundIngest() {
+  withCache(
+    "stream:background-ingest-trigger",
+    BACKGROUND_INGEST_INTERVAL_MS,
+    async () => {
+      runIngest().catch((err) => {
+        console.error(`Background ingest (from stream) failed: ${err}`);
+      });
+      return true;
+    },
+  ).catch(() => {
+    // Best-effort — a failed trigger just means we try again next connection.
+  });
+}
+
 function toSseMessage(event: string, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
@@ -28,6 +57,8 @@ export async function GET(req: NextRequest) {
   const encoder = new TextEncoder();
   const sinceParam = req.nextUrl.searchParams.get("since");
   let lastId = sinceParam ? Number(sinceParam) : 0;
+
+  triggerBackgroundIngest();
 
   const stream = new ReadableStream({
     async start(controller) {
