@@ -5,57 +5,92 @@ independent media reliability/bias trackers — mainly [Media Bias/Fact
 Check](https://mediabiasfactcheck.com) (MBFC), with
 [AllSides](https://www.allsides.com) and [Ad Fontes
 Media](https://adfontesmedia.com) as cross-checks where MBFC and AllSides
-disagreed. Checked 2026-09-04.
+disagreed. Two review passes: an initial check (2026-09-04) and a second,
+stricter pass the same day after being asked to apply the standard "would
+a responsible American third party consider this outlet reliable" —
+which surfaced one source (Al Jazeera) that passed the first pass's bar
+but not the second.
 
 **"Unbiased" is not a real property any single news outlet has.** Every
-source below carries some lean per these trackers — that's normal, not
-disqualifying. What this app relies on instead:
+source below carries some editorial lean per these trackers — that alone
+is normal, not disqualifying. A bias *lean* and a *trust* problem are
+different things, and this list draws that line explicitly: sources were
+removed for something more concrete than "leans left" or "leans
+right" — undisclosed/contested ownership, a documented editorial-
+independence failure, or an active government/legal entanglement a
+careful reader would reasonably weigh. What's left leans on:
 
 1. **Diversity** — many countries, a mix of left-center and right-center
    outlets, state-funded and privately-owned, so no single editorial
    lean dominates the feed.
-2. **A factual-reporting floor** — sources with a documented pattern of
-   failed fact-checks, plagiarism, or undisclosed ownership were removed
-   outright, not just noted.
-3. **Disclosure** — ownership/funding is listed for every source below,
+2. **A trust floor**, not just a factual-accuracy floor — see "Removed"
+   below for the difference.
+3. **Disclosure** — ownership/funding is listed for every source kept,
    including the state-funded public broadcasters (DW, France24, CNA),
-   because who pays for a newsroom is relevant context for reading it,
-   even when editorial independence is real and well-documented.
+   because who pays for a newsroom is relevant context even when
+   editorial independence is real and legally protected.
 
-## Removed after this review
+## The wire-service gap (checked, not available)
 
-| Source | Reason |
-|---|---|
-| MercoPress | MBFC rates it **Questionable** / **Low Credibility** — "poor sourcing techniques that border on plagiarism," Mixed factual reporting. Fails the floor outright. |
-| Middle East Eye | MBFC docks its factual rating specifically for **opaque ownership**; independent reporting (HonestReporting and others) alleges its controlling figure has ties to Al-Quds TV, a broadcaster widely identified as Hamas-affiliated. This source would feed directly into Israel-Palestine coverage — a conflict-of-interest risk too large to accept regardless of its otherwise "Mostly Factual" score. |
+Reuters, AP, and AFP are the outlets working journalists themselves rank
+as the trust benchmark — a 2024 Pew survey found 78% of journalists cite
+wire services as their most-trusted source for breaking international
+news. All three were checked for a usable free public RSS feed:
 
-Neither was replaced with a same-region substitute picked under time
-pressure — an honest coverage gap beats backfilling with an unvetted
-source. See `src/lib/sources/rss.ts`'s own comments for the same note.
+- **Reuters**: `401 Unauthorized` — feed requires a paid API/syndication
+  account now.
+- **AP**: `404` — no public feed found at their documented paths.
+- **AFP**: has an `rss.xml`, but it serves AFP's own corporate/press
+  announcements (e.g. conference recaps), not a news wire — not usable.
+
+This is a real gap in the source list, not one papered over with a
+weaker substitute. If a paid Reuters/AP syndication feed is ever added
+later, it should be the first thing wired in.
+
+## Removed
+
+| Source | Why | Category |
+|---|---|---|
+| MercoPress | MBFC rates it **Questionable** / **Low Credibility** — "poor sourcing techniques that border on plagiarism." | Factual-accuracy failure |
+| Middle East Eye | MBFC docks its factual rating specifically for **opaque ownership**; independent reporting (HonestReporting and others) alleges its controlling figure has ties to Al-Quds TV, a broadcaster widely identified as Hamas-affiliated. Would have fed directly into Israel-Palestine coverage. | Ownership / conflict of interest |
+| Al Jazeera | Left-Center/Mixed-to-Neutral on bias trackers (raters disagree) — that alone wouldn't have been disqualifying. What is: AJ+, Al Jazeera's US-facing digital arm, was ordered by the **US Department of Justice in 2020 to register under FARA** (the Foreign Agents Registration Act) over political activity on behalf of Qatar, a bipartisan Congressional group (Cruz, Rubio, Zeldin, and others) has continued pushing for enforcement, and the parent network is Qatari state-funded. Editorial independence is contested by the network's own US legal history, not just by critics' opinion. | Active US legal/regulatory concern |
+| South China Morning Post | Alibaba Group-owned since 2016. MBFC and multiple outside reviewers (Lowy Institute, Asia Sentinel) document a post-acquisition editorial mission shift toward "improving China's image overseas," with softer coverage of Hong Kong pro-democracy protests and Xinjiang specifically. MBFC: Left-Center, MIXED factual, MEDIUM credibility. | Ownership / documented editorial shift |
+| Times of India | MBFC: Right-Center, **MIXED** factual reporting — four failed fact-checks, story selection favoring the ruling party. The Hindu covers the same country at a meaningfully higher reliability tier and is kept instead. | Factual-accuracy — better same-country alternative exists |
+| Rio Times | Not independently rated by MBFC, AllSides, or Ad Fontes at all. No red flags found in this review, but nothing to point to either — under the "would a third party vouch for this" standard, an unrated source can't clear the bar the same way a rated one can. | Unverifiable |
+
+None of these were backfilled with a same-region substitute picked under
+time pressure — Al-Monitor (below) is the one deliberate exception,
+found specifically because losing both Al Jazeera and Middle East Eye
+would have left Middle East coverage entirely one-sided (Israeli-founded
+Times of Israel only). Everywhere else, an honest coverage gap beats
+backfilling with an unvetted source.
 
 ## Kept, with disclosed ownership and rating
 
 | Source | Ownership / funding | MBFC bias | MBFC factual rating | Notes |
 |---|---|---|---|---|
-| BBC | UK public broadcaster (licence-fee funded, editorially independent) | Least Biased / Center | Very High | Widely used as a reliability benchmark by other trackers. |
-| Al Jazeera English | State of Qatar (via Qatari royal family funding) | Left-Center (MBFC) / Neutral (Ad Fontes) — raters disagree | Mixed (MBFC) | MBFC flags "misleading extreme editorial bias that favors Qatar" on Qatar/Gulf-adjacent stories specifically; Ad Fontes rates it neutral/reliable. Kept for its genuinely distinct vantage point on Middle East coverage, disclosed as Qatar-funded. |
+| BBC | UK public broadcaster (licence-fee funded, editorially independent) | Least Biased / Center | Very High | Used as a reliability benchmark by other trackers. |
 | The Guardian | UK, owned by the Scott Trust (non-profit, no controlling shareholder) | Left-Center | High | |
-| New York Times | US, publicly traded, Sulzberger family controlling stake | Left-Center | High | Failed fact-checks noted by MBFC were on opinion pieces, not news reporting. |
+| New York Times | US, publicly traded, Sulzberger family controlling stake | Left-Center | High | Failed fact-checks MBFC notes were on opinion pieces, not news reporting. |
 | NPR | US, member-station public radio (federal/listener/corporate funding mix) | Left-Center | High | |
 | CBS News | US, Paramount Skydance | Right-Center | Mostly Factual | MBFC notes a recent rightward editorial shift under new leadership (Bari Weiss) as of this rating. |
-| DW (Deutsche Welle) | German federal government (public broadcaster, statutory editorial independence under the Deutsche Welle Act) | — (not separately tracked by MBFC under this exact name) | Good factual/sourcing record per third-party reviews | Disclosed as state-funded; legally protected editorial independence, comparable model to BBC. |
+| DW (Deutsche Welle) | German federal government (public broadcaster, statutory editorial independence under the Deutsche Welle Act) | Not separately tracked by MBFC under this exact name | Strong factual/sourcing record per third-party reviews | State-funded with legally protected editorial independence — same model as BBC/NPR, a democracy with a free press, not a comparable situation to Al Jazeera's FARA question. |
 | France 24 | French state, via France Médias Monde (public holding company) | Least Biased | High Credibility | Same state-funded/editorially-independent model as DW. |
 | Euronews | Alpac Capital (Portugal investment fund, 88%) + government-linked broadcasters (12%); receives some European Commission subsidy | Left-Center | Mostly Factual | MBFC flags subsidy-linked content as a factor keeping it at Mostly (not High) Factual. |
 | CNA (Channel News Asia) | Mediacorp, majority state-owned via Singapore's Temasek | Least Biased | High | Reporters Without Borders flags broader press-freedom/self-censorship pressure in Singapore's media environment generally; CNA's own fact-check record is clean per MBFC. |
-| South China Morning Post | Alibaba Group (acquired 2016) | Left-Center | Mixed / Medium Credibility | Post-acquisition editorial shift toward "improving China's image overseas" is documented; softer coverage of Hong Kong/Xinjiang-sensitive topics noted by multiple outside reviewers. Kept for its on-the-ground Hong Kong/China desk, but the weakest-rated source still in the list — read with that in mind. |
-| Times of India | Times Group (Sahu Jain family) | Right-Center | Mixed | Four failed fact-checks per MBFC; story selection favors the ruling party. The Hindu (below) is the more reliable India source. |
-| The Hindu | The Hindu Group / Kasturi & Sons | Left-Center | Mostly Factual / High Credibility | |
-| Times of Israel | Independent (chairman Seth Klarman), ad/subscription/donation funded | Left-Center | High | |
-| AllAfrica | AllAfrica Global Media | Least Biased | High | Aggregator distributing wire content from African publishers; largest English-language African news distributor. |
+| The Hindu | The Hindu Group / Kasturi & Sons (independent family ownership) | Left-Center | Mostly Factual / High Credibility | One of India's oldest (1878) and most internationally cited papers of record. |
+| Al-Monitor | Al Monitor LLC — founded by Arab-American entrepreneur Jamal Daniel, Washington DC-based, partnered with North Base Media | Left-Center | HIGH Credibility / HIGH factual | Added in the second review pass specifically to give Middle East coverage a non-Israeli, Arab-world-sourced vantage point without Al Jazeera's FARA history. |
+| Times of Israel | Independent (chairman Seth Klarman, US-based Baupost Group founder), ad/subscription/donation funded | Left-Center | High | |
+| AllAfrica | AllAfrica Global Media | Least Biased | High | Largest English-language distributor of African-published news; aggregates from African outlets rather than being a single newsroom. |
 | Premium Times (Nigeria) | Premium Times Services Ltd. (Dapo Olorunyomi) | Left-Center | Mostly Factual | MBFC notes weaker sourcing technique but a clean fact-check record; known for anti-corruption/accountability reporting. |
 | Africanews | Owned by Euronews (majority-owned by Media Globe Networks / Naguib Sawiris) | Left-Center | Mostly Factual | |
 | Buenos Aires Times | Editorial Perfil SA (Jorge Fontevecchia) | Right-Center | High Credibility | |
-| Rio Times | Independent (editor Matthias Camenzind) | Not rated by MBFC/AllSides/Ad Fontes | Not rated | No red flags found in this review, but no independent verification exists either — treat with more caution than the rated sources above. |
+
+16 sources, spanning North America, Europe, the Middle East (both an
+Israeli and an Arab-world vantage point), South/Southeast Asia, Africa,
+and Latin America (Argentina only, after Rio Times's removal and
+MercoPress's earlier removal — a real gap; Brazil/wider South America
+coverage now depends on the global wire outlets happening to cover it).
 
 ## Non-editorial sources (not applicable)
 
@@ -67,20 +102,21 @@ licensing terms are tracked separately in `src/lib/sourceRegistry.ts`.
 
 **GDELT** is an aggregator, not a publisher — it indexes tens of
 thousands of outlets globally rather than having its own editorial
-stance. Its own documented limitations (see the GDELT Project's blog):
-a geographic bias toward event coverage physically proximate to
-Western/English-language newsrooms, a US-domestic skew, and roughly
-55% field-level accuracy with ~20% data redundancy in its raw event
+stance. Its own documented limitations (per the GDELT Project's blog): a
+geographic bias toward event coverage physically proximate to
+Western/English-language newsrooms, a US-domestic skew, and roughly 55%
+field-level accuracy with ~20% data redundancy in its raw event
 extraction. This app only uses GDELT's article-search API (headline +
 link + snippet, routed through the same keyword classifier as everything
-else) — not its pre-extracted event/tone fields — which avoids the
-worst of that accuracy problem, but the geographic/language skew still
-shapes what shows up in results for the five flashpoint queries.
+else) — not its pre-extracted event/tone fields — which avoids the worst
+of that accuracy problem, but the geographic/language skew still shapes
+what shows up for the five flashpoint queries.
 
 ## Revisiting this
 
-This isn't a one-time check — outlet ownership and editorial direction
-change (SCMP's post-Alibaba shift and CBS's recent leadership change are
-both examples already reflected above). Worth re-checking every few
-months, and immediately if a source starts showing up disproportionately
-for one country/category or a reader flags something that looks off.
+This isn't a one-time check — outlet ownership, funding, and legal status
+change (SCMP's post-Alibaba shift, CBS's recent leadership change, and
+Al Jazeera's FARA history are all examples already reflected above).
+Worth re-checking every few months, and immediately if a source starts
+showing up disproportionately for one country/category or a reader flags
+something that looks off.

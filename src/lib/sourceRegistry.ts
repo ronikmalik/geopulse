@@ -42,7 +42,7 @@ export const SOURCE_REGISTRY: SourceLicenseInfo[] = [
   {
     id: "rss",
     provider:
-      "19 outlet RSS feeds across North America, Europe, Asia-Pacific, the Middle East, Africa, and Latin America — see src/lib/sources/rss.ts for the full list and docs/SOURCE_CREDIBILITY.md for the per-outlet bias/reliability vetting",
+      "16 outlet RSS feeds across North America, Europe, Asia-Pacific, the Middle East, Africa, and Latin America — see src/lib/sources/rss.ts for the full list and docs/SOURCE_CREDIBILITY.md for the per-outlet bias/reliability vetting",
     url: "https://www.bbci.co.uk/news/10318089",
     license: "Publisher-specific — RSS provided for personal/non-commercial syndication",
     commercialUse: "unclear",

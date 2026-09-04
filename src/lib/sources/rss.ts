@@ -8,27 +8,39 @@ const parser = new Parser({
 
 // Global-wire baseline plus one real, English-language outlet per
 // underserved region. Every source here was checked against independent
-// reliability/bias trackers (Media Bias/Fact Check, AllSides, Ad Fontes)
-// before being kept — see docs/SOURCE_CREDIBILITY.md for the full
-// per-outlet writeup (ownership, funding, bias lean, factual-reporting
-// rating, citations). Two candidates that made it into an earlier version
-// of this list failed that check and were removed:
-//   - MercoPress: MBFC rates it "Questionable" / LOW CREDIBILITY, citing
-//     poor sourcing that "borders on plagiarism."
-//   - Middle East Eye: MBFC docks its factual rating specifically for
-//     opaque ownership; independent reporting alleges its owner has ties
-//     to a Hamas-affiliated broadcaster. For a source that would directly
-//     feed Israel-Palestine coverage, that's disqualifying regardless of
-//     its Mostly-Factual score.
-// "Unbiased" isn't a real property any single outlet has — every source
-// here still carries SOME lean per these trackers. The mitigation is
-// diversity (many countries, both left-center and right-center outlets,
-// state-funded and independent) plus disclosure (docs/SOURCE_CREDIBILITY.md),
-// not a false claim that any one of these is neutral.
+// reliability/bias trackers (Media Bias/Fact Check, AllSides, Ad Fontes) —
+// see docs/SOURCE_CREDIBILITY.md for the full per-outlet writeup
+// (ownership, funding, bias lean, factual-reporting rating, citations)
+// and, more importantly, for WHY each removal below was removed — a bias
+// *lean* alone isn't disqualifying (every outlet has one), but these
+// failed on something more concrete: undisclosed/contested ownership,
+// a documented editorial-independence problem, or an active US legal/
+// regulatory concern that a careful reader would reasonably weigh:
+//   - MercoPress: MBFC rates it "Questionable" / LOW CREDIBILITY — sourcing
+//     that "borders on plagiarism."
+//   - Middle East Eye: opaque ownership; independent reporting alleges its
+//     controlling figure has ties to a Hamas-affiliated broadcaster.
+//   - Al Jazeera: Qatari state funding aside, AJ+ (its US-facing arm) was
+//     ordered by the DOJ in 2020 to register under FARA (foreign agent
+//     disclosure) and a bipartisan Congressional push (Cruz, Rubio, Zeldin
+//     among others) has continued pressing the issue — an active US
+//     legal/regulatory question, not just a bias-tracker lean.
+//   - South China Morning Post: Alibaba-owned since 2016; MBFC and
+//     multiple outside reviewers document a post-acquisition editorial
+//     shift toward softer coverage of Hong Kong/Xinjiang-sensitive topics.
+//   - Times of India: MIXED factual rating from MBFC (four failed fact
+//     checks) and story selection favoring the ruling party — The Hindu
+//     covers the same country at a meaningfully higher reliability tier.
+//   - Rio Times: not independently rated by MBFC/AllSides/Ad Fontes at
+//     all — no red flags found, but nothing to point to either.
+// Reuters, AP, and AFP — the wire services actually considered the
+// trust benchmark by working journalists — were checked and do NOT have
+// a usable free public RSS feed anymore (Reuters: 401, AP: 404, AFP's
+// feed serves the agency's own corporate press releases, not a news
+// wire). That's an honest gap, not something substituted around.
 export const RSS_FEEDS: { name: string; url: string }[] = [
   // Global wire / North America
   { name: "bbc-world", url: "http://feeds.bbci.co.uk/news/world/rss.xml" },
-  { name: "al-jazeera", url: "https://www.aljazeera.com/xml/rss/all.xml" },
   { name: "guardian-world", url: "https://www.theguardian.com/world/rss" },
   {
     name: "nyt-world",
@@ -48,16 +60,15 @@ export const RSS_FEEDS: { name: string; url: string }[] = [
     name: "cna-world",
     url: "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml",
   },
-  { name: "scmp", url: "https://www.scmp.com/rss/91/feed" },
-  {
-    name: "times-of-india",
-    url: "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
-  },
   {
     name: "the-hindu",
     url: "https://www.thehindu.com/news/national/feeder/default.rss",
   },
-  // Middle East
+  // Middle East — Washington DC-based, Arab-American-founded, HIGH
+  // credibility/HIGH factual per MBFC, no foreign-agent registration
+  // question. Times of Israel gives the Israeli vantage point; this
+  // gives the Arab-world one, without Al Jazeera's baggage.
+  { name: "al-monitor", url: "https://www.al-monitor.com/rss.xml" },
   { name: "times-of-israel", url: "https://www.timesofisrael.com/feed/" },
   // Africa
   {
@@ -68,10 +79,6 @@ export const RSS_FEEDS: { name: string; url: string }[] = [
   { name: "africanews", url: "https://www.africanews.com/feed/rss" },
   // Latin America
   { name: "buenos-aires-times", url: "https://www.batimes.com.ar/feed" },
-  // Not independently rated by any major fact-checking org (no red flags
-  // found either) — disclosed as such in docs/SOURCE_CREDIBILITY.md
-  // rather than presented as equivalently vetted to the rated sources above.
-  { name: "rio-times", url: "https://riotimesonline.com/feed/" },
 ];
 
 export async function fetchRssFeed(feed: {
