@@ -44,8 +44,29 @@ interface TelegramPost {
   publishedAt: Date;
 }
 
+// Postgres text columns reject a handful of things browsers tolerate fine:
+// a literal NUL byte, other C0 control characters, and lone (unpaired)
+// UTF-16 surrogates — any of which fails the *whole* batch insert in
+// ingest.ts (rows are inserted together in one statement), not just this
+// one row. A live run hit exactly this. Numeric HTML entities can decode
+// to codepoints that produce an unpaired surrogate if malformed, so this
+// runs after entity decoding, not before. Iterating by code point (rather
+// than a regex character class) sidesteps having to embed literal control
+// characters in source at all.
+function sanitizeForStorage(text: string): string {
+  let out = "";
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0;
+    const isTabOrNewline = code === 9 || code === 10 || code === 13;
+    const isControlChar = code < 32 || code === 127;
+    if (isControlChar && !isTabOrNewline) continue;
+    out += ch;
+  }
+  return out.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
+}
+
 function decodeEntities(html: string): string {
-  return html
+  const decoded = html
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<[^>]+>/g, "")
     .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
@@ -56,6 +77,7 @@ function decodeEntities(html: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&nbsp;/g, " ")
     .trim();
+  return sanitizeForStorage(decoded);
 }
 
 function parseChannelHtml(html: string): TelegramPost[] {
@@ -104,13 +126,24 @@ async function fetchChannelHtml(handle: string): Promise<string> {
 // reproduction) in src/lib/sources/rss.ts.
 const EXCERPT_MAX_CHARS = 280;
 
+// A live run found `sanitizeForStorage`'s unpaired-surrogate stripping
+// getting undone right afterward: plain `.slice()` counts UTF-16 code
+// units, so cutting at exactly N chars can land inside a surrogate pair
+// (most emoji) and leave a dangling half behind — reintroducing the exact
+// problem sanitizeForStorage exists to prevent. Array.from splits a string
+// into whole code points, so slicing the array can't split a pair.
+function truncateSafely(text: string, maxChars: number): string {
+  const chars = Array.from(text);
+  return chars.length > maxChars ? chars.slice(0, maxChars).join("") : text;
+}
+
 function toDirectItem(post: TelegramPost, config: TelegramChannelConfig): DirectItem | null {
   const centroid = COUNTRY_CENTROIDS[config.country];
   if (!centroid) return null;
 
   const excerpt =
     post.text.length > EXCERPT_MAX_CHARS
-      ? `${post.text.slice(0, EXCERPT_MAX_CHARS)}…`
+      ? `${truncateSafely(post.text, EXCERPT_MAX_CHARS)}…`
       : post.text;
 
   // See docs/TELEGRAM_SOURCES.md "Framing discipline" — always named,
@@ -120,7 +153,7 @@ function toDirectItem(post: TelegramPost, config: TelegramChannelConfig): Direct
   return {
     source: `telegram:${config.handle}`,
     url: `https://t.me/${post.id}`,
-    title: summary.length > 120 ? `${summary.slice(0, 117)}...` : summary,
+    title: summary.length > 120 ? `${truncateSafely(summary, 117)}...` : summary,
     summary,
     category: config.category,
     location: config.label,
