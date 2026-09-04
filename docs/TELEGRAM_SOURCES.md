@@ -83,6 +83,28 @@ expansion, not skipped silently.
   v1 pending a specific decision on whether militia self-reporting belongs
   in this product at all.
 
+## Translation
+
+Six of the nine channels post in Ukrainian, Russian, or Farsi. Verified
+before implementing (2026-09-04) that no free/keyless option actually
+works: the unofficial Google Translate endpoint is explicitly disallowed
+in Google's own `robots.txt` (`Disallow: /translate_a/`) and its server
+live-rejected an automated request as bot traffic during testing; MyMemory
+(free, keyless) returned literal garbage — confirmed at the raw-byte
+level, not a display bug — for both a Ukrainian and a Farsi test string;
+the public LibreTranslate instance now requires a paid key, and its free
+community mirrors were down or unreachable. DeepL was ruled out separately
+— it doesn't support Farsi at all.
+
+`src/lib/translate.ts` uses the Cloud Translation API v2 ("Basic") via a
+simple API key (`GOOGLE_TRANSLATE_API_KEY`) — no OAuth/service account.
+Same soft-no-op pattern as `FIRMS_MAP_KEY`: translation is skipped
+(original-language text stored as-is) until the key is set, so this
+shipped without waiting on it. Every channel's excerpts are translated in
+one batched request per fetch, not one call per post. A translated
+summary is explicitly marked "[translated from Ukrainian]" (etc.) rather
+than presented as the channel's own English phrasing.
+
 ## Framing discipline
 
 Every Telegram-derived event's summary is prefixed with the channel's

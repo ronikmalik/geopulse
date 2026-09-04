@@ -24,6 +24,7 @@ import type {
   ForexResponse,
   CftcResponse,
   CyberResponse,
+  TelegramLayerResponse,
 } from "@/lib/dataLayerTypes";
 import type { GeoEvent } from "@/lib/types";
 
@@ -155,6 +156,11 @@ export default function Home() {
     DATA_LAYER_POLL_MS.cyber,
     activeDataLayers.has("cyber"),
   );
+  const telegramLayer = useLiveLayer<TelegramLayerResponse>(
+    "/api/layers/telegram",
+    DATA_LAYER_POLL_MS.telegram,
+    activeDataLayers.has("telegram"),
+  );
 
   // Forex is the app's headline feature, not an opt-in layer — it polls
   // continuously rather than gating behind a checkbox.
@@ -211,6 +217,7 @@ export default function Home() {
     gdp: gdpLayer.data,
     population: populationLayer.data,
     cyber: cyberLayer.data,
+    telegram: telegramLayer.data,
     forex: forexLayer.data,
     cftc: cftcLayer.data,
     connectionStatus: status,

@@ -19,6 +19,7 @@ import type {
   GdpResponse,
   PopulationResponse,
   CyberResponse,
+  TelegramLayerResponse,
 } from "@/lib/dataLayerTypes";
 
 interface LayersDashboardProps {
@@ -32,6 +33,7 @@ interface LayersDashboardProps {
   gdp: GdpResponse | null;
   population: PopulationResponse | null;
   cyber: CyberResponse | null;
+  telegram: TelegramLayerResponse | null;
 }
 
 const LAYER_DESCRIPTIONS: Partial<Record<Category, string>> = {
@@ -72,6 +74,7 @@ export default function LayersDashboard({
   gdp,
   population,
   cyber,
+  telegram,
 }: LayersDashboardProps) {
   function renderPreview(id: DataLayerId) {
     if (id === "flights" && flights) {
@@ -131,6 +134,25 @@ export default function LayersDashboard({
                 )}
               </span>
               <span className="shrink-0">{v.dateAdded}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    if (id === "telegram" && telegram) {
+      return (
+        <div className="mt-1.5 space-y-1.5 text-[11px] text-neutral-500">
+          {telegram.posts.slice(0, 5).map((p) => (
+            <div key={p.url}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-neutral-400">{p.channelLabel}</span>
+                {p.translated && (
+                  <span className="shrink-0 text-[9px] uppercase tracking-wider text-sky-500">
+                    translated
+                  </span>
+                )}
+              </div>
+              <p className="line-clamp-2">{p.text}</p>
             </div>
           ))}
         </div>

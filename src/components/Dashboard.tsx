@@ -20,6 +20,7 @@ import type {
   ForexResponse,
   CftcResponse,
   CyberResponse,
+  TelegramLayerResponse,
 } from "@/lib/dataLayerTypes";
 
 export type DashboardTab = "feed" | "risk" | "layers" | "forex" | "trends";
@@ -61,6 +62,7 @@ interface DashboardProps {
   gdp: GdpResponse | null;
   population: PopulationResponse | null;
   cyber: CyberResponse | null;
+  telegram: TelegramLayerResponse | null;
 
   forex: ForexResponse | null;
   cftc: CftcResponse | null;
@@ -172,6 +174,7 @@ export default function Dashboard(props: DashboardProps) {
             gdp={props.gdp}
             population={props.population}
             cyber={props.cyber}
+            telegram={props.telegram}
           />
         )}
         {activeTab === "forex" && (

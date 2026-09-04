@@ -15,7 +15,7 @@ export const GLOBE_DATA_LAYERS = [
   "commercial-flights",
   "weather",
 ] as const;
-export const TICKER_DATA_LAYERS = ["gdp", "population", "cyber"] as const;
+export const TICKER_DATA_LAYERS = ["gdp", "population", "cyber", "telegram"] as const;
 
 export const DATA_LAYERS = [...GLOBE_DATA_LAYERS, ...TICKER_DATA_LAYERS] as const;
 
@@ -34,6 +34,7 @@ export const DATA_LAYER_LABELS: Record<DataLayerId, string> = {
   gdp: "Economic Exposure (GDP)",
   population: "Population Exposure",
   cyber: "Actively Exploited Vulnerabilities",
+  telegram: "Telegram OSINT (raw channel feed)",
 };
 
 export const DATA_LAYER_DESCRIPTIONS: Record<DataLayerId, string> = {
@@ -45,6 +46,7 @@ export const DATA_LAYER_DESCRIPTIONS: Record<DataLayerId, string> = {
   gdp: "World Bank — GDP by country. Structural context for how much economic exposure a threat in that country represents.",
   population: "World Bank — population by country. Structural context for how many people a threat in that country could affect.",
   cyber: "CISA KEV — vulnerabilities with confirmed active exploitation, most recent first. Global feed (no country attribution yet) for the Cyber & Technology pillar.",
+  telegram: "The raw feed from the 9 Telegram channels also feeding scored events — every recent post, not just the ones that made it into the Pulse feed. See docs/TELEGRAM_SOURCES.md for the terms-of-service tradeoff this source involves.",
 };
 
 // Poll intervals per layer — long enough to respect free-tier rate limits,
@@ -56,4 +58,8 @@ export const DATA_LAYER_POLL_MS: Record<DataLayerId, number> = {
   gdp: 60 * 60_000,
   population: 60 * 60_000,
   cyber: 30 * 60_000,
+  // Same 5-minute floor as weather — frequent enough to feel live without
+  // adding meaningfully to the request volume concern documented in
+  // docs/TELEGRAM_SOURCES.md (this layer's own route also caches).
+  telegram: 5 * 60_000,
 };

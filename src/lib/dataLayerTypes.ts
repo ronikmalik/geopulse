@@ -45,3 +45,16 @@ export interface CftcResponse {
 export interface CyberResponse {
   vulnerabilities: KevEntry[];
 }
+
+export interface TelegramLayerPost {
+  channelLabel: string;
+  country: string;
+  url: string;
+  text: string;
+  translated: boolean;
+  publishedAt: string;
+}
+
+export interface TelegramLayerResponse {
+  posts: TelegramLayerPost[];
+}

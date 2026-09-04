@@ -1,6 +1,7 @@
 import type { Category } from "../categories";
 import type { DirectItem } from "./direct";
 import { COUNTRY_CENTROIDS } from "../countryCentroids";
+import { translateBatch } from "../translate";
 
 // Public-channel scraping via Telegram's own no-auth web preview
 // (t.me/s/<channel>) — no bot token, no login, never touches groups or
@@ -21,21 +22,22 @@ export interface TelegramChannelConfig {
   label: string; // shown to the reader, e.g. "Rybar (pro-Russian military channel)"
   country: string; // ISO 3166-1 alpha-2
   category: Category;
+  language: string; // ISO 639-1 source language, or "en" to skip translation
 }
 
 // See docs/TELEGRAM_SOURCES.md for how this list was built (sourced from
 // ISW's own published citations, not guessed) and the reasoning for what
 // was deliberately left out.
 export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
-  { handle: "GeneralStaffZSU", label: "Ukraine General Staff (official)", country: "UA", category: "russia-ukraine" },
-  { handle: "kpszsu", label: "Ukrainian Air Force (official)", country: "UA", category: "russia-ukraine" },
-  { handle: "mod_russia", label: "Russian Ministry of Defense (official)", country: "RU", category: "russia-ukraine" },
-  { handle: "dsns_telegram", label: "Ukraine State Emergency Service (official)", country: "UA", category: "natural-disaster" },
-  { handle: "rybar", label: "Rybar (pro-Russian military channel, unverified)", country: "RU", category: "russia-ukraine" },
-  { handle: "wargonzo", label: "WarGonzo (pro-Russian military channel, unverified)", country: "RU", category: "russia-ukraine" },
-  { handle: "iribnews", label: "IRIB — Iran state broadcaster", country: "IR", category: "us-iran" },
-  { handle: "farsna", label: "Fars News Agency (Iran state-affiliated)", country: "IR", category: "us-iran" },
-  { handle: "presstv", label: "Press TV (Iran state media)", country: "IR", category: "us-iran" },
+  { handle: "GeneralStaffZSU", label: "Ukraine General Staff (official)", country: "UA", category: "russia-ukraine", language: "uk" },
+  { handle: "kpszsu", label: "Ukrainian Air Force (official)", country: "UA", category: "russia-ukraine", language: "uk" },
+  { handle: "mod_russia", label: "Russian Ministry of Defense (official)", country: "RU", category: "russia-ukraine", language: "ru" },
+  { handle: "dsns_telegram", label: "Ukraine State Emergency Service (official)", country: "UA", category: "natural-disaster", language: "uk" },
+  { handle: "rybar", label: "Rybar (pro-Russian military channel, unverified)", country: "RU", category: "russia-ukraine", language: "ru" },
+  { handle: "wargonzo", label: "WarGonzo (pro-Russian military channel, unverified)", country: "RU", category: "russia-ukraine", language: "ru" },
+  { handle: "iribnews", label: "IRIB — Iran state broadcaster", country: "IR", category: "us-iran", language: "fa" },
+  { handle: "farsna", label: "Fars News Agency (Iran state-affiliated)", country: "IR", category: "us-iran", language: "fa" },
+  { handle: "presstv", label: "Press TV (Iran state media)", country: "IR", category: "us-iran", language: "en" },
 ];
 
 interface TelegramPost {
@@ -137,18 +139,35 @@ function truncateSafely(text: string, maxChars: number): string {
   return chars.length > maxChars ? chars.slice(0, maxChars).join("") : text;
 }
 
-function toDirectItem(post: TelegramPost, config: TelegramChannelConfig): DirectItem | null {
+const LANGUAGE_NAMES: Record<string, string> = {
+  uk: "Ukrainian",
+  ru: "Russian",
+  fa: "Farsi",
+};
+
+function excerptOf(text: string): string {
+  return text.length > EXCERPT_MAX_CHARS
+    ? `${truncateSafely(text, EXCERPT_MAX_CHARS)}…`
+    : text;
+}
+
+function toDirectItem(
+  post: TelegramPost,
+  excerpt: string,
+  translated: boolean,
+  config: TelegramChannelConfig,
+): DirectItem | null {
   const centroid = COUNTRY_CENTROIDS[config.country];
   if (!centroid) return null;
 
-  const excerpt =
-    post.text.length > EXCERPT_MAX_CHARS
-      ? `${truncateSafely(post.text, EXCERPT_MAX_CHARS)}…`
-      : post.text;
-
   // See docs/TELEGRAM_SOURCES.md "Framing discipline" — always named,
-  // never presented as a neutral wire report.
-  const summary = `${config.label}: ${excerpt}`;
+  // never presented as a neutral wire report. Machine-translated text is
+  // marked as such rather than presented as if it were the channel's own
+  // English phrasing — see docs/OSINT_SOURCES.md's Telegram section for
+  // why (GOOGLE_TRANSLATE_API_KEY gates this; text stays in its original
+  // language, untranslated, if the key isn't set).
+  const translationNote = translated ? ` [translated from ${LANGUAGE_NAMES[config.language] ?? config.language}]` : "";
+  const summary = `${config.label}${translationNote}: ${excerpt}`;
 
   return {
     source: `telegram:${config.handle}`,
@@ -170,7 +189,31 @@ export async function fetchTelegramChannel(
 ): Promise<DirectItem[]> {
   const html = await fetchChannelHtml(config.handle);
   const posts = parseChannelHtml(html);
+  if (posts.length === 0) return [];
+
+  const excerpts = posts.map((p) => excerptOf(p.text));
+
+  // Batch-translate the whole channel's excerpts in one request rather
+  // than per-post — see src/lib/translate.ts. Soft-degrades to the
+  // original-language excerpts (translated: false) if no key is
+  // configured, the API call fails, or the channel is already English
+  // (presstv) — never blocks ingest on translation being available.
+  let finalExcerpts = excerpts;
+  let translated = false;
+  if (config.language !== "en") {
+    const result = await translateBatch(excerpts, config.language).catch(() => null);
+    if (result) {
+      finalExcerpts = result.map((t, i) =>
+        // Translation runs on the already-sanitized excerpt, but the API
+        // response itself needs the same control-char/surrogate cleanup
+        // applied before it can safely reach Postgres.
+        sanitizeForStorage(t) || excerpts[i],
+      );
+      translated = true;
+    }
+  }
+
   return posts
-    .map((p) => toDirectItem(p, config))
+    .map((p, i) => toDirectItem(p, finalExcerpts[i], translated, config))
     .filter((item): item is DirectItem => item !== null);
 }
