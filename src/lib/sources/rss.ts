@@ -6,18 +6,25 @@ const parser = new Parser({
   headers: { "User-Agent": "geopulse-globe/1.0" },
 });
 
-// Global-wire baseline (unchanged) plus one real, English-language outlet
-// per underserved region — added because the original list leaned heavily
-// Anglo/European and left large swaths of the world (Africa, Latin
-// America, South Asia beyond wire coverage) with near-zero direct
-// signal. Every URL below was verified live (HTTP 200 + a real <rss>/
-// <feed> root) before being added — a guessed feed URL fails silently
-// (fetchRssFeed's catch just returns []), which reads as "this region is
-// quiet" when it's actually "this region was never actually being
-// checked." A few regions (East Africa specifically, NHK World's actual
-// feed URL, Arab News) were tried and dropped rather than forced in —
-// they either 403'd (bot protection) or 404'd and no working URL was
-// found; better to leave a gap honestly than wire up a dead feed.
+// Global-wire baseline plus one real, English-language outlet per
+// underserved region. Every source here was checked against independent
+// reliability/bias trackers (Media Bias/Fact Check, AllSides, Ad Fontes)
+// before being kept — see docs/SOURCE_CREDIBILITY.md for the full
+// per-outlet writeup (ownership, funding, bias lean, factual-reporting
+// rating, citations). Two candidates that made it into an earlier version
+// of this list failed that check and were removed:
+//   - MercoPress: MBFC rates it "Questionable" / LOW CREDIBILITY, citing
+//     poor sourcing that "borders on plagiarism."
+//   - Middle East Eye: MBFC docks its factual rating specifically for
+//     opaque ownership; independent reporting alleges its owner has ties
+//     to a Hamas-affiliated broadcaster. For a source that would directly
+//     feed Israel-Palestine coverage, that's disqualifying regardless of
+//     its Mostly-Factual score.
+// "Unbiased" isn't a real property any single outlet has — every source
+// here still carries SOME lean per these trackers. The mitigation is
+// diversity (many countries, both left-center and right-center outlets,
+// state-funded and independent) plus disclosure (docs/SOURCE_CREDIBILITY.md),
+// not a false claim that any one of these is neutral.
 export const RSS_FEEDS: { name: string; url: string }[] = [
   // Global wire / North America
   { name: "bbc-world", url: "http://feeds.bbci.co.uk/news/world/rss.xml" },
@@ -52,7 +59,6 @@ export const RSS_FEEDS: { name: string; url: string }[] = [
   },
   // Middle East
   { name: "times-of-israel", url: "https://www.timesofisrael.com/feed/" },
-  { name: "middle-east-eye", url: "https://www.middleeasteye.net/rss" },
   // Africa
   {
     name: "allafrica",
@@ -61,8 +67,10 @@ export const RSS_FEEDS: { name: string; url: string }[] = [
   { name: "premium-times-nigeria", url: "https://www.premiumtimesng.com/feed" },
   { name: "africanews", url: "https://www.africanews.com/feed/rss" },
   // Latin America
-  { name: "mercopress", url: "https://en.mercopress.com/rss/" },
   { name: "buenos-aires-times", url: "https://www.batimes.com.ar/feed" },
+  // Not independently rated by any major fact-checking org (no red flags
+  // found either) — disclosed as such in docs/SOURCE_CREDIBILITY.md
+  // rather than presented as equivalently vetted to the rated sources above.
   { name: "rio-times", url: "https://riotimesonline.com/feed/" },
 ];
 
