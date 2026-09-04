@@ -3,6 +3,7 @@ import { currencyForCountry } from "@/lib/countryCurrency";
 import { stockIndexForCountry } from "@/lib/countryStockIndex";
 import { fetchUsdRateFor } from "@/lib/sources/forex";
 import { fetchIndexQuote, FinnhubNotConfiguredError } from "@/lib/sources/finnhub";
+import { fetchCountryDossier } from "@/lib/countryDossier";
 import { withCache } from "@/lib/layerCache";
 
 export async function GET(req: NextRequest) {
@@ -37,5 +38,12 @@ export async function GET(req: NextRequest) {
     };
   });
 
-  return NextResponse.json(snapshot);
+  // GDP/population/region barely change day to day, unlike currency/index
+  // above — a much longer cache avoids re-hitting World Bank on every
+  // dossier open without going stale in any way that matters.
+  const dossier = await withCache(`country-dossier:${iso2}`, 24 * 60 * 60_000, () =>
+    fetchCountryDossier(iso2).catch(() => null),
+  );
+
+  return NextResponse.json({ ...snapshot, dossier });
 }

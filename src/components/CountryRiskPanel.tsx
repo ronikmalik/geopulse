@@ -53,6 +53,16 @@ interface CountryThreatDetail {
   events: CountryRiskEvent[];
 }
 
+interface CountryDossier {
+  countryName: string;
+  region: string | null;
+  incomeLevel: string | null;
+  capitalCity: string | null;
+  gdpUsd: { value: number; year: string } | null;
+  population: { value: number; year: string } | null;
+  summary: string;
+}
+
 interface CountrySnapshot {
   country: string;
   currency: {
@@ -69,7 +79,13 @@ interface CountrySnapshot {
     change: number;
     changePct: number;
   } | null;
+  dossier: CountryDossier | null;
 }
+
+const compactNumber = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
 
 interface CountryRiskPanelProps {
   scores: CountryRiskScore[];
@@ -266,6 +282,37 @@ export default function CountryRiskPanel({
                   )}
                   {!loadingDetail && detail && detail.country === r.country && (
                     <>
+                      {snapshot?.country === r.country && snapshot.dossier && (
+                        <div className="mb-2 border-b border-red-950/70 pb-2">
+                          <p className="font-mono text-[10px] leading-relaxed text-neutral-400">
+                            {snapshot.dossier.summary}
+                          </p>
+                          {(snapshot.dossier.gdpUsd || snapshot.dossier.population) && (
+                            <div className="mt-1.5 flex items-center gap-4">
+                              {snapshot.dossier.gdpUsd && (
+                                <div>
+                                  <div className="font-mono text-[9px] uppercase tracking-wider text-neutral-500">
+                                    GDP ({snapshot.dossier.gdpUsd.year})
+                                  </div>
+                                  <div className="font-mono text-xs text-red-300">
+                                    ${compactNumber.format(snapshot.dossier.gdpUsd.value)}
+                                  </div>
+                                </div>
+                              )}
+                              {snapshot.dossier.population && (
+                                <div>
+                                  <div className="font-mono text-[9px] uppercase tracking-wider text-neutral-500">
+                                    Population ({snapshot.dossier.population.year})
+                                  </div>
+                                  <div className="font-mono text-xs text-red-300">
+                                    {compactNumber.format(snapshot.dossier.population.value)}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <div className="mb-2 grid grid-cols-2 gap-1.5 border-b border-red-950/70 pb-2">
                         {detail.pillars.map((p) => (
                           <div

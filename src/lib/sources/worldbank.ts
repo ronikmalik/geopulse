@@ -83,3 +83,91 @@ export async function fetchWorldBankIndicator(
       value: e.value,
     }));
 }
+
+// Single-country, single-indicator lookup — used for the country
+// click-through dossier (one country at a time) rather than the top-10
+// ticker layers above (which need the full ranked list).
+export async function fetchWorldBankIndicatorForCountry(
+  countryIso3: string,
+  indicatorCode: string,
+): Promise<WorldBankObservation | null> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `${WORLD_BANK_ENDPOINT.replace("/country/all/", `/country/${countryIso3}/`)}/${indicatorCode}?format=json&mrnev=1`,
+      {
+        headers: { "User-Agent": "geopulse-globe/1.0" },
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
+  } catch (err) {
+    throw new Error(`World Bank request failed: ${err}`);
+  }
+
+  if (!res.ok) {
+    console.error(`World Bank fetch failed for ${countryIso3}: ${res.status}`);
+    return null;
+  }
+
+  const data = (await res.json()) as [unknown, WorldBankEntry[] | null];
+  const entry = data[1]?.[0];
+  if (!entry || entry.value == null) return null;
+
+  return {
+    indicatorId: entry.indicator.id,
+    countryIso3: entry.countryiso3code,
+    countryName: entry.country.value,
+    year: entry.date,
+    value: entry.value,
+  };
+}
+
+export interface WorldBankCountryMeta {
+  name: string;
+  region: string;
+  incomeLevel: string;
+  capitalCity: string | null;
+}
+
+interface WorldBankCountryEntry {
+  name: string;
+  region: { value: string };
+  incomeLevel: { value: string };
+  capitalCity: string;
+}
+
+// Country metadata (region, income classification, capital) — no
+// indicator value, just the descriptive fields used to compose the
+// dossier's one-line summary.
+export async function fetchWorldBankCountryMeta(
+  countryIso3: string,
+): Promise<WorldBankCountryMeta | null> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `https://api.worldbank.org/v2/country/${countryIso3}?format=json`,
+      {
+        headers: { "User-Agent": "geopulse-globe/1.0" },
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
+  } catch (err) {
+    throw new Error(`World Bank country-meta request failed: ${err}`);
+  }
+
+  if (!res.ok) {
+    console.error(`World Bank country-meta fetch failed for ${countryIso3}: ${res.status}`);
+    return null;
+  }
+
+  const data = (await res.json()) as [unknown, WorldBankCountryEntry[] | null];
+  const entry = data[1]?.[0];
+  if (!entry) return null;
+
+  return {
+    name: entry.name,
+    region: entry.region.value,
+    incomeLevel: entry.incomeLevel.value,
+    capitalCity: entry.capitalCity || null,
+  };
+}
