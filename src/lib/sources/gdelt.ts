@@ -1,3 +1,5 @@
+import { Agent } from "undici";
+
 export interface RawItem {
   source: string;
   url: string;
@@ -7,6 +9,23 @@ export interface RawItem {
 }
 
 const GDELT_DOC_ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc";
+
+// Node's global fetch (undici under the hood) has its own internal socket
+// connect timeout, hardcoded to 10s by default and completely separate
+// from AbortSignal.timeout() — raising the AbortSignal value does nothing
+// for a slow/failed connect specifically (confirmed against undici's own
+// issue tracker, not assumed). This app's production logs showed exactly
+// that failure mode against GDELT specifically: "ConnectTimeoutError...
+// timeout: 10000ms" — a dead giveaway it's undici's internal default
+// firing, not our own timeoutMs. A live test from outside Vercel's network
+// reached GDELT fine (got a real 429 back) in ~12s total, so the actual
+// TCP/TLS handshake from Vercel's network is plausibly just slower than
+// undici's 10s default allows, not a hard block — worth actually giving it
+// room to complete instead of aborting every single attempt before it can.
+// A dedicated dispatcher scoped to this module only (not a global
+// override) keeps this fix targeted to the one source with evidence of
+// this specific failure mode.
+const gdeltDispatcher = new Agent({ connectTimeout: 20_000 });
 
 interface GdeltArticle {
   url: string;
@@ -59,7 +78,10 @@ export async function fetchGdelt(
     res = await fetch(`${GDELT_DOC_ENDPOINT}?${params.toString()}`, {
       headers: { "User-Agent": "geopulse-globe/1.0" },
       signal: AbortSignal.timeout(timeoutMs),
-    });
+      // Not in the standard fetch types (dispatcher is a Node/undici
+      // extension) — see gdeltDispatcher above for why this is needed.
+      dispatcher: gdeltDispatcher,
+    } as RequestInit);
   } catch (err) {
     // Network-level failure (DNS, connect timeout, reset) rather than a
     // non-2xx response — err.cause carries the real reason, which the

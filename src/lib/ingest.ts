@@ -146,17 +146,31 @@ export async function runIngest(): Promise<IngestResult> {
   // every cycle, only ROTATION_CHUNK_SIZE categories run per ingest call,
   // chosen deterministically from the current time so consecutive cycles
   // (roughly one every 15 min, however this route gets triggered) advance
-  // through the full list — every category still gets a fresh GDELT check
-  // at least once per rotation (currently ~4 cycles, ~1h worst case),
-  // which RSS's continuous coverage of the same topics backstops in the
-  // meantime. retries: 0 (vs. fetchGdelt's own default of 1) since a
-  // same-query retry would just double this already-tight budget for no
-  // benefit — a failed query this cycle gets a fresh attempt next
+  // through the full list, which RSS's continuous coverage of the same
+  // topics backstops in the meantime.
+  //
+  // 2026-09-04: production logs showed GDELT failing with
+  // "ConnectTimeoutError... timeout: 10000ms" specifically — a dead
+  // giveaway of undici's own internal socket-connect timeout (hardcoded
+  // 10s default, and NOT controlled by this file's own timeoutMs/
+  // AbortSignal — see src/lib/sources/gdelt.ts's gdeltDispatcher for the
+  // undici-issue-tracker-confirmed reasoning). Overriding that to 20s
+  // there only helps if this file's own outer timeout budget is raised to
+  // actually leave room for a slower-but-real connect to finish — so
+  // GDELT_QUERY_TIMEOUT_MS goes up from 10s to 22s. That no longer fits
+  // two sequential queries in the 30s budget (2×22s alone blows past it
+  // before even counting spacing/response time), so ROTATION_CHUNK_SIZE
+  // drops to 1 — slower full-7-category rotation coverage (~1h45m worst
+  // case instead of ~1h), traded for each attempted query actually having
+  // a real chance to connect instead of being aborted before the TCP
+  // handshake can complete. retries: 0 (vs. fetchGdelt's own default of 1)
+  // — a same-query retry would double this already-tight budget for no
+  // benefit, since a failed query this cycle gets a fresh attempt next
   // rotation regardless.
-  const ROTATION_CHUNK_SIZE = 2;
+  const ROTATION_CHUNK_SIZE = 1;
   const ROTATION_INTERVAL_MS = 15 * 60_000;
   const GDELT_QUERY_SPACING_MS = 1500;
-  const GDELT_QUERY_TIMEOUT_MS = 10_000;
+  const GDELT_QUERY_TIMEOUT_MS = 22_000;
   const gdeltQueryErrors: string[] = [];
 
   // Same rotation cadence as GDELT (ROTATION_INTERVAL_MS) but its own chunk
