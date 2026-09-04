@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sql } from "drizzle-orm";
+import { and, eq, gt, like } from "drizzle-orm";
 import { getDb } from "@/db";
 import { events } from "@/db/schema";
 import { isCronAuthorized } from "@/lib/cronAuth";
@@ -35,8 +35,9 @@ export async function GET(req: NextRequest) {
 
   const db = getDb();
   const sourceFilter = source
-    ? sql`${events.source} = ${source}`
-    : sql`${events.source} like ${sourcePrefix + "%"}`;
+    ? eq(events.source, source)
+    : like(events.source, `${sourcePrefix}%`);
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60_000);
 
   const rows = await db
     .select({
@@ -52,9 +53,7 @@ export async function GET(req: NextRequest) {
       createdAt: events.createdAt,
     })
     .from(events)
-    .where(
-      sql`${sourceFilter} and ${events.publishedAt} > now() - interval '${sql.raw(String(days))} days'`,
-    );
+    .where(and(sourceFilter, gt(events.publishedAt, cutoff)));
 
   return NextResponse.json({ count: rows.length, rows });
 }
