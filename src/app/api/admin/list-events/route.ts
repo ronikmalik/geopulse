@@ -39,21 +39,36 @@ export async function GET(req: NextRequest) {
     : like(events.source, `${sourcePrefix}%`);
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60_000);
 
-  const rows = await db
-    .select({
-      id: events.id,
-      source: events.source,
-      url: events.url,
-      title: events.title,
-      summary: events.summary,
-      category: events.category,
-      country: events.country,
-      severity: events.severity,
-      publishedAt: events.publishedAt,
-      createdAt: events.createdAt,
-    })
-    .from(events)
-    .where(and(sourceFilter, gt(events.publishedAt, cutoff)));
+  try {
+    const rows = await db
+      .select({
+        id: events.id,
+        source: events.source,
+        url: events.url,
+        title: events.title,
+        summary: events.summary,
+        category: events.category,
+        country: events.country,
+        severity: events.severity,
+        publishedAt: events.publishedAt,
+        createdAt: events.createdAt,
+      })
+      .from(events)
+      .where(and(sourceFilter, gt(events.publishedAt, cutoff)));
 
-  return NextResponse.json({ count: rows.length, rows });
+    return NextResponse.json({
+      receivedParams: { source, sourcePrefix, days },
+      count: rows.length,
+      rows,
+    });
+  } catch (err) {
+    return NextResponse.json(
+      {
+        receivedParams: { source, sourcePrefix, days },
+        error: String(err),
+        stack: err instanceof Error ? err.stack : null,
+      },
+      { status: 500 },
+    );
+  }
 }
