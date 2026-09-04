@@ -113,7 +113,13 @@ const CATEGORY_MATCHERS: [NewsCategory, RegExp][] = [
   ],
   [
     "humanitarian",
-    /famine|food insecurity|malnutrition|refugee|displaced|displacement|humanitarian crisis|humanitarian emergency|disease outbreak|epidemic/i,
+    // "outbreak" bare, not just "disease outbreak" — a real synthetic-test
+    // case ("Cholera Outbreak Kills Dozens...") fell through to "other"
+    // because MODERATE_SEVERITY (above) already accepts bare "outbreak"
+    // but this category matcher required the exact phrase "disease
+    // outbreak", which real headlines naming the specific disease
+    // (cholera, measles, Ebola outbreak) don't use.
+    /famine|food insecurity|malnutrition|refugee|displaced|displacement|humanitarian crisis|humanitarian emergency|\boutbreak\b|epidemic|exodus|flee(s|ing)?/i,
   ],
 ];
 
@@ -134,14 +140,42 @@ const CATEGORY_FALLBACK_COUNTRY: Partial<Record<NewsCategory, string>> = {
 // behind Israel's settlement strategy?" is not a risk event just because it
 // mentions Israel. Matched against the title only: these phrasings are a
 // headline convention, not something that shows up mid-article.
+// commentary/roundup/special report/deep dive/backgrounder/primer/op-ed
+// added alongside the original set — same headline-convention logic, just
+// more of the genre, in response to the user's explicit push for a much
+// higher "is this actually breaking" bar after the RSS outlet expansion
+// (2026-09-04): "Definitely not reflection pieces on events that happened
+// in the past or analyses."
 const NON_EVENT_TITLE_PATTERNS =
-  /^(what to know|explainer|analysis|opinion|q&a|in pictures|in photos|photos:|the backstory|timeline:|explained:)\b|explainer$|^(who is|who are|why is|why did|why does|how is|how did|how does|what happened)\b|:\s*(what to know|what happened|explained|explainer|analysis|q&a)\b/i;
+  /^(what to know|explainer|analysis|opinion|op-ed|q&a|in pictures|in photos|photos:|the backstory|timeline:|explained:|commentary|roundup|special report|deep dive|backgrounder|primer)\b|explainer$|^(who is|who are|why is|why did|why does|how is|how did|how does|what happened|what to make of)\b|:\s*(what to know|what happened|explained|explainer|analysis|q&a|commentary)\b/i;
 
 // Coverage of an ongoing/pre-existing situation rather than a fresh
-// development — "years after the invasion, X still..." reads as current
-// (mentions the invasion) but isn't reporting anything new today.
+// development — softer signals that only suppress when nothing else in
+// the text also reads as an actual fresh escalation (see hasEscalation in
+// assessIncidentSeverity below) — "amid ongoing tension" is routine on its
+// own, but "amid ongoing tension, X strikes Y today" is not.
 const ONGOING_COVERAGE_PATTERNS =
-  /\bamid ongoing\b|as .* continues\b|years? after\b|decades? after\b|since the .* (war|conflict|invasion) began\b|still reeling\b|\banniversary of\b/i;
+  /\bamid ongoing\b|as .* continues\b|since the .* (war|conflict|invasion) began\b|still reeling\b|\banniversary of\b/i;
+
+// "X years/decades after Y" and its 2026-09-04 siblings (months-into/
+// one-year-since/year-in-review/look-back-at) are a much stronger,
+// near-deterministic "this is a retrospective" marker than the softer
+// ONGOING_COVERAGE_PATTERNS above — strong enough that they suppress
+// UNCONDITIONALLY, without the "unless it also has escalation language"
+// carve-out. That carve-out exists because a routine-activity word and a
+// fresh-escalation word can legitimately coexist ("joint exercise
+// cancelled after strikes"), but a retrospective's whole subject IS
+// escalation-tier vocabulary by definition — "Years After the Famine,
+// Ethiopia Still Struggles to Recover" was incorrectly kept by a synthetic
+// test because "famine" (added to MODERATE_SEVERITY the same day)
+// satisfied the softer carve-out and defeated the "years after" signal
+// entirely. Deliberately NOT adding bare "so far" or "to date" here or
+// above: those phrases show up constantly INSIDE genuinely breaking
+// articles as a live-count qualifier ("at least 40 killed so far in the
+// strikes"), so blocking them would cut real breaking news, not just
+// retrospectives.
+const DEFINITELY_ONGOING_PATTERNS =
+  /years? after\b|decades? after\b|months? into (the )?(war|conflict|invasion)\b|\bone year (since|on|after)\b|\byear in review\b|\blook(s)? back at\b/i;
 
 // Routine, expected, or de-escalatory activity that the topical KEYWORDS
 // filter above will still catch (a port call by a US carrier mentions
@@ -155,7 +189,28 @@ const ONGOING_COVERAGE_PATTERNS =
 const BENIGN_PATTERNS =
   /port call|goodwill visit|routine (patrol|visit|deployment)|arrives? (in|for)|\bvisits?\b|\bvisiting\b|state visit|travels? to|heads? to|trip to|(joint|annual|routine) (exercise|drill|training)(?!.*(warn|threat|escalat|tension|provoc))|peace talks|peace deal|ceasefire (holds|agreed|announced)|signs? (a |an )?(deal|agreement|treaty)|trade deal|summit|diplomatic visit|meets with|holds talks|anniversary|marks \d+ years?|art (festival|exhibition)|film festival|sporting event|championship/i;
 
-const HIGH_SEVERITY = /nuclear (test|strike|weapon)|invasion|massacre|genocide|declared war/i;
+// "invasion" was a bare noun here originally, and it broke on real feed
+// output (2026-09-04): a Moscow Times piece about a Russian ambassador's
+// tenure ending scored Extreme severity purely because its snippet
+// mentioned "the full-scale invasion of Ukraine" as scene-setting
+// background — four-plus years in, that exact phrase is now almost always
+// a historical reference, not a report of a fresh invasion starting.
+// Requiring an active verb form (invades/invaded/invading, launches/
+// launched an invasion) instead of the bare noun catches genuinely fresh
+// invasion reporting while no longer matching backward-looking mentions.
+//
+// "massacre" had the identical problem, caught in the same review pass: a
+// Haaretz piece analyzing Netanyahu's election strategy ("pivots to
+// conspiracy theories") scored Extreme because its snippet referenced
+// "the 2023 Hamas massacre" as background — October 7 has become a named
+// historical event referenced in nearly every Israel-Palestine political
+// analysis, the same way "the invasion" has for Russia-Ukraine. Excluding
+// the two specific stale-reference forms actually observed (preceded by
+// "October 7" or "Hamas") rather than removing "massacre" outright, which
+// would also lose genuinely fresh massacre reports that don't happen to
+// also use "killed"/"dead"/"casualties".
+const HIGH_SEVERITY =
+  /nuclear (test|strike|weapon)|invad(ed|es|ing)|launch(ed|es)? (a |an )?invasion|(?<!october 7[,\s]{0,4})(?<!hamas\s)massacre|genocide|declared war/i;
 // Expanded beyond the original "strike/attack/killed" set after reviewing
 // real leaked-through feed output: military developments are often
 // reported with a specific action verb ("cleared tunnels", "downed a
@@ -168,10 +223,26 @@ const HIGH_SEVERITY = /nuclear (test|strike|weapon)|invasion|massacre|genocide|d
 // "struck", "neutralized", "liquidated") more than the strike/attack/killed
 // wording RSS headlines typically use. Kept narrow enough not to fire on
 // idiom ("struck a deal") or economic reporting ("hit record highs").
+// Political-instability and humanitarian incident language added
+// 2026-09-04 alongside the MIN_SEVERITY_TO_INCLUDE bar-raise below. Before
+// this, a headline like "Government Collapses After Election Fraud
+// Allegations" or "500,000 Displaced by Flooding" would categorize
+// correctly (categorizeByKeywords already matched these exact phrases for
+// political-instability/humanitarian) but scored severity 1 and got
+// dropped anyway, because the category matchers and the severity matchers
+// were never kept in sync — those two categories were structurally
+// starved regardless of where the inclusion bar sat. mobiliz/border
+// incident moved up from MILD: a military mobilization or a border
+// incident is a concrete reported development, not rhetoric, and the
+// user's explicit ask includes "military updates (show of strengths,
+// etc.)". Bare "refugee"/"displaced" alone were deliberately left OUT
+// here — too easily true of a passing mention in an unrelated story;
+// "refugee crisis", "displaced"+numeric-impact framing, "exodus", and
+// active "flee(ing)" read as an actual event happening, which is the bar.
 const MODERATE_SEVERITY =
-  /\bstrikes?\b|missile (launch|fired|strike)|airstrike|\battack(ed|ing|s)?\b|killed|\bdead\b|casualties|wounded|injured|explosion|bombing|offensive|clashes?|\bcoup\b|martial law|seiz(ed|es|ing)(?!\s+(the\s+)?opportunity)|captur(ed|es|ing)(?!\s+(the\s+)?(moment|imagination|attention|essence|hearts?|spirit))|raid(ed|s)?|storm(ed|s)?|shot down|downed (a |an )?(drone|aircraft|jet|missile)|intercepted|cleared (tunnels|the area)|detained|arrested|evacuat(ed|es|ing|ion)|recaptur(ed|es|ing)|\bretook\b|\bretake\b|reclaim(ed|s|ing)|liberat(ed|es|ing)|repel(led|s)?|thwart(ed|s)?|destroy(ed|s)?|neutrali[sz]ed|eliminat(ed|es)|liquidat(ed|es)|struck\b(?! a (deal|balance|chord|pose))|hit by/i;
+  /\bstrikes?\b|missile (launch|fired|strike)|airstrike|\battack(ed|ing|s)?\b|killed|\bdead\b|casualties|wounded|injured|explosion|bombing|offensive|clashes?|\bcoup\b|martial law|seiz(ed|es|ing)(?!\s+(the\s+)?opportunity)|captur(ed|es|ing)(?!\s+(the\s+)?(moment|imagination|attention|essence|hearts?|spirit))|raid(ed|s)?|storm(ed|s)?|shot down|downed (a |an )?(drone|aircraft|jet|missile)|intercepted|cleared (tunnels|the area)|detained|arrested|evacuat(ed|es|ing|ion)|recaptur(ed|es|ing)|\bretook\b|\bretake\b|reclaim(ed|s|ing)|liberat(ed|es|ing)|repel(led|s)?|thwart(ed|s)?|destroy(ed|s)?|neutrali[sz]ed|eliminat(ed|es)|liquidat(ed|es)|struck\b(?! a (deal|balance|chord|pose))|hit by|mobiliz|border incident|state of emergency|election fraud|government collapse|\bousted\b|\boverthrown\b|power grab|parliament dissolved|resign(ed|s)? (amid|under|following)|famine|malnutrition|displaced|displacement|refugee crisis|humanitarian crisis|humanitarian emergency|disease outbreak|epidemic|\bexodus\b|flee(s|ing)?|death toll|\boutbreak\b/i;
 const MILD_SEVERITY =
-  /warns?|threatens?|escalat|tension|sanctions? (imposed|announced)|protest|unrest|mobiliz|border incident/i;
+  /warns?|threatens?|escalat|tension|sanctions? (imposed|announced)|protest|unrest/i;
 
 // Severity defaults low (1 = Low) rather than moderate — an article merely
 // touching a topic shouldn't read as meaningful risk on its own. Only
@@ -184,6 +255,20 @@ function keywordSeverity(text: string): number {
   return 1;
 }
 
+// Raised from 2 (MILD) to 3 (MODERATE) on 2026-09-04, after expanding the
+// RSS outlet list to 26 sources — more outlets meant more volume of
+// exactly the "technically on-topic, not actually breaking" content this
+// gate exists to catch, and the user was explicit that the bar needed to
+// be meaningfully higher, not just wider coverage: "there is too much
+// fluff... make sure the news we get is truly live events or recent
+// events... it should be a proxy for gdelt/telegram/truly live updates."
+// MILD_SEVERITY (warnings, threats, "tension," sanctions announcements,
+// bare protest/unrest) is exactly the rhetorical/diplomatic-noise
+// register the complaint was about — a country "warning" another, or
+// generic "tension," reads as analysis-adjacent, not a live incident.
+// This now matches TELEGRAM_MIN_SEVERITY in src/lib/sources/telegram.ts
+// (which already used 3) — one consistent bar across GDELT, RSS, and
+// Telegram, all three sourced through this same assessIncidentSeverity.
 // A severity-1 item has none of HIGH/MODERATE/MILD_SEVERITY's language at
 // all — nothing in it reads as an incident, escalation, or even a
 // warning/tension signal, just topical proximity to a flashpoint (a
@@ -198,7 +283,7 @@ function keywordSeverity(text: string): number {
 // precision-over-recall call: some real but mildly-worded developments
 // get dropped along with the noise, but "breaking, not reflective" (the
 // actual brief) needs that trade made in this direction, not the other.
-const MIN_SEVERITY_TO_INCLUDE = 2;
+export const MIN_SEVERITY_TO_INCLUDE = 3;
 
 // Title-first, same reasoning as country resolution below: a snippet
 // mentioning Iran in passing (a related-coverage teaser, a source's other
@@ -225,6 +310,10 @@ function categorizeByKeywords(title: string, text: string): NewsCategory | "othe
 // MIN_SEVERITY_TO_INCLUDE=2, Telegram's raw-channel filter uses a stricter
 // bar — see TELEGRAM_MIN_SEVERITY in telegram.ts).
 export function assessIncidentSeverity(text: string): number | null {
+  // Checked first and unconditionally — see DEFINITELY_ONGOING_PATTERNS
+  // above for why this one bypasses the hasEscalation carve-out entirely.
+  if (DEFINITELY_ONGOING_PATTERNS.test(text)) return null;
+
   const hasEscalation = HIGH_SEVERITY.test(text) || MODERATE_SEVERITY.test(text);
 
   // A benign/routine signal only suppresses the item if nothing in it also

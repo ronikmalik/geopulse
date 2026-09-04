@@ -2,7 +2,7 @@ import type { Category } from "../categories";
 import type { DirectItem } from "./direct";
 import { COUNTRY_CENTROIDS } from "../countryCentroids";
 import { translateBatch } from "../translate";
-import { assessIncidentSeverity } from "../classify";
+import { assessIncidentSeverity, MIN_SEVERITY_TO_INCLUDE } from "../classify";
 
 // Public-channel scraping via Telegram's own no-auth web preview
 // (t.me/s/<channel>) — no bot token, no login, never touches groups or
@@ -192,13 +192,17 @@ function toDirectItem(
 // map-worthy "event" turned this into a raw channel mirror instead of a
 // breaking-news layer (this is what the user flagged: "we are using all of
 // the telegram stuff"). This reuses classify.ts's own incident-severity
-// judgment (BENIGN/ONGOING suppression + escalation-verb scoring) but with
-// a stricter floor than the general feed's MIN_SEVERITY_TO_INCLUDE=2:
+// judgment (BENIGN/ONGOING suppression + escalation-verb scoring).
 // mild-only language (warnings, sanctions, "tension," protests) is exactly
 // the kind of routine channel chatter this is meant to filter out, so
 // Telegram requires actual incident-level wording — a strike, a capture, a
-// territory reclaimed, a drone shot down — not just topic proximity.
-const TELEGRAM_MIN_SEVERITY = 3;
+// territory reclaimed, a drone shot down — not just topic proximity. This
+// used to be a stricter floor than the general RSS/GDELT feed
+// (MIN_SEVERITY_TO_INCLUDE was 2 there); as of 2026-09-04 that floor was
+// raised to match this one exactly, so this reuses the same constant
+// rather than keeping a second number that could silently drift out of
+// sync with it — one consistent "truly breaking" bar across every source.
+const TELEGRAM_MIN_SEVERITY = MIN_SEVERITY_TO_INCLUDE;
 
 // Only English or successfully-translated text can be scored against the
 // (English-language) incident keywords at all. Rather than guess at
