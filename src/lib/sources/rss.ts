@@ -55,6 +55,25 @@ export const RSS_FEEDS: { name: string; url: string }[] = [
     name: "euronews",
     url: "https://www.euronews.com/rss?level=theme&name=news",
   },
+  // US government-funded (via USAGM), statutorily editorially independent
+  // — same disclosed-public-funding model as BBC/DW/France24 above, not
+  // comparable to Al Jazeera's FARA history (see SOURCE_CREDIBILITY.md).
+  // Broadest single-outlet geographic reach in this list: Russia, Ukraine,
+  // the Caucasus, Central Asia, and the Balkans in one feed — exactly the
+  // conflict theaters russia-ukraine and political-instability track.
+  { name: "rferl", url: "https://www.rferl.org/api/" },
+  // Independent, in-exile Russian outlets (Russian authorities revoked
+  // both organizations' domestic media standing) — an anti-Kremlin
+  // editorial lean is disclosed and expected, the same way Rybar/WarGonzo
+  // in the Telegram layer are disclosed as pro-Kremlin; having both
+  // framings in the pipeline is the point, not a flaw in either.
+  { name: "meduza", url: "https://meduza.io/rss/en/all" },
+  { name: "moscow-times", url: "https://www.themoscowtimes.com/rss/news" },
+  // Defense/conflict specialists — not general-interest outlets, chosen
+  // specifically because they cover military/security developments in
+  // more operational depth than a general-news wire does.
+  { name: "twz", url: "https://www.twz.com/feed" },
+  { name: "long-war-journal", url: "https://www.longwarjournal.org/feed" },
   // Asia-Pacific
   {
     name: "cna-world",
@@ -64,12 +83,25 @@ export const RSS_FEEDS: { name: string; url: string }[] = [
     name: "the-hindu",
     url: "https://www.thehindu.com/news/national/feeder/default.rss",
   },
+  // Taiwan-specific — china-taiwan previously had no dedicated regional
+  // outlet (cna-world above is Singapore's Channel News Asia, general
+  // Asia-Pacific, not Taiwan-focused). Disclosed pro-Taiwan-independence
+  // editorial lean per MBFC.
+  { name: "taipei-times", url: "https://www.taipeitimes.com/xml/index.rss" },
+  // North Korea-specific — north-korea previously had no dedicated outlet
+  // at all, only GDELT's keyword query.
+  { name: "nknews", url: "https://www.nknews.org/feed" },
   // Middle East — Washington DC-based, Arab-American-founded, HIGH
   // credibility/HIGH factual per MBFC, no foreign-agent registration
   // question. Times of Israel gives the Israeli vantage point; this
   // gives the Arab-world one, without Al Jazeera's baggage.
   { name: "al-monitor", url: "https://www.al-monitor.com/rss.xml" },
   { name: "times-of-israel", url: "https://www.timesofisrael.com/feed/" },
+  // Israeli-domestic-critical counterweight to Times of Israel — same
+  // "disclosed lean, still high factual reporting" logic as Meduza/Moscow
+  // Times above. Ownership includes a 25% stake held by Leonid Nevzlin
+  // (Russian-Israeli businessman) — disclosed in SOURCE_CREDIBILITY.md.
+  { name: "haaretz", url: "https://www.haaretz.com/srv/haaretz-latest-headlines" },
   // Africa
   {
     name: "allafrica",

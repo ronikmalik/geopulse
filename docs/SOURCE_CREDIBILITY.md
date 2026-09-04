@@ -85,12 +85,36 @@ backfilling with an unvetted source.
 | Premium Times (Nigeria) | Premium Times Services Ltd. (Dapo Olorunyomi) | Left-Center | Mostly Factual | MBFC notes weaker sourcing technique but a clean fact-check record; known for anti-corruption/accountability reporting. |
 | Africanews | Owned by Euronews (majority-owned by Media Globe Networks / Naguib Sawiris) | Left-Center | Mostly Factual | |
 | Buenos Aires Times | Editorial Perfil SA (Jorge Fontevecchia) | Right-Center | High Credibility | |
+| RFE/RL | US government, funded via USAGM (US Agency for Global Media); statutorily editorially independent, same legal model as VOA | Least Biased | High Credibility | Broadest single-outlet reach in this list — Russia, Ukraine, the Caucasus, Central Asia, and the Balkans in one feed. Added 2026-09-04 at the user's request to find more disclosed-government-funded outlets in the BBC/DW/France24 mold. |
+| Meduza | Independent, non-profit, reader/crowdfunded; based in Riga after Russian authorities designated it an "undesirable organization" | Left | High | In-exile Russian outlet — anti-Kremlin lean is disclosed and expected, the same way Rybar/WarGonzo in the Telegram layer are disclosed as pro-Kremlin. |
+| The Moscow Times | Independent, reader-funded; based in Amsterdam after Russian authorities revoked its domestic media registration | Left-Center | High | Same in-exile situation as Meduza. |
+| TWZ (The War Zone) | Recurrent Ventures (privately held US digital media company) | Center | High | Defense/military-conflict specialist, not a general-interest outlet. |
+| FDD's Long War Journal | Published by the Foundation for Defense of Democracies, a Washington DC think tank | Right-Center | High | Terrorism/insurgency-tracking specialist. |
+| Taipei Times | Liberty Times Group (private Taiwanese media company) | Left-Center | Mostly Factual / High Credibility | Disclosed pro-Taiwan-independence editorial lean. Closes a real gap — china-taiwan previously had no dedicated regional outlet. |
+| NK News | Korea Risk Group (private, founded by Chad O'Carroll), subscription-funded | Least Biased | High | North Korea specialist. Closes a real gap — north-korea previously had no dedicated outlet, only GDELT's keyword query. |
+| Haaretz | Schocken family (75%), Leonid Nevzlin (25%, Russian-Israeli businessman) | Left | High | Israeli-domestic-critical counterweight to Times of Israel — same disclosed-lean logic as Meduza/Moscow Times. |
 
-16 sources, spanning North America, Europe, the Middle East (both an
-Israeli and an Arab-world vantage point), South/Southeast Asia, Africa,
-and Latin America (Argentina only, after Rio Times's removal and
-MercoPress's earlier removal — a real gap; Brazil/wider South America
-coverage now depends on the global wire outlets happening to cover it).
+24 sources, spanning North America, Europe, Russia/Ukraine/Central Asia
+(now meaningfully deeper via RFE/RL, Meduza, and Moscow Times), the
+Middle East (Israeli, Arab-world, and Israeli-critical vantage points),
+South/Southeast Asia, Taiwan, North Korea, Africa, and Latin America
+(Argentina only, after Rio Times's removal and MercoPress's earlier
+removal — a real gap; Brazil/wider South America coverage now depends on
+the global wire outlets happening to cover it).
+
+## Checked and rejected (2026-09-04 expansion pass)
+
+Looking specifically for outlets specializing in breaking/conflict news
+and, per the user's request, more disclosed-government-funded outlets in
+the RFE/RL mold. These were checked and did not make it in:
+
+| Source | Why not |
+|---|---|
+| Kyiv Independent | High credibility per MBFC, but no working RSS feed found at any common path (confirmed 404 after redirect) — an honest gap, not a bias/credibility failure. |
+| Focus Taiwan (CNA) | High factual per MBFC, government-funded (Taiwan) and disclosed, but no discoverable RSS feed. |
+| Naharnet | Reasonable credibility signal (independent, Center bias, Very High factuality per Ground News) but no MBFC page found and no discoverable RSS feed — couldn't clear either the verification bar or the availability bar. |
+| Rudaw | MBFC rates it **Questionable** overall — "promotion of pro-government propaganda" and ownership/funding opacity. Same tier as the already-excluded MercoPress. |
+| Institute for the Study of War (understandingwar.org) | The organization researched at the start of this whole Telegram-sourcing effort — but their own CMS explicitly disables RSS ("we disable the RSS feed for performance reasons," per their server headers). Nothing to wire in. |
 
 ## Non-editorial sources (not applicable)
 
