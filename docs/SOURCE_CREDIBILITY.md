@@ -72,8 +72,9 @@ should be revisited.
 | Middle East Eye | MBFC docks its factual rating specifically for **opaque ownership**; independent reporting (HonestReporting and others) alleges its controlling figure has ties to Al-Quds TV, a broadcaster widely identified as Hamas-affiliated. Would have fed directly into Israel-Palestine coverage. | Ownership / conflict of interest |
 | Al Jazeera | Left-Center/Mixed-to-Neutral on bias trackers (raters disagree) — that alone wouldn't have been disqualifying. What is: AJ+, Al Jazeera's US-facing digital arm, was ordered by the **US Department of Justice in 2020 to register under FARA** (the Foreign Agents Registration Act) over political activity on behalf of Qatar, a bipartisan Congressional group (Cruz, Rubio, Zeldin, and others) has continued pushing for enforcement, and the parent network is Qatari state-funded. Editorial independence is contested by the network's own US legal history, not just by critics' opinion. | Active US legal/regulatory concern |
 | South China Morning Post | Alibaba Group-owned since 2016. MBFC and multiple outside reviewers (Lowy Institute, Asia Sentinel) document a post-acquisition editorial mission shift toward "improving China's image overseas," with softer coverage of Hong Kong pro-democracy protests and Xinjiang specifically. MBFC: Left-Center, MIXED factual, MEDIUM credibility. | Ownership / documented editorial shift |
-| Times of India | MBFC: Right-Center, **MIXED** factual reporting — four failed fact-checks, story selection favoring the ruling party. The Hindu covers the same country at a meaningfully higher reliability tier and is kept instead. | Factual-accuracy — better same-country alternative exists |
+| Times of India | MBFC: Right-Center, **MIXED** factual reporting — four failed fact-checks, story selection favoring the ruling party. Originally rejected in favor of keeping The Hindu as the same-country alternative; The Hindu was later removed too (2026-09-04, user request, not a credibility finding), leaving India without a dedicated outlet in this list. | Factual-accuracy — better same-country alternative exists |
 | Rio Times | Not independently rated by MBFC, AllSides, or Ad Fontes at all. No red flags found in this review, but nothing to point to either — under the "would a third party vouch for this" standard, an unrated source can't clear the bar the same way a rated one can. | Unverifiable |
+| The Hindu | No credibility issue found in review (Left-Center, Mostly Factual / High Credibility, independent Kasturi & Sons family ownership) — removed 2026-09-04 at the user's explicit request, not for a trust/accuracy reason. Leaves this list without a dedicated India outlet (Times of India above was already rejected on factual-accuracy grounds). | User-requested removal |
 
 None of these were backfilled with a same-region substitute picked under
 time pressure — Al-Monitor (below) is the one deliberate exception,
@@ -95,7 +96,6 @@ backfilling with an unvetted source.
 | France 24 | French state, via France Médias Monde (public holding company) | Least Biased | High Credibility | Same state-funded/editorially-independent model as DW. |
 | Euronews | Alpac Capital (Portugal investment fund, 88%) + government-linked broadcasters (12%); receives some European Commission subsidy | Left-Center | Mostly Factual | MBFC flags subsidy-linked content as a factor keeping it at Mostly (not High) Factual. |
 | CNA (Channel News Asia) | Mediacorp, majority state-owned via Singapore's Temasek | Least Biased | High | Reporters Without Borders flags broader press-freedom/self-censorship pressure in Singapore's media environment generally; CNA's own fact-check record is clean per MBFC. |
-| The Hindu | The Hindu Group / Kasturi & Sons (independent family ownership) | Left-Center | Mostly Factual / High Credibility | One of India's oldest (1878) and most internationally cited papers of record. |
 | Al-Monitor | Al Monitor LLC — founded by Arab-American entrepreneur Jamal Daniel, Washington DC-based, partnered with North Base Media | Left-Center | HIGH Credibility / HIGH factual | Added in the second review pass specifically to give Middle East coverage a non-Israeli, Arab-world-sourced vantage point without Al Jazeera's FARA history. |
 | Times of Israel | Independent (chairman Seth Klarman, US-based Baupost Group founder), ad/subscription/donation funded | Left-Center | High | |
 | AllAfrica | AllAfrica Global Media | Least Biased | High | Largest English-language distributor of African-published news; aggregates from African outlets rather than being a single newsroom. |
@@ -115,14 +115,17 @@ backfilling with an unvetted source.
 | Radio Free Asia | US government, funded via USAGM — same model as RFE/RL | Left-Center | High | Added 2026-09-04. A prior pass listed this as "no working RSS feed found"; the real feed was found behind a redirect (`/english/rss2.xml` → `/arc/outboundfeeds/english/rss/`) during an unrelated ISW-sourcing research pass. Correction, not a new decision. |
 | Yonhap News Agency | South Korean government — directly controls Yonhap and appoints its board (not just statutory-independence funding, the BBC/DW/RFE/RL model) | Not separately tracked as "Least Biased/Left/Right" by MBFC | Mostly Factual | Added 2026-09-04. Held back in the 2026-09-04 expansion pass pending an explicit decision on whether a government-appointed-board outlet clears the bar; resolved by applying the same "state-linked, disclosed, included and framed accordingly" precedent already used for Iran's IRIB/Fars/Press TV and Russia's `mod_russia` in the Telegram layer, rather than the stricter "statutory independence" bar BBC/DW/RFE/RL clear. Closes the last major Korean-peninsula gap alongside NK News/RFA. |
 
-28 sources, spanning North America, Europe, Russia/Ukraine/Central Asia
+27 sources, spanning North America, Europe, Russia/Ukraine/Central Asia
 (now meaningfully deeper via RFE/RL, Meduza, and Moscow Times), the
 Middle East (Israeli, Arab-world, and Israeli-critical vantage points),
-South/Southeast Asia, Taiwan, North Korea (now RFA and Yonhap alongside
+Southeast Asia, Taiwan, North Korea (now RFA and Yonhap alongside
 NK News), Australia, Canada, Africa, and Latin America (Argentina only,
 after Rio Times's removal and MercoPress's earlier removal — a real gap;
 Brazil/wider South America coverage now depends on the global wire
-outlets happening to cover it).
+outlets happening to cover it). India has no dedicated outlet after The
+Hindu's removal (2026-09-04) — Times of India was already rejected on
+factual-accuracy grounds, so this is now an open gap, not a deliberate
+choice.
 
 ## Checked and rejected (2026-09-04 expansion pass)
 

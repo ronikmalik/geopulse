@@ -87,10 +87,6 @@ export const RSS_FEEDS: { name: string; url: string }[] = [
     name: "cna-world",
     url: "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml",
   },
-  {
-    name: "the-hindu",
-    url: "https://www.thehindu.com/news/national/feeder/default.rss",
-  },
   // Taiwan-specific — china-taiwan previously had no dedicated regional
   // outlet (cna-world above is Singapore's Channel News Asia, general
   // Asia-Pacific, not Taiwan-focused). Disclosed pro-Taiwan-independence
