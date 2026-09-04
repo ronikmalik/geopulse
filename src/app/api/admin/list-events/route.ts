@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { and, eq, gt, like } from "drizzle-orm";
+import { and, asc, eq, gt, like } from "drizzle-orm";
 import { getDb } from "@/db";
 import { events } from "@/db/schema";
 import { isCronAuthorized } from "@/lib/cronAuth";
@@ -25,6 +25,20 @@ export const dynamic = "force-dynamic";
 // "rss:meduza"/"telegram:presstv") and a `days` lookback (default matches
 // risk.ts's LOOKBACK_DAYS=30, i.e. "still actually live in the feed", not
 // literally every row ever inserted).
+//
+// Paginated via `afterId` (only rows with id > afterId, ordered by id
+// ascending) + `limit` (default 100) — a broad sourcePrefix query over the
+// full 30-day window can return hundreds of rows, and the first
+// unpaginated version of this route genuinely worked server-side but
+// produced a single JSON response line long enough that GitHub Actions'
+// log capture (the only way to read this endpoint's output, since
+// CRON_SECRET only exists as a GitHub secret) silently dropped it
+// entirely — indistinguishable from a real empty/broken response without
+// directly inspecting a shorter, provably-working request first. Trimmed
+// response fields (no summary/country/createdAt) for the same reason —
+// summary duplicates title for every classifier-governed source (both
+// classifyGdeltItem and classifyByKeywords set summary: item.title), so
+// it's pure payload bloat for this endpoint's actual purpose.
 export async function GET(req: NextRequest) {
   if (!isCronAuthorized(req)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -42,6 +56,16 @@ export async function GET(req: NextRequest) {
   if (!Number.isInteger(days) || days <= 0) {
     return NextResponse.json({ error: "days must be a positive integer" }, { status: 400 });
   }
+  const limitParam = req.nextUrl.searchParams.get("limit");
+  const limit = limitParam ? Number(limitParam) : 100;
+  if (!Number.isInteger(limit) || limit <= 0 || limit > 500) {
+    return NextResponse.json({ error: "limit must be 1-500" }, { status: 400 });
+  }
+  const afterIdParam = req.nextUrl.searchParams.get("afterId");
+  const afterId = afterIdParam ? Number(afterIdParam) : 0;
+  if (!Number.isInteger(afterId) || afterId < 0) {
+    return NextResponse.json({ error: "afterId must be a non-negative integer" }, { status: 400 });
+  }
 
   const db = getDb();
   const sourceFilter = source
@@ -55,15 +79,16 @@ export async function GET(req: NextRequest) {
       source: events.source,
       url: events.url,
       title: events.title,
-      summary: events.summary,
       category: events.category,
-      country: events.country,
       severity: events.severity,
       publishedAt: events.publishedAt,
-      createdAt: events.createdAt,
     })
     .from(events)
-    .where(and(sourceFilter, gt(events.publishedAt, cutoff)));
+    .where(
+      and(sourceFilter, gt(events.publishedAt, cutoff), gt(events.id, afterId)),
+    )
+    .orderBy(asc(events.id))
+    .limit(limit);
 
   return NextResponse.json({ count: rows.length, rows });
 }
