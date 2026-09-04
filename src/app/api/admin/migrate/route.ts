@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { isCronAuthorized } from "@/lib/cronAuth";
 
 // There's no migration framework in this project (no local Node install to
 // run drizzle-kit, and the Neon connection string isn't retrievable via
@@ -11,13 +12,6 @@ import { getDb } from "@/db";
 // schema change ships. Safe to hit repeatedly — every statement no-ops if
 // already applied.
 export const maxDuration = 55;
-
-function isAuthorized(req: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return true; // no secret configured yet (local dev) — allow
-  const auth = req.headers.get("authorization");
-  return auth === `Bearer ${secret}`;
-}
 
 const STATEMENTS = [
   sql`CREATE TABLE IF NOT EXISTS country_state_history (
@@ -35,7 +29,7 @@ const STATEMENTS = [
 ];
 
 export async function GET(req: NextRequest) {
-  if (!isAuthorized(req)) {
+  if (!isCronAuthorized(req)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const db = getDb();
