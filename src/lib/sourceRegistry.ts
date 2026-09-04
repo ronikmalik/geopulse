@@ -41,7 +41,8 @@ export const SOURCE_REGISTRY: SourceLicenseInfo[] = [
   },
   {
     id: "rss",
-    provider: "BBC / Al Jazeera / The Guardian / NYT world RSS feeds",
+    provider:
+      "20 outlet RSS feeds across North America, Europe, Asia-Pacific, the Middle East, Africa, and Latin America — see src/lib/sources/rss.ts for the full list",
     url: "https://www.bbci.co.uk/news/10318089",
     license: "Publisher-specific — RSS provided for personal/non-commercial syndication",
     commercialUse: "unclear",
@@ -51,7 +52,7 @@ export const SOURCE_REGISTRY: SourceLicenseInfo[] = [
     maxCacheAgeNotes: "Headline/summary + source link only — no full-article reproduction.",
     rateLimit: "Unpublished — poll politely (this app: every ~15 min).",
     apiKeyRequired: false,
-    termsLastChecked: "2026-09-02",
+    termsLastChecked: "2026-09-03",
   },
   {
     id: "usgs",
