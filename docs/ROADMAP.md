@@ -15,11 +15,11 @@ Checked against the platform brief's own §23 acceptance list:
 | 2 | 10–15 reliable sources actively ingesting | ✅ 6 event sources (GDELT, RSS×9, USGS, EONET, GDACS, IODA) + 12 standalone context/ticker sources — see `docs/API_SOURCES.md` |
 | 3 | Events normalized into one common schema | ✅ `events` table, one shape regardless of source — see gaps in ARCHITECTURE.md §3 for the fuller schema not yet needed |
 | 4 | Events mapped to countries and risk pillars | ✅ every category → exactly one pillar (`src/lib/pillars.ts`) |
-| 5 | Duplicate events substantially reduced | ⚠️ Partial — URL-uniqueness + 24h recency filter; no cross-source semantic dedup (needs the correlation engine) |
+| 5 | Duplicate events substantially reduced | ✅ URL-uniqueness + 24h recency filter, plus cross-outlet near-duplicate merging (`src/lib/eventDedup.ts`, Jaccard similarity over filtered word sets) — same-story reports from different outlets collapse into one feed card with "Also reported by" sources |
 | 6 | Country Threat Level + Momentum | ✅ |
 | 7 | Each pillar has Threat Level + Momentum + recent events + drivers | ✅ 6 of 8 pillars covered by a live source; Supply Chain and Cyber (country-attributed) honestly show "not tracked" |
 | 8 | Click a country → what changed, why, evidence | ✅ Feed tab filtered to that country; Risk tab has the pillar breakdown |
-| 9 | Click an event → source, timestamp, location, severity, confidence, related events | ⚠️ Partial — source/timestamp/location/severity/category all shown; no confidence score or "related events" (needs correlation engine) |
+| 9 | Click an event → source, timestamp, location, severity, confidence, related events | ⚠️ Partial — source/timestamp/location/severity/category all shown; cross-outlet duplicate sources shown as "related" via `eventDedup.ts`, but no confidence score and no broader semantic/geographic correlation across genuinely distinct-but-linked events |
 | 10 | API failures visible internally | ✅ `GET /api/admin/health`, this session — no UI page rendering it yet |
 | 11 | Source licensing documented | ✅ `src/lib/sourceRegistry.ts` + `docs/API_SOURCES.md` |
 | 12 | Deployed and publicly accessible | ✅ https://geopulse-green.vercel.app |
@@ -38,33 +38,41 @@ correlation engine.**
   the risk model. WGI specifically blocked (dead indicator codes on the live API —
   see API_SOURCES.md). Rest not started.
 - **Phase 5** (event clustering, pillar mapping, Threat Level engine, Momentum
-  engine): pillar mapping + Threat Level + Momentum engines are **done**. Event
-  clustering is **not started** — this is the single highest-leverage remaining piece,
-  since acceptance criteria 5 and 9 both trace back to it.
+  engine): pillar mapping + Threat Level + Momentum engines are **done**.
+  Near-duplicate event clustering (same story, multiple outlets) is **done**
+  (`src/lib/eventDedup.ts`). Broader semantic/geographic correlation across
+  distinct-but-related events (e.g. linking a strike to a retaliation days later) is
+  **not started** — that's the remaining highest-leverage piece for acceptance
+  criterion 9's full "related events."
 - **Phase 6** (frontend — global map, country cards, country pages, event detail,
-  source transparency): done, modulo "related events" on event detail (blocked on
-  clustering).
+  source transparency): done, including cross-outlet "Also reported by" sources on
+  event detail; broader cross-event correlation still open (see Phase 5).
 - **Phase 7** (cross-risk relationships, alerts, historical charts, search,
-  filtering): not started. Historical charts additionally need a
-  `country_state_history` snapshot table that doesn't exist yet (ARCHITECTURE.md §6.3).
+  filtering): not started, except the `country_state_history` snapshot table now
+  exists with a daily snapshot cron (`vercel.ts` → `/api/admin/snapshot`,
+  `src/lib/history.ts`) — historical charting is unblocked on the data side, just
+  not built into the frontend yet.
 
 ## Immediate next priorities, in order
 
-1. **Event correlation engine.** Unblocks two acceptance criteria at once (dedup
-   quality, "related events" on event detail) and is the prerequisite for the cascade
-   model. Design the clustering approach (geographic + temporal + semantic proximity,
-   confidence ladder per brief §5) before writing code — this is standalone work, not
-   an incremental bolt-on.
+1. **Broader event correlation engine**, beyond the near-duplicate merging already
+   done (`eventDedup.ts`). Design the clustering approach (geographic + temporal +
+   semantic proximity, confidence ladder per brief §5) before writing code — this is
+   standalone work, not an incremental bolt-on.
 2. **Supply Chain & Resource Security pillar coverage.** Currently the only pillar
    with zero signal of any kind. IMF PortWatch is the most promising unverified
    candidate.
-3. **`country_state_history` snapshot table.** Needed for any historical charting and
-   for country-relative Momentum baselining (ARCHITECTURE.md §5).
-4. **Real scheduled ingestion**, decoupled from site visits. The self-triggering
-   stream-based ingest (ARCHITECTURE.md §7) is a working mitigation, not the intended
-   long-term mechanism — the originally-intended GitHub Actions cron has never fired
-   once, root cause undiagnosed. Fixing that, or standing up a dedicated worker
-   service (Railway/Fly.io/Render per the brief), is the top infrastructure item.
+3. **Historical charts frontend**, now that `country_state_history` has data flowing
+   in daily — the backend piece (ARCHITECTURE.md §6.3) is done, just not surfaced in
+   the UI yet.
+4. **A dedicated always-on worker**, decoupled from any single external scheduler.
+   cron-job.org is currently the real primary ingest trigger and is working reliably
+   (see ARCHITECTURE.md §7), with the self-triggering stream-based ingest and a daily
+   Vercel cron as fallbacks — but all three still ultimately depend on this one Vercel
+   deployment. The originally-intended GitHub Actions cron has never fired on its own
+   schedule (root cause undiagnosed) and only runs via manual dispatch. Standing up a
+   dedicated worker service (Railway/Fly.io/Render per the brief) so ingestion isn't
+   dependent on a single third-party scheduler is the top infrastructure item.
 5. **Admin health panel UI.** The data exists (`GET /api/admin/health`); it just
    isn't rendered anywhere yet.
 6. **Broader source coverage** per `docs/API_SOURCES.md`'s prioritized candidate list

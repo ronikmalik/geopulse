@@ -47,6 +47,23 @@ This is a real gap in the source list, not one papered over with a
 weaker substitute. If a paid Reuters/AP syndication feed is ever added
 later, it should be the first thing wired in.
 
+## Known technical gap: France24 (world edition)
+
+`france24-world` is wired into `src/lib/sources/rss.ts` and passes the
+credibility review above, but its feed (`https://www.france24.com/en/rss`)
+ships malformed XML — an unescaped `>` inside an attribute, which the
+`sax`/`xml2js` parser `rss-parser` uses rejects outright (`Attribute
+without value`, line 9). Confirmed reproducible directly against the
+live feed, not a local artifact. Tried `xml2js: { strict: false }`
+(rss-parser passes its `xml2js` option straight through) as a lenient
+fallback — it fails differently instead of recovering ("Feed not
+recognized as RSS 1 or 2"), so it isn't a real fix. `fetchRssFeed`'s
+existing try/catch means this fails soft (0 items that cycle, logged,
+no crash) rather than breaking ingestion — same posture as the wire-
+service gap above: a real gap, not one worth a fragile workaround. If
+France24 ever fixes their feed or publishes an alternate endpoint, this
+should be revisited.
+
 ## Removed
 
 | Source | Why | Category |

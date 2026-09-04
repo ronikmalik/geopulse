@@ -173,28 +173,34 @@ Deliberately not attempted this pass, in the order they'd actually get built:
 routes), Postgres via Neon, no separate worker service.
 
 The brief recommends *not* relying on Vercel alone for persistent ingestion workers.
-That recommendation is correct, and this session hit exactly the failure mode it
+That recommendation is correct, and this project hit exactly the failure mode it
 warns about: the originally-intended scheduling mechanism (a GitHub Actions cron
-calling `/api/ingest` every ~15 minutes) has **never fired once**, verified against
-GitHub's own Actions run history — for the entire life of this repository, on this
-deployment or the previous one. Root cause undiagnosed (no GitHub token available this
-session to inspect repo Actions settings).
+calling `/api/ingest`) has **never fired once** on its own schedule trigger, verified
+against GitHub's own Actions run history — for the entire life of this repository, on
+this deployment or the previous one. Root cause undiagnosed. It now only runs via
+manual `workflow_dispatch` and is kept as a backup, not the primary mechanism.
 
-Rather than leave the app dependent on infrastructure that's silently not working, the
-live SSE stream route (`src/app/api/stream/route.ts`) now opportunistically triggers a
-background ingest run on every new connection, gated to at most once per ~10 minutes
-per warm instance. In practice: **the app self-refreshes whenever someone has it
-open**, using Next's `after()` API to guarantee the trigger request actually gets sent
-rather than being silently dropped when the stream's own response completes.
+The actual primary trigger, as of 2026-09 (confirmed live via `/api/admin/health`
+showing multi-minute-fresh `lastAttemptAt` timestamps), is an external scheduler,
+[cron-job.org](https://cron-job.org), hitting `/api/ingest` directly and
+authenticating via `?secret=` (see `cronAuth.ts` for why query-param auth was chosen
+over a header). Its schedule lives in cron-job.org's own dashboard, not in this repo.
+It has one hard, non-configurable constraint that shaped `src/lib/ingest.ts` and
+`src/lib/sources/gdelt.ts`: a 30s request timeout, confirmed directly in its UI.
 
-This is a genuine, working mitigation — not a substitute for fixing real scheduled
-ingestion. It has one real limitation the brief anticipates: if literally nobody
-visits the site for an extended period, ingestion pauses. The daily Vercel cron
-(`vercel.ts`) remains as a once-a-day floor (Vercel Hobby plan caps custom cron
-frequency at once/day — this is a real platform limit, not a design choice). Fixing
-GitHub Actions properly, or moving ingestion to a dedicated always-on worker (Railway/
-Fly.io/Render, as the brief suggests) is the correct long-term fix and is on the
-roadmap — it needs credentials/access this session didn't have.
+As a second-tier mitigation independent of cron-job.org, the live SSE stream route
+(`src/app/api/stream/route.ts`) also opportunistically triggers a background ingest
+run on every new connection, gated to at most once per ~10 minutes per warm instance
+— so **the app additionally self-refreshes whenever someone has it open**, using
+Next's `after()` API to guarantee the trigger request actually gets sent rather than
+being silently dropped when the stream's own response completes.
+
+The daily Vercel cron (`vercel.ts`) is a third-tier floor in case both of the above
+stop working (Vercel Hobby plan caps custom cron frequency at once/day — this is a
+real platform limit, not a design choice). Fixing GitHub Actions properly, or moving
+ingestion to a dedicated always-on worker (Railway/Fly.io/Render, as the brief
+suggests) so a single third-party scheduler isn't the sole real-time dependency, is
+still the correct long-term fix and is on the roadmap.
 
 **Serverless duration**: Vercel Hobby-tier functions are commonly documented at a 60s
 ceiling; this project's Fluid Compute setting has empirically allowed a full ~60–90s

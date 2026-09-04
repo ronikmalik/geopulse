@@ -296,10 +296,12 @@ const NAMES_BY_LENGTH_DESC = Object.keys(COUNTRY_NAME_TO_ALPHA2).sort(
   (a, b) => b.length - a.length,
 );
 
-// Case-sensitive institutional signals, checked against the ORIGINAL text
-// before the general lowercase scan runs. Two things live here for the
-// same reason: they're too short/collision-prone to be safe as plain
-// lowercase substrings, but unambiguous once case is respected.
+// Case-sensitive institutional signals, matched against the ORIGINAL text
+// (not lowercased) and folded into the same earliest-position candidate
+// pool as country names in resolveCountryFromText below — never returned
+// unconditionally. Two things live here for the same reason: they're too
+// short/collision-prone to be safe as plain lowercase substrings, but
+// unambiguous once case is respected.
 //
 // "US" is the big one — deliberately excluded from the general map because
 // the pronoun "us" ("tells us", "let us know") would match constantly
@@ -370,6 +372,17 @@ function resolveNameInPhrase(phrase: string): string | null {
   return null;
 }
 
+// A country's own forces/personnel/facilities being the OBJECT of an attack
+// verb ("Iran hits US military targets") is a real signal the story is
+// about that country's risk exposure — same idea as TARGETING_PATTERNS
+// above, generalized from sanctions/capital-flight to attacks. Kept
+// separate (rather than folded into TARGETING_PATTERNS) because it needs
+// case-sensitive "US" matching, not resolveNameInPhrase's lowercase name
+// map — a plainly-spelled target country ("strikes on Israeli forces") is
+// already handled fine by the general earliest-mention scan below.
+const ATTACK_ON_US_PATTERN =
+  /\b(?:hits?|hit|strikes?|struck|targets?|targeted|attacks?|attacked|kills?|killed|wounds?|wounded|bombs?|bombed|shells?|shelled)\b[^.]{0,25}\b(?:U\.S\.?|US)\b[^.]{0,20}\b(?:military|naval|air(?:craft)?|troops?|forces?|base|bases|embassy|embassies|consulate|personnel|warship|soldiers?|servicemembers?|sailors?|marines?|targets?)\b/;
+
 // Picks whichever recognized name appears EARLIEST in the text, not the
 // longest one — a headline's subject/actor is almost always named first
 // ("Dutch bank moves gold from UK to Canada" is a Netherlands story, not a
@@ -379,12 +392,18 @@ function resolveNameInPhrase(phrase: string): string | null {
 // other (e.g. "south korea" containing "korea") — the pre-sorted, longer
 // name wins that comparison so the more specific match takes it.
 //
-// Three checks run first, each because "earliest mention" gets the wrong
-// answer in a specific, common way: TARGETING_PATTERNS (the actor named
-// first isn't who the risk is about), INSTITUTION_ACRONYM_TO_ALPHA2 (short
-// tokens the general scan can't safely handle case-insensitively), and —
-// inline in the scan below — PERSON_NOUNS (a demonym describing a person
-// isn't a location).
+// TARGETING_PATTERNS runs first, unconditionally: the actor named first
+// genuinely isn't who the risk is about, so that one's a real override.
+// INSTITUTION_ACRONYM_TO_ALPHA2 is NOT a similar override — it exists only
+// because short tokens like "US" need case-sensitive handling the general
+// lowercase scan can't do safely, not because an institution mention should
+// beat an earlier, more central country name. ("Russian drone strikes
+// Ukraine security HQ as US talks on the war are expected" is a
+// Russia/Ukraine story; "US" is a bystander mentioned last, not the
+// subject.) So institution matches are folded into the same earliest-
+// position candidate pool as country names, rather than checked first and
+// returned immediately. PERSON_NOUNS (a demonym describing a person isn't
+// a location) is applied inline in that same pool.
 export function resolveCountryFromText(text: string): string | null {
   for (const pattern of TARGETING_PATTERNS) {
     const m = text.match(pattern);
@@ -394,21 +413,42 @@ export function resolveCountryFromText(text: string): string | null {
     }
   }
 
+  if (/[a-z]/.test(text) && ATTACK_ON_US_PATTERN.test(text)) return "US";
+
+  const lower = text.toLowerCase();
+  const candidates: { index: number; length: number; alpha2: string }[] = [];
+
   if (/[a-z]/.test(text)) {
     for (const [pattern, alpha2] of INSTITUTION_ACRONYM_TO_ALPHA2) {
-      if (pattern.test(text)) return alpha2;
+      const m = text.match(pattern);
+      if (m && m.index !== undefined) {
+        candidates.push({ index: m.index, length: m[0].length, alpha2 });
+      }
     }
   }
 
-  const lower = text.toLowerCase();
-  const candidates = NAMES_BY_LENGTH_DESC
-    .map((name) => ({ name, index: lower.indexOf(name) }))
-    .filter((c) => c.index !== -1)
-    .sort((a, b) => a.index - b.index || b.name.length - a.name.length);
+  for (const name of NAMES_BY_LENGTH_DESC) {
+    const index = lower.indexOf(name);
+    if (index !== -1) {
+      candidates.push({ index, length: name.length, alpha2: COUNTRY_NAME_TO_ALPHA2[name] });
+    }
+  }
 
+  // Collapse same-start-index matches to just the longest (e.g. "venezuela"
+  // is a substring of "venezuelan" at the same index) — otherwise a
+  // person-noun skip on the longer match falls through to a truncated
+  // remnant of the very same word, which no longer lands on a real word
+  // boundary and defeats the skip.
+  candidates.sort((a, b) => a.index - b.index || b.length - a.length);
+  const deduped: typeof candidates = [];
   for (const c of candidates) {
-    if (PERSON_NOUNS.has(wordAfter(lower, c.index + c.name.length))) continue;
-    return COUNTRY_NAME_TO_ALPHA2[c.name];
+    if (deduped.length && deduped[deduped.length - 1].index === c.index) continue;
+    deduped.push(c);
+  }
+
+  for (const c of deduped) {
+    if (PERSON_NOUNS.has(wordAfter(lower, c.index + c.length))) continue;
+    return c.alpha2;
   }
   return null;
 }
