@@ -93,14 +93,16 @@ backfilling with an unvetted source.
 | Taipei Times | Liberty Times Group (private Taiwanese media company) | Left-Center | Mostly Factual / High Credibility | Disclosed pro-Taiwan-independence editorial lean. Closes a real gap — china-taiwan previously had no dedicated regional outlet. |
 | NK News | Korea Risk Group (private, founded by Chad O'Carroll), subscription-funded | Least Biased | High | North Korea specialist. Closes a real gap — north-korea previously had no dedicated outlet, only GDELT's keyword query. |
 | Haaretz | Schocken family (75%), Leonid Nevzlin (25%, Russian-Israeli businessman) | Left | High | Israeli-domestic-critical counterweight to Times of Israel — same disclosed-lean logic as Meduza/Moscow Times. |
+| ABC News (Australia) | Australian Broadcasting Corporation — public broadcaster, statutorily editorially independent | Left-Center | High | Same disclosed-public-funding/independence model as BBC/DW/France24/RFE/RL. |
+| CBC News (Canada) | Canadian Broadcasting Corporation — public broadcaster, statutorily editorially independent | Left-Center | High | Same model as ABC Australia. |
 
-24 sources, spanning North America, Europe, Russia/Ukraine/Central Asia
+26 sources, spanning North America, Europe, Russia/Ukraine/Central Asia
 (now meaningfully deeper via RFE/RL, Meduza, and Moscow Times), the
 Middle East (Israeli, Arab-world, and Israeli-critical vantage points),
-South/Southeast Asia, Taiwan, North Korea, Africa, and Latin America
-(Argentina only, after Rio Times's removal and MercoPress's earlier
-removal — a real gap; Brazil/wider South America coverage now depends on
-the global wire outlets happening to cover it).
+South/Southeast Asia, Taiwan, North Korea, Australia, Canada, Africa, and
+Latin America (Argentina only, after Rio Times's removal and MercoPress's
+earlier removal — a real gap; Brazil/wider South America coverage now
+depends on the global wire outlets happening to cover it).
 
 ## Checked and rejected (2026-09-04 expansion pass)
 
@@ -115,6 +117,9 @@ the RFE/RL mold. These were checked and did not make it in:
 | Naharnet | Reasonable credibility signal (independent, Center bias, Very High factuality per Ground News) but no MBFC page found and no discoverable RSS feed — couldn't clear either the verification bar or the availability bar. |
 | Rudaw | MBFC rates it **Questionable** overall — "promotion of pro-government propaganda" and ownership/funding opacity. Same tier as the already-excluded MercoPress. |
 | Institute for the Study of War (understandingwar.org) | The organization researched at the start of this whole Telegram-sourcing effort — but their own CMS explicitly disables RSS ("we disable the RSS feed for performance reasons," per their server headers). Nothing to wire in. |
+| Voice of America | Same USAGM funding model as RFE/RL, but the feed is **dead**: every article is dated 2026-03-15 — the exact day USAGM funding was cut — and nothing has published since. An 18-month-stale feed, not a live source. |
+| Radio Free Asia | Reportedly still publishing per third-party reporting, but no working RSS feed found at any common or guessed path. |
+| Yonhap News Agency | Real value for Korean-peninsula coverage, but a meaningfully weaker trust model than the others here — MBFC notes the South Korean government directly controls Yonhap and appoints its board (not just funds it under statutory independence, the BBC/DW/RFE/RL model), and rates its factual reporting "Mostly Factual" rather than "High" due to weaker sourcing technique. Held back pending an explicit decision rather than folded in quietly. |
 
 ## Non-editorial sources (not applicable)
 

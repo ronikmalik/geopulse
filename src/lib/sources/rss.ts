@@ -62,6 +62,14 @@ export const RSS_FEEDS: { name: string; url: string }[] = [
   // the Caucasus, Central Asia, and the Balkans in one feed — exactly the
   // conflict theaters russia-ukraine and political-instability track.
   { name: "rferl", url: "https://www.rferl.org/api/" },
+  // Same statutory-independence public-broadcaster model as BBC/DW/
+  // France24/RFE/RL above. Checked alongside RFE/RL for more disclosed-
+  // government-funded outlets; VOA and Radio Free Asia were also checked
+  // and rejected (VOA's feed has been dead since 2025-03-15, the day
+  // USAGM funding was cut; RFA has no working RSS feed found) — see
+  // SOURCE_CREDIBILITY.md.
+  { name: "abc-australia", url: "https://www.abc.net.au/news/feed/51120/rss.xml" },
+  { name: "cbc-world", url: "https://www.cbc.ca/webfeed/rss/rss-world" },
   // Independent, in-exile Russian outlets (Russian authorities revoked
   // both organizations' domestic media standing) — an anti-Kremlin
   // editorial lean is disclosed and expected, the same way Rybar/WarGonzo
