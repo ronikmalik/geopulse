@@ -11,9 +11,10 @@ import { fetchIodaOutages } from "./sources/ioda";
 import { fetchFirmsThermalAnomalies } from "./sources/firms";
 import { fetchTelegramChannel, TELEGRAM_CHANNELS } from "./sources/telegram";
 import type { DirectItem } from "./sources/direct";
-import { classifyByKeywords, isLikelyGeopolitical } from "./classify";
+import { classifyByKeywords, isLikelyGeopolitical, assessIncidentSeverity } from "./classify";
 import { trackFetch, recordSourceHealth } from "./sourceHealth";
 import { correlationGroupId } from "./correlation";
+import { archiveClassifications } from "./classificationArchive";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -320,11 +321,39 @@ export async function runIngest(): Promise<IngestResult> {
   // classifyByKeywords is a pure, synchronous, local function (no external
   // API), so unlike the old LLM-based classifyBatch this needs no batching
   // or rate-limit pacing between calls.
+  //
+  // Every candidate — kept AND dropped — is archived to
+  // classification_archive (see src/lib/classificationArchive.ts) as a
+  // side effect of this same pass, not a separate query: the point is
+  // building a real, growing dataset of what the severity gate is
+  // currently rejecting, so new incident vocabulary can be found with
+  // actual evidence instead of guessing. Dropped items don't get a
+  // category from classifyByKeywords (it bails before computing one), so
+  // severity is independently recomputed via assessIncidentSeverity for
+  // archival purposes — cheap, pure, and already exported for exactly
+  // this kind of reuse.
   try {
+    const archiveOutcomes = fresh.map((item) => {
+      const text = `${item.title} ${item.snippet}`;
+      return {
+        source: item.source,
+        url: item.url,
+        title: item.title,
+        snippet: item.snippet,
+        kept: false,
+        severity: assessIncidentSeverity(text) ?? 1,
+        category: null as string | null,
+        publishedAt: item.publishedAt,
+      };
+    });
+
     const rows = fresh
-      .map((item) => {
+      .map((item, i) => {
         const c = classifyByKeywords(item);
         if (!c) return null;
+        archiveOutcomes[i].kept = true;
+        archiveOutcomes[i].severity = c.severity;
+        archiveOutcomes[i].category = c.category;
         const country = c.country.toUpperCase();
         return {
           source: item.source,
@@ -351,6 +380,8 @@ export async function runIngest(): Promise<IngestResult> {
         .returning({ id: events.id });
       inserted += result.length;
     }
+
+    await archiveClassifications(archiveOutcomes);
   } catch (err) {
     errors.push(`classify: ${err}`);
   }

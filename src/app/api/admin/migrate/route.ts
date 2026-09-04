@@ -38,6 +38,20 @@ const STATEMENTS = [
     date TEXT PRIMARY KEY,
     characters INTEGER NOT NULL DEFAULT 0
   )`,
+  sql`CREATE TABLE IF NOT EXISTS classification_archive (
+    id SERIAL PRIMARY KEY,
+    source TEXT NOT NULL,
+    url TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    snippet TEXT NOT NULL,
+    kept BOOLEAN NOT NULL,
+    severity INTEGER NOT NULL,
+    category TEXT,
+    published_at TIMESTAMPTZ NOT NULL,
+    archived_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS classification_archive_kept_idx ON classification_archive (kept)`,
+  sql`CREATE INDEX IF NOT EXISTS classification_archive_archived_at_idx ON classification_archive (archived_at)`,
 ];
 
 export async function GET(req: NextRequest) {

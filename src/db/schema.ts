@@ -7,6 +7,7 @@ import {
   integer,
   timestamp,
   index,
+  boolean,
 } from "drizzle-orm/pg-core";
 
 export const events = pgTable(
@@ -129,3 +130,47 @@ export const translationUsage = pgTable("translation_usage", {
 });
 
 export type TranslationUsageRow = typeof translationUsage.$inferSelect;
+
+// Every candidate item the classifier evaluates (GDELT/RSS after the
+// topical isLikelyGeopolitical filter, Telegram posts after translation)
+// — kept AND dropped — archived here regardless of outcome. Separate from
+// `events`, which only ever holds what actually became feed-visible: this
+// table is never read by the website, only by
+// /api/admin/vocabulary-report (see src/lib/classificationArchive.ts). The
+// point is a growing, real dataset of what assessIncidentSeverity is
+// currently rejecting, so new incident vocabulary can be found and added
+// with real evidence behind it — the same discipline every vocabulary
+// change already goes through in src/lib/classify.ts's comments, just
+// automated instead of a one-off live-test each time. Deliberately does
+// NOT feed back into classify.ts automatically — see the doc comment on
+// GET in the vocabulary-report route for why that boundary is intentional.
+export const classificationArchive = pgTable(
+  "classification_archive",
+  {
+    id: serial("id").primaryKey(),
+    source: text("source").notNull(),
+    url: text("url").notNull().unique(),
+    title: text("title").notNull(),
+    snippet: text("snippet").notNull(),
+    kept: boolean("kept").notNull(),
+    // Always computable via assessIncidentSeverity regardless of outcome.
+    severity: integer("severity").notNull(),
+    // Only set when kept=true — classifyByKeywords computes category as
+    // part of the same pass that decides inclusion; dropped items never
+    // reach that step, and re-deriving it just for archival isn't worth
+    // the duplicated logic for what this table is actually used for
+    // (vocabulary discovery cares about severity/text, not category).
+    category: text("category"),
+    publishedAt: timestamp("published_at", { withTimezone: true }).notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("classification_archive_kept_idx").on(table.kept),
+    index("classification_archive_archived_at_idx").on(table.archivedAt),
+  ],
+);
+
+export type ClassificationArchiveRow = typeof classificationArchive.$inferSelect;
+export type NewClassificationArchiveRow = typeof classificationArchive.$inferInsert;

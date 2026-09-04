@@ -301,6 +301,20 @@ function categorizeByKeywords(title: string, text: string): NewsCategory | "othe
   return "other";
 }
 
+// Used by src/lib/classificationArchive.ts's vocabulary-candidate report —
+// a word/phrase already covered by any severity tier isn't a useful
+// "new vocabulary" suggestion, so this lets that report filter candidates
+// against the actual live patterns instead of a hand-maintained exclude
+// list that could silently drift out of sync with the regexes above.
+export function isKnownIncidentVocabulary(phrase: string): boolean {
+  return (
+    HIGH_SEVERITY.test(phrase) ||
+    MODERATE_SEVERITY.test(phrase) ||
+    MILD_SEVERITY.test(phrase) ||
+    BENIGN_PATTERNS.test(phrase)
+  );
+}
+
 // Shared by classifyByKeywords below and src/lib/sources/telegram.ts's
 // breaking-incident filter — the "is this actually a reported development,
 // not routine/reflective noise" judgment shouldn't be reimplemented twice.

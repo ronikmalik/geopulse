@@ -3,6 +3,7 @@ import type { DirectItem } from "./direct";
 import { COUNTRY_CENTROIDS } from "../countryCentroids";
 import { translateBatch } from "../translate";
 import { assessIncidentSeverity, MIN_SEVERITY_TO_INCLUDE } from "../classify";
+import { archiveClassifications, type ClassificationOutcome } from "../classificationArchive";
 
 // Public-channel scraping via Telegram's own no-auth web preview
 // (t.me/s/<channel>) — no bot token, no login, never touches groups or
@@ -245,11 +246,35 @@ export async function fetchTelegramChannel(
 
   if (!canAssess(config, translated)) return [];
 
-  return posts
+  // Every scoreable post — kept AND dropped — is archived to
+  // classification_archive (see src/lib/classificationArchive.ts), same
+  // as GDELT/RSS in src/lib/ingest.ts. `severity === null` (BENIGN/
+  // ONGOING-suppressed entirely, not just below the bar) is logged as 1
+  // for archival purposes — there's no meaningful difference for
+  // vocabulary-discovery purposes between "scored 1" and "suppressed
+  // outright", both mean "nothing here looks like an incident."
+  const archiveOutcomes: ClassificationOutcome[] = [];
+
+  const items = posts
     .map((p, i) => {
       const severity = assessIncidentSeverity(finalExcerpts[i]);
-      if (severity === null || severity < TELEGRAM_MIN_SEVERITY) return null;
-      return toDirectItem(p, finalExcerpts[i], translated, config, severity);
+      const kept = severity !== null && severity >= TELEGRAM_MIN_SEVERITY;
+      archiveOutcomes.push({
+        source: `telegram:${config.handle}`,
+        url: `https://t.me/${p.id}`,
+        title: finalExcerpts[i].slice(0, 200),
+        snippet: finalExcerpts[i],
+        kept,
+        severity: severity ?? 1,
+        category: kept ? config.category : null,
+        publishedAt: p.publishedAt,
+      });
+      if (!kept) return null;
+      return toDirectItem(p, finalExcerpts[i], translated, config, severity as number);
     })
     .filter((item): item is DirectItem => item !== null);
+
+  await archiveClassifications(archiveOutcomes);
+
+  return items;
 }
