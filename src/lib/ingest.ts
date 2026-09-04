@@ -14,6 +14,10 @@ import { classifyByKeywords, isLikelyGeopolitical } from "./classify";
 import { trackFetch, recordSourceHealth } from "./sourceHealth";
 import { correlationGroupId } from "./correlation";
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function dedupeByUrl(items: RawItem[]): RawItem[] {
   const seen = new Map<string, RawItem>();
   for (const item of items) seen.set(item.url, item);
@@ -104,19 +108,55 @@ export async function runIngest(): Promise<IngestResult> {
   // (nothing at all came back), which is the meaningful "is GDELT down"
   // signal for source_health, while the per-query detail still surfaces
   // in this run's error list either way.
+  //
+  // Sequential with spacing, not Promise.all: GDELT's own docs say their
+  // APIs are "rate limited to protect the underlying ElasticSearch
+  // clusters", and this app was firing all 7 category queries
+  // simultaneously every ~15 min — a real burst-of-7-concurrent-requests
+  // pattern from the same IP, repeated on a cron. A live curl test against
+  // GDELT (independent of this app) also showed ~11-13s just to get a 429
+  // back, well past this app's old 7s per-query timeout — so some of what
+  // source_health was logging as "GDELT down" was actually this app
+  // aborting a slow-but-real response, not GDELT rejecting the request.
+  // retries: 0 here (rather than fetchGdelt's own default of 1) because
+  // serialization already means one query's failure doesn't cost the
+  // others anything — a same-query retry would just double the worst-case
+  // wall-clock time for no corresponding benefit.
+  //
+  // GDELT_MAX_PHASE_MS bounds the *total* time this sequential fan-out can
+  // spend, not just each query — cron-job.org's own request timeout and
+  // Vercel's practical (not just configured) execution ceiling both cap
+  // how long the whole /api/ingest response can take, and 7 queries at a
+  // generous 15s timeout each could in the worst case (GDELT fully down)
+  // add up to well over either of those. Once the budget is spent, any
+  // remaining categories are skipped for this run rather than attempted —
+  // they'll just get picked up on the next ingest cycle a few minutes
+  // later, same as if this run's ingest simply hadn't happened yet.
+  const GDELT_QUERY_SPACING_MS = 1500;
+  const GDELT_MAX_PHASE_MS = 40_000;
   const gdeltQueryErrors: string[] = [];
 
   const [gdelt, rss, usgs, eonet, gdacs, ioda, firms] = await Promise.all([
     trackFetch("gdelt", async () => {
-      const perQuery = await Promise.all(
-        Object.values(CATEGORY_QUERIES).map((q) =>
-          fetchGdelt(q, 15).catch((err) => {
-            gdeltQueryErrors.push(`gdelt(${q}): ${err}`);
-            return [] as RawItem[];
-          }),
-        ),
-      );
-      const flat = perQuery.flat();
+      const results: RawItem[][] = [];
+      const queries = Object.values(CATEGORY_QUERIES);
+      const phaseStart = Date.now();
+      for (let i = 0; i < queries.length; i++) {
+        if (Date.now() - phaseStart > GDELT_MAX_PHASE_MS) {
+          gdeltQueryErrors.push(
+            `gdelt(${queries[i]}): skipped, GDELT phase budget (${GDELT_MAX_PHASE_MS}ms) exhausted`,
+          );
+          continue;
+        }
+        if (i > 0) await sleep(GDELT_QUERY_SPACING_MS);
+        try {
+          results.push(await fetchGdelt(queries[i], 15, 0));
+        } catch (err) {
+          gdeltQueryErrors.push(`gdelt(${queries[i]}): ${err}`);
+          results.push([]);
+        }
+      }
+      const flat = results.flat();
       if (flat.length === 0 && gdeltQueryErrors.length > 0) {
         throw new Error(gdeltQueryErrors.join("; "));
       }

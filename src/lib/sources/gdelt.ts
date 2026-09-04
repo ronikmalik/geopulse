@@ -30,12 +30,14 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Bounded so the category queries in ingest.ts (run in parallel, one
-// retry each on network failure) can't stall the whole ingest run for
-// long if GDELT is slow or unreachable — a dead endpoint should fail
-// fast enough that RSS and everything else still gets a fair chance to
-// run within the ingest route's overall budget.
-const REQUEST_TIMEOUT_MS = 7_000;
+// A live curl test against GDELT (independent of this app, 2026-09-04)
+// took ~11-13s just to get a response back (a 429) under real load —
+// well past the 7s this was originally set to. ingest.ts now runs the 7
+// category queries sequentially rather than concurrently (see the comment
+// there), so a generous per-query timeout here no longer risks stalling
+// the other 6 queries the way it would have under the old Promise.all
+// fan-out; it only needs to fit within the ingest route's own 300s budget.
+const REQUEST_TIMEOUT_MS = 15_000;
 
 export async function fetchGdelt(
   query: string,
