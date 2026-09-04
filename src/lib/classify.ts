@@ -420,6 +420,57 @@ export function assessIncidentSeverity(text: string): number | null {
   return keywordSeverity(text);
 }
 
+// GDELT-specific, deliberately looser than classifyByKeywords below. Per
+// the user's explicit instruction (2026-09-04): "let the gdelt updates be
+// far less restrictive than the others. as long as it is new info and
+// about what is happening in a country let them through." RSS/Telegram
+// need the full severity + BENIGN/ONGOING suppression stack because they're
+// a general firehose where most volume is topic-adjacent noise (features,
+// op-eds, routine diplomacy). GDELT hits come from CATEGORY_QUERIES —
+// already scoped to a specific flashpoint topic at the query level — so a
+// result is inherently "what is happening" in that topic; there's much
+// less noise to filter out, and none of MIN_SEVERITY_TO_INCLUDE or
+// BENIGN_PATTERNS/ONGOING_COVERAGE_PATTERNS is applied here. What's still
+// excluded is narrower and answers a different question — "is this
+// actually new information" — not "is this escalation-worthy": pure
+// explainer/opinion headlines, unconditional retrospectives ("years
+// after..."), and rhetorical-argument pieces are still not news of
+// something happening, they're commentary on something that already did.
+export function classifyGdeltItem(item: RawItem): ClassifiedItem | null {
+  if (NON_EVENT_TITLE_PATTERNS.test(item.title)) return null;
+
+  const text = `${item.title} ${item.snippet}`;
+  if (DEFINITELY_ONGOING_PATTERNS.test(text)) return null;
+  if (RHETORICAL_ARGUMENT_PATTERNS.test(text)) return null;
+
+  const severity = keywordSeverity(text);
+  const category =
+    (item.gdeltCategory as NewsCategory | undefined) ??
+    categorizeByKeywords(item.title, text);
+
+  const resolvedCountry =
+    resolveCountryFromText(item.title) ?? resolveCountryFromText(item.snippet);
+  const country =
+    resolvedCountry ??
+    (category !== "other" ? CATEGORY_FALLBACK_COUNTRY[category] : undefined);
+  if (!country) return null;
+
+  const centroid = COUNTRY_CENTROIDS[country];
+  if (!centroid) return null;
+
+  return {
+    id: 0,
+    relevant: true,
+    summary: item.title,
+    category,
+    location: centroid.name,
+    country,
+    lat: centroid.lat,
+    lon: centroid.lon,
+    severity,
+  };
+}
+
 export function classifyByKeywords(item: RawItem): ClassifiedItem | null {
   if (NON_EVENT_TITLE_PATTERNS.test(item.title)) return null;
 

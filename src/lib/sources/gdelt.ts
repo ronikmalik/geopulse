@@ -6,6 +6,10 @@ export interface RawItem {
   title: string;
   snippet: string;
   publishedAt: Date;
+  // Set by ingest.ts for GDELT items only, from the CATEGORY_QUERIES key
+  // that produced them — lets classify.ts's GDELT path use the category
+  // the query already guarantees instead of re-deriving it by regex.
+  gdeltCategory?: string;
 }
 
 const GDELT_DOC_ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc";

@@ -1,7 +1,7 @@
 import { getDb } from "@/db";
 import { events } from "@/db/schema";
 import { inArray } from "drizzle-orm";
-import { CATEGORY_QUERIES } from "./categories";
+import { CATEGORY_QUERIES, type NewsCategory } from "./categories";
 import { fetchGdelt, type RawItem } from "./sources/gdelt";
 import { fetchAllRssFeeds } from "./sources/rss";
 import { fetchUsgsEarthquakes } from "./sources/usgs";
@@ -11,7 +11,12 @@ import { fetchIodaOutages } from "./sources/ioda";
 import { fetchFirmsThermalAnomalies } from "./sources/firms";
 import { fetchTelegramChannel, TELEGRAM_CHANNELS } from "./sources/telegram";
 import type { DirectItem } from "./sources/direct";
-import { classifyByKeywords, isLikelyGeopolitical, assessIncidentSeverity } from "./classify";
+import {
+  classifyByKeywords,
+  classifyGdeltItem,
+  isLikelyGeopolitical,
+  assessIncidentSeverity,
+} from "./classify";
 import { trackFetch, recordSourceHealth } from "./sourceHealth";
 import { correlationGroupId } from "./correlation";
 import { archiveClassifications } from "./classificationArchive";
@@ -185,10 +190,13 @@ export async function runIngest(): Promise<IngestResult> {
 
   const [gdelt, rss, usgs, eonet, gdacs, ioda, firms, telegram] = await Promise.all([
     trackFetch("gdelt", async () => {
-      const allQueries = Object.values(CATEGORY_QUERIES);
-      const chunkCount = Math.ceil(allQueries.length / ROTATION_CHUNK_SIZE);
+      const allQueryEntries = Object.entries(CATEGORY_QUERIES) as [
+        NewsCategory,
+        string,
+      ][];
+      const chunkCount = Math.ceil(allQueryEntries.length / ROTATION_CHUNK_SIZE);
       const chunkIndex = Math.floor(Date.now() / ROTATION_INTERVAL_MS) % chunkCount;
-      const queries = allQueries.slice(
+      const queries = allQueryEntries.slice(
         chunkIndex * ROTATION_CHUNK_SIZE,
         chunkIndex * ROTATION_CHUNK_SIZE + ROTATION_CHUNK_SIZE,
       );
@@ -196,16 +204,16 @@ export async function runIngest(): Promise<IngestResult> {
       const results: RawItem[][] = [];
       for (let i = 0; i < queries.length; i++) {
         if (i > 0) await sleep(GDELT_QUERY_SPACING_MS);
+        const [category, query] = queries[i];
         try {
-          results.push(
-            await withDeadline(
-              fetchGdelt(queries[i], 15, 0, GDELT_QUERY_TIMEOUT_MS),
-              GDELT_QUERY_TIMEOUT_MS + 1_000,
-              `gdelt(${queries[i]})`,
-            ),
+          const items = await withDeadline(
+            fetchGdelt(query, 15, 0, GDELT_QUERY_TIMEOUT_MS),
+            GDELT_QUERY_TIMEOUT_MS + 1_000,
+            `gdelt(${query})`,
           );
+          results.push(items.map((item) => ({ ...item, gdeltCategory: category })));
         } catch (err) {
-          gdeltQueryErrors.push(`gdelt(${queries[i]}): ${err}`);
+          gdeltQueryErrors.push(`gdelt(${query}): ${err}`);
           results.push([]);
         }
       }
@@ -350,7 +358,16 @@ export async function runIngest(): Promise<IngestResult> {
 
     const rows = fresh
       .map((item, i) => {
-        const c = classifyByKeywords(item);
+        // GDELT queries are already scoped to a specific flashpoint topic
+        // (see CATEGORY_QUERIES), so a GDELT hit is inherently on-topic in
+        // a way a general RSS firehose isn't — the user asked GDELT be
+        // "far less restrictive than the others... as long as it is new
+        // info and about what is happening in a country let them through."
+        // classifyGdeltItem drops the MIN_SEVERITY_TO_INCLUDE floor and the
+        // routine/benign suppression RSS/Telegram use, keeping only the
+        // "is this actually new info" checks (not a retrospective, not a
+        // rhetorical/opinion piece, not a pure explainer headline).
+        const c = item.source === "gdelt" ? classifyGdeltItem(item) : classifyByKeywords(item);
         if (!c) return null;
         archiveOutcomes[i].kept = true;
         archiveOutcomes[i].severity = c.severity;
