@@ -154,11 +154,19 @@ export default function CountryRiskPanel({
   const { watchlist, toggle } = useWatchlist();
 
   useEffect(() => {
-    if (!selectedCountry) {
-      setDetail(null);
-      return;
-    }
+    // No setDetail(null) reset here: every render site below already
+    // guards on `detail.country === r.country`, so stale detail for a
+    // deselected country is simply never shown — resetting it would only
+    // trigger an extra render for no visible effect.
+    if (!selectedCountry) return;
     let cancelled = false;
+    // react-hooks/set-state-in-effect flags this, but it's React's own
+    // canonical fetch-with-loading-flag pattern (react.dev/learn/
+    // synchronizing-with-effects#fetching-data) — deriving "loading"
+    // instead would mean losing the distinction between "still fetching"
+    // and "fetch failed", which the current .catch/.finally below relies
+    // on. Not worth restructuring into a reducer for a lint nit.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingDetail(true);
     fetch(`/api/risk?country=${selectedCountry}`)
       .then((res) => res.json())
@@ -177,10 +185,9 @@ export default function CountryRiskPanel({
   }, [selectedCountry]);
 
   useEffect(() => {
-    if (!selectedCountry) {
-      setSnapshot(null);
-      return;
-    }
+    // Same reasoning as the detail effect above: render already guards on
+    // `snapshot?.country === r.country`, so no explicit reset is needed.
+    if (!selectedCountry) return;
     let cancelled = false;
     fetch(`/api/country-snapshot?country=${selectedCountry}`)
       .then((res) => res.json())

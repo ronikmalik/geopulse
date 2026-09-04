@@ -82,6 +82,31 @@ export default function GlobeView({
   const refreshScheduledRef = useRef(false);
   const [ready, setReady] = useState(false);
 
+  // Selecting a country and a countryScores refresh can each ask for a
+  // polygon repaint within the same tick. Firing .polygonsData() twice in
+  // quick succession raced three-globe's mesh rebuild — country A's border
+  // white-highlight would sometimes only partially apply (some ring
+  // segments still red) because a second rebuild interrupted the first
+  // mid-flight. Coalescing to one rAF-deferred call per frame means only
+  // the latest ref values ever get applied, and only once.
+  //
+  // Declared here (above the effects that call it) rather than after them
+  // — function declarations hoist either way, but the React Compiler
+  // linter's dependency analysis wants call sites to follow the
+  // declaration in source order.
+  function refreshPolygons() {
+    if (refreshScheduledRef.current) return;
+    refreshScheduledRef.current = true;
+    requestAnimationFrame(() => {
+      refreshScheduledRef.current = false;
+      const globeExt = globeRef.current as unknown as {
+        polygonsData?: (d: unknown[]) => void;
+      } | null;
+      // New array reference forces three-globe to re-evaluate every accessor.
+      globeExt?.polygonsData?.([...countryFeatures]);
+    });
+  }
+
   useEffect(() => {
     onSelectRef.current = onSelect;
   }, [onSelect]);
@@ -106,26 +131,6 @@ export default function GlobeView({
     threatByCountryRef.current = threatMap;
     refreshPolygons();
   }, [countryScores]);
-
-  // Selecting a country and a countryScores refresh can each ask for a
-  // polygon repaint within the same tick. Firing .polygonsData() twice in
-  // quick succession raced three-globe's mesh rebuild — country A's border
-  // white-highlight would sometimes only partially apply (some ring
-  // segments still red) because a second rebuild interrupted the first
-  // mid-flight. Coalescing to one rAF-deferred call per frame means only
-  // the latest ref values ever get applied, and only once.
-  function refreshPolygons() {
-    if (refreshScheduledRef.current) return;
-    refreshScheduledRef.current = true;
-    requestAnimationFrame(() => {
-      refreshScheduledRef.current = false;
-      const globeExt = globeRef.current as unknown as {
-        polygonsData?: (d: unknown[]) => void;
-      } | null;
-      // New array reference forces three-globe to re-evaluate every accessor.
-      globeExt?.polygonsData?.([...countryFeatures]);
-    });
-  }
 
   useEffect(() => {
     const container = containerRef.current;

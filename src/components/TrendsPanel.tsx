@@ -89,12 +89,16 @@ export default function TrendsPanel({ countryScores }: TrendsPanelProps) {
   }, [query, countryScores]);
 
   useEffect(() => {
-    if (!selected) {
-      setHistory([]);
-      setSummary(null);
-      return;
-    }
+    // No reset here: history/summary render is already gated on `{selected
+    // && (...)}` below, so stale data from a cleared selection is simply
+    // never shown.
+    if (!selected) return;
     let cancelled = false;
+    // react-hooks/set-state-in-effect flags this, but it's React's own
+    // canonical fetch-with-loading-flag pattern (react.dev/learn/
+    // synchronizing-with-effects#fetching-data) — see the identical note
+    // in CountryRiskPanel.tsx.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     fetch(`/api/history?country=${selected}`)
       .then((res) => res.json())

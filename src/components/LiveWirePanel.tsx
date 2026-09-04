@@ -41,12 +41,22 @@ export default function LiveWirePanel({
   // Follow the selected country's suggested broadcaster — unless the user
   // has manually picked a different one, in which case their choice sticks
   // until they clear the country selection.
+  // react-hooks/set-state-in-effect flags both effects below. They're
+  // genuinely syncing internal state to the selectedCountry prop (with a
+  // manual-override escape hatch), which react.dev/learn/you-might-not-
+  // need-an-effect's "adjust state when a prop changes" pattern would
+  // normally replace with a render-time comparison — but that pattern
+  // doesn't compose cleanly with two independent triggers (country change
+  // and override-cleared) feeding the same state. Left as effects rather
+  // than restructured without being able to verify the UI live.
   useEffect(() => {
     if (manualOverride) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setChannelId(suggestLiveChannel(selectedCountry));
   }, [selectedCountry, manualOverride]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!selectedCountry) setManualOverride(false);
   }, [selectedCountry]);
 

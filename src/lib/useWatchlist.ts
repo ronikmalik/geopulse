@@ -18,6 +18,11 @@ export function useWatchlist() {
   const [watchlist, setWatchlist] = useState<Set<string>>(new Set());
 
   useEffect(() => {
+    // Deliberately not a `useState(load)` lazy initializer: SSR always
+    // renders empty (no `window`), so the client's first render must also
+    // start empty to match, then pick up localStorage here after mount —
+    // reading it eagerly would cause a hydration mismatch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setWatchlist(load());
   }, []);
 

@@ -76,11 +76,15 @@ export default function Home() {
   // shared window would filter to nothing and show "Listening for
   // signals…" even with real history in the DB.
   useEffect(() => {
-    if (!selectedCountry) {
-      setCountryFeed([]);
-      return;
-    }
+    // No reset here: feedEvents below already falls back to `filtered`
+    // whenever selectedCountry is null, regardless of countryFeed's
+    // contents, so stale per-country data is simply never shown.
+    if (!selectedCountry) return;
     let cancelled = false;
+    // react-hooks/set-state-in-effect flags this, but it's React's own
+    // canonical fetch-with-loading-flag pattern — see the identical note
+    // in CountryRiskPanel.tsx.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCountryFeedLoading(true);
     fetch(`/api/events?country=${selectedCountry}`)
       .then((res) => res.json())
