@@ -192,6 +192,29 @@ const ONGOING_COVERAGE_PATTERNS =
 const DEFINITELY_ONGOING_PATTERNS =
   /years? after\b|decades? after\b|months? into (the )?(war|conflict|invasion)\b|\bone year (since|on|after)\b|\byear in review\b|\blook(s)? back at\b/i;
 
+// Same unconditional-suppression reasoning as DEFINITELY_ONGOING_PATTERNS
+// above, for a different failure mode: state-media/propaganda commentary
+// that argues a broad political characterization rather than reporting a
+// specific new incident, but happens to reference real conflict
+// vocabulary while doing it ("outrageous lie... pointing to a long
+// history of attacks") — which satisfies the softer BENIGN_PATTERNS
+// carve-out below and defeats it, the same way "famine" did for the
+// ONGOING case. Found 2026-09-04 auditing Iran state-media Telegram
+// channels at the user's request ("so much junk is making it through,
+// straight propaganda... focus on direct reportings on attacks... not
+// the propaganda junk"): a real Press TV post — "Gilbert Doctorow says
+// the US claims that it never targets civilians are an outrageous lie,
+// pointing to a long history of attacks..." — passed at severity 3
+// despite being a named commentator's opinion, not a report that
+// anything specific just happened. This targets the recognizable
+// rhetorical-argument register (calling something a lie/hypocrisy/
+// propaganda/double standard, "so-called" framing) rather than trying to
+// detect "is this a pundit" structurally, which "IRGC commander says
+// [strike] occurred" (legitimate direct reporting, same "X says Y"
+// shape) would false-positive on.
+const RHETORICAL_ARGUMENT_PATTERNS =
+  /(is|are) (an? )?outrageous lies?|(is|are) a lie\b|(is|are) lies\b|smacks of hypocrisy|(is|are) (pure |sheer )?hypocrisy|(is|are) (pure |sheer )?propaganda|double standards?|so-called\b/i;
+
 // Routine, expected, or de-escalatory activity that the topical KEYWORDS
 // filter above will still catch (a port call by a US carrier mentions
 // "troops"/a country by name, a peace summit mentions the same countries
@@ -380,9 +403,11 @@ export function isKnownIncidentVocabulary(phrase: string): boolean {
 // MIN_SEVERITY_TO_INCLUDE=2, Telegram's raw-channel filter uses a stricter
 // bar — see TELEGRAM_MIN_SEVERITY in telegram.ts).
 export function assessIncidentSeverity(text: string): number | null {
-  // Checked first and unconditionally — see DEFINITELY_ONGOING_PATTERNS
-  // above for why this one bypasses the hasEscalation carve-out entirely.
+  // Checked first and unconditionally — see DEFINITELY_ONGOING_PATTERNS /
+  // RHETORICAL_ARGUMENT_PATTERNS above for why these bypass the
+  // hasEscalation carve-out entirely.
   if (DEFINITELY_ONGOING_PATTERNS.test(text)) return null;
+  if (RHETORICAL_ARGUMENT_PATTERNS.test(text)) return null;
 
   const hasEscalation = HIGH_SEVERITY.test(text) || MODERATE_SEVERITY.test(text);
 
