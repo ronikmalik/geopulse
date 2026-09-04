@@ -1,0 +1,35 @@
+name: Admin endpoint call
+
+# Manual-dispatch-only utility for calling an authenticated /api/admin/*
+# GET endpoint using the CRON_SECRET this repo already has as a GitHub
+# secret (see ingest.yml). Exists because Vercel's production env vars are
+# correctly write-only ("sensitive") once set — nobody, including the
+# account owner via the dashboard or CLI, can read the value back out —
+# so this is the only way to trigger a one-off authenticated admin
+# operation (e.g. a data-correction endpoint) without weakening that.
+on:
+  workflow_dispatch:
+    inputs:
+      path:
+        description: "Path + query string after /api/, e.g. admin/recompute-country?apply=true"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  call:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Call endpoint
+        run: |
+          status=$(curl -sS -o /tmp/body.txt -w "%{http_code}" \
+            -X GET "https://geopulse-green.vercel.app/api/${{ github.event.inputs.path }}" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          echo "HTTP $status"
+          cat /tmp/body.txt
+          if [ "$status" -ge 300 ]; then
+            echo "Request failed"
+            exit 1
+          fi
