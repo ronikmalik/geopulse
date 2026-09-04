@@ -161,8 +161,30 @@ const CATEGORY_FALLBACK_COUNTRY: Partial<Record<NewsCategory, string>> = {
 // higher "is this actually breaking" bar after the RSS outlet expansion
 // (2026-09-04): "Definitely not reflection pieces on events that happened
 // in the past or analyses."
+// "What the latest flare-up between the U.S and Iran means" (a real GDELT
+// hit, 2026-09-04) — a bare "what ... means" analysis construction with no
+// colon and none of the specific "who is/why did/what happened" phrasings
+// above, so it slipped through both this pattern and (since it carried no
+// escalation vocabulary) the severity floor alone wouldn't have been a
+// reliable second line of defense for every future case like it. Added as
+// its own alternation rather than folded into the "what happened" branch
+// since "what X means" is a distinct, common analysis-piece construction.
 const NON_EVENT_TITLE_PATTERNS =
-  /^(what to know|explainer|analysis|opinion|op-ed|q&a|in pictures|in photos|photos:|the backstory|timeline:|explained:|commentary|roundup|special report|deep dive|backgrounder|primer)\b|explainer$|^(who is|who are|why is|why did|why does|how is|how did|how does|what happened|what to make of)\b|:\s*(what to know|what happened|explained|explainer|analysis|q&a|commentary)\b/i;
+  /^(what to know|explainer|analysis|opinion|op-ed|q&a|in pictures|in photos|photos:|the backstory|timeline:|explained:|commentary|roundup|special report|deep dive|backgrounder|primer)\b|explainer$|^(who is|who are|why is|why did|why does|how is|how did|how does|what happened|what to make of)\b|:\s*(what to know|what happened|explained|explainer|analysis|q&a|commentary)\b|^what\b.{0,80}\bmeans?\b/i;
+
+// GDELT-specific (see classifyGdeltItem below): press releases/advisories
+// from advocacy orgs and media-criticism pieces that argue an outlet got
+// something wrong — neither is a report that anything happened. Found live
+// (2026-09-04): "PRESS ADVISORY: Kite Framing: CAMERA Urges Media Outlets
+// to Recall History of Destructive Attacks..." scored severity 3 purely
+// because "Attacks" appeared in a historical-reference clause, and "The
+// American Prospect Features Inaccurate Claims about the State of Israel
+// and American Jews" is pure media criticism with no incident at all
+// (scored severity 1, but this pattern exists as a belt-and-suspenders
+// check independent of severity — a press advisory that happened to use
+// stronger language wouldn't be safe to let the floor alone catch).
+const EDITORIAL_PATTERNS =
+  /^press advisory\b|\burges?\s+(media|outlets|journalists)\b|\bfeatures?\s+(inaccurate|misleading|false)\s+claims?\b|\brepeats?\s+(inaccurate|misleading|false)\s+claims?\b/i;
 
 // Coverage of an ongoing/pre-existing situation rather than a fresh
 // development — softer signals that only suppress when nothing else in
@@ -420,30 +442,41 @@ export function assessIncidentSeverity(text: string): number | null {
   return keywordSeverity(text);
 }
 
-// GDELT-specific, deliberately looser than classifyByKeywords below. Per
-// the user's explicit instruction (2026-09-04): "let the gdelt updates be
-// far less restrictive than the others. as long as it is new info and
-// about what is happening in a country let them through." RSS/Telegram
-// need the full severity + BENIGN/ONGOING suppression stack because they're
-// a general firehose where most volume is topic-adjacent noise (features,
-// op-eds, routine diplomacy). GDELT hits come from CATEGORY_QUERIES —
-// already scoped to a specific flashpoint topic at the query level — so a
-// result is inherently "what is happening" in that topic; there's much
-// less noise to filter out, and none of MIN_SEVERITY_TO_INCLUDE or
-// BENIGN_PATTERNS/ONGOING_COVERAGE_PATTERNS is applied here. What's still
-// excluded is narrower and answers a different question — "is this
-// actually new information" — not "is this escalation-worthy": pure
-// explainer/opinion headlines, unconditional retrospectives ("years
-// after..."), and rhetorical-argument pieces are still not news of
-// something happening, they're commentary on something that already did.
+// GDELT-specific — meaningfully looser than classifyByKeywords below (no
+// MIN_SEVERITY_TO_INCLUDE=3 floor, no BENIGN_PATTERNS/ONGOING_COVERAGE_
+// PATTERNS suppression), but NOT zero-floor. First pass (2026-09-04)
+// accepted any severity including 1, on "let them through as long as it's
+// new info about what's happening in a country" — that let real noise
+// through: "China and Iran Commit to Broadening Strategic Partnership
+// Across Various Sectors" and "Israel Armed Argentina Against Britain in
+// 1982 Now Putin, Trump and Netanyahu Encourage Milei..." both scored
+// severity 1 (by keywordSeverity's own definition, severity 1 means NONE
+// of HIGH/MODERATE/MILD_SEVERITY matched — zero incident, escalation, or
+// even warning/tension language, just topical proximity), and the user's
+// direct follow-up ("too much shit is filtering though... make sure it's
+// very relevant to the country or geopolitical risk, not editorial... it
+// needs to be live breaking news, not some random analysis") confirmed
+// that's exactly the "doesn't influence anything" content to cut. Floor
+// raised to MILD_SEVERITY (>=2) — still well short of RSS/Telegram's
+// MODERATE+ bar (>=3), so routine-but-real developments with at least a
+// warn/threaten/escalate/tension/protest/unrest signal still get through,
+// but bare topic-adjacent mentions with no signal at all don't.
+// EDITORIAL_PATTERNS is a separate, severity-independent check — a press
+// advisory or media-criticism piece isn't safe to let through just because
+// it happens to score high (see its own comment above: the CAMERA press
+// advisory scored severity 3 from "Attacks" appearing in a historical
+// reference clause, not from reporting anything happening).
 export function classifyGdeltItem(item: RawItem): ClassifiedItem | null {
   if (NON_EVENT_TITLE_PATTERNS.test(item.title)) return null;
+  if (EDITORIAL_PATTERNS.test(item.title)) return null;
 
   const text = `${item.title} ${item.snippet}`;
   if (DEFINITELY_ONGOING_PATTERNS.test(text)) return null;
   if (RHETORICAL_ARGUMENT_PATTERNS.test(text)) return null;
 
   const severity = keywordSeverity(text);
+  if (severity < 2) return null;
+
   const category =
     (item.gdeltCategory as NewsCategory | undefined) ??
     categorizeByKeywords(item.title, text);
