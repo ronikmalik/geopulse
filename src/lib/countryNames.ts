@@ -163,11 +163,8 @@ export const COUNTRY_NAME_TO_ALPHA2: Record<string, string> = {
   uganda: "UG",
   ukraine: "UA",
   "united arab emirates": "AE",
-  uae: "AE",
   "united kingdom": "GB",
-  uk: "GB",
   "united states": "US",
-  usa: "US",
   "u.s.": "US",
   uruguay: "UY",
   uzbekistan: "UZ",
@@ -317,15 +314,26 @@ const NAMES_BY_LENGTH_DESC = Object.keys(COUNTRY_NAME_TO_ALPHA2).sort(
 // text: an all-caps wire-style headline ("TELLS US WHAT HAPPENED") would
 // make "US" indistinguishable from the pronoun again, so this whole check
 // is skipped for shouty all-caps text rather than risk a false positive.
+//
+// UK/USA/UAE live here for the identical reason "US" does, found via a
+// 2026-09-04 full-database recompute audit: as bare lowercase substring
+// keys they matched inside unrelated words with no relation to any of
+// these countries — "uk" inside "Levuka" and "Dukono", "usa" inside "Nusa
+// Tenggara" — silently misattributing earthquakes/eruptions on those
+// islands to the UK or US. Case-sensitive whole-word matching against the
+// original text fixes it the same way it already worked for "US".
 const INSTITUTION_ACRONYM_TO_ALPHA2: [RegExp, string][] = [
   [/\bU\.S\.?\b/, "US"],
   [/\bUS\b/, "US"],
+  [/\bUSA\b/, "US"],
   [/\bICE\b/, "US"],
   [/\bDHS\b/, "US"],
   [/\bFBI\b/, "US"],
   [/\bCIA\b/, "US"],
   [/\bPentagon\b/, "US"],
   [/\bWhite House\b/, "US"],
+  [/\bUK\b/, "GB"],
+  [/\bUAE\b/, "AE"],
   [/\bDowning Street\b/, "GB"],
   [/\bKremlin\b/, "RU"],
 ];
