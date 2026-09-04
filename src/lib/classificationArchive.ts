@@ -2,6 +2,7 @@ import { sql, and, eq, gt } from "drizzle-orm";
 import { getDb } from "@/db";
 import { classificationArchive } from "@/db/schema";
 import { isKnownIncidentVocabulary } from "./classify";
+import { COUNTRY_NAME_TO_ALPHA2 } from "./countryNames";
 
 export interface ClassificationOutcome {
   source: string;
@@ -53,12 +54,41 @@ const STOPWORDS = new Set([
   "week", "month", "year", "years", "day", "days", "time", "amp",
 ]);
 
+// World leaders and political figures that show up constantly in
+// geopolitical headlines regardless of whether the story is a fresh
+// incident — evidence-based, not a preemptive guess: a real first
+// production run of the vocabulary report (2026-09-04) came back
+// dominated by "trump"/"trumps"/"donald"/"milei" as the top "candidates",
+// none of them useful (COUNTRY_NAME_TO_ALPHA2, reused below, already
+// covers the flashpoint-country leaders — Putin, Zelensky, Netanyahu,
+// Khamenei, Xi — this list is deliberately just the gap that list didn't
+// close). Expect to keep growing this the same way — a real report
+// surfaces a dominant non-incident proper noun, add it here — rather than
+// trying to enumerate every current world leader up front.
+const PROPER_NOUN_NOISE = new Set(["trump", "donald", "milei", "farage", "starmer"]);
+
+const COUNTRY_AND_DEMONYM_NOISE = new Set(Object.keys(COUNTRY_NAME_TO_ALPHA2));
+
+// A possessive ("Israel's", "Russia's") survives tokenize()'s apostrophe
+// stripping as a trailing "s" ("israels", "russias") — checking both the
+// word and its de-possessivized form against the noise sets catches that
+// without needing a separate possessive-aware tokenizer.
+function isProperNounNoise(word: string): boolean {
+  const bare = word.endsWith("s") ? word.slice(0, -1) : word;
+  return (
+    COUNTRY_AND_DEMONYM_NOISE.has(word) ||
+    COUNTRY_AND_DEMONYM_NOISE.has(bare) ||
+    PROPER_NOUN_NOISE.has(word) ||
+    PROPER_NOUN_NOISE.has(bare)
+  );
+}
+
 function tokenize(text: string): string[] {
   return text
     .toLowerCase()
     .replace(/['’]/g, "")
     .split(/[^a-z0-9]+/)
-    .filter((w) => w.length > 2 && !STOPWORDS.has(w));
+    .filter((w) => w.length > 2 && !STOPWORDS.has(w) && !isProperNounNoise(w));
 }
 
 export interface VocabularyCandidate {

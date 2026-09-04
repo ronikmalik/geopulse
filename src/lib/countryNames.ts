@@ -2,7 +2,14 @@
 // location strings from feeds that don't supply a country code directly
 // (USGS "place" strings, NASA EONET titles). Not exhaustive geocoding —
 // just enough to attribute events to a country for the risk panel.
-const COUNTRY_NAME_TO_ALPHA2: Record<string, string> = {
+// Exported (in addition to resolveCountryFromText below) for
+// src/lib/classificationArchive.ts's vocabulary-candidate report — country
+// names, demonyms, capital cities, and heads-of-state are exactly the kind
+// of high-frequency noise that would otherwise crowd out genuine incident
+// verbs in a raw word-frequency count, and this is already the curated,
+// maintained list of exactly those terms rather than a second one that
+// could drift out of sync with it.
+export const COUNTRY_NAME_TO_ALPHA2: Record<string, string> = {
   afghanistan: "AF",
   albania: "AL",
   algeria: "DZ",
