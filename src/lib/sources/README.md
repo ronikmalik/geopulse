@@ -2,8 +2,15 @@
 
 Most files here are wired into `src/lib/ingest.ts` and feed the live `events`
 table: `gdelt.ts`, `rss.ts`, `usgs.ts`, `eonet.ts`, `gdacs.ts`, `ioda.ts`,
-`firms.ts`. Each event category maps to one of the eight risk pillars — see
-`src/lib/pillars.ts` and `docs/ROADMAP.md`.
+`firms.ts`, `telegram.ts`. Each event category maps to one of the eight risk
+pillars — see `src/lib/pillars.ts` and `docs/ROADMAP.md`.
+
+**`telegram.ts`** is a deliberate exception to this project's usual sourcing
+bar: Telegram's own terms restrict the kind of automated access it does. The
+user made that call explicitly, with the tradeoff understood — see
+`docs/TELEGRAM_SOURCES.md` for the full reasoning, the channel list (sourced
+from ISW's own published citations, not guessed), and what was deliberately
+left out.
 
 **`firms.ts`** (NASA FIRMS/VIIRS satellite thermal-anomaly detection) is the
 one genuinely "just happened, not reported-and-written-up" signal in this

@@ -9,6 +9,7 @@ import { fetchNasaEonet } from "./sources/eonet";
 import { fetchGdacsAlerts } from "./sources/gdacs";
 import { fetchIodaOutages } from "./sources/ioda";
 import { fetchFirmsThermalAnomalies } from "./sources/firms";
+import { fetchTelegramChannel, TELEGRAM_CHANNELS } from "./sources/telegram";
 import type { DirectItem } from "./sources/direct";
 import { classifyByKeywords, isLikelyGeopolitical } from "./classify";
 import { trackFetch, recordSourceHealth } from "./sourceHealth";
@@ -158,7 +159,15 @@ export async function runIngest(): Promise<IngestResult> {
   const GDELT_QUERY_TIMEOUT_MS = 10_000;
   const gdeltQueryErrors: string[] = [];
 
-  const [gdelt, rss, usgs, eonet, gdacs, ioda, firms] = await Promise.all([
+  // Same rotation cadence as GDELT (ROTATION_INTERVAL_MS) but its own chunk
+  // size — 9 channels at 3 per cycle covers the full list roughly every
+  // 45 min, comfortably faster than GDELT's 7-category rotation needs.
+  const TELEGRAM_CHUNK_SIZE = 3;
+  const TELEGRAM_QUERY_SPACING_MS = 800;
+  const TELEGRAM_QUERY_TIMEOUT_MS = 7_000;
+  const telegramErrors: string[] = [];
+
+  const [gdelt, rss, usgs, eonet, gdacs, ioda, firms, telegram] = await Promise.all([
     trackFetch("gdelt", async () => {
       const allQueries = Object.values(CATEGORY_QUERIES);
       const chunkCount = Math.ceil(allQueries.length / ROTATION_CHUNK_SIZE);
@@ -199,18 +208,53 @@ export async function runIngest(): Promise<IngestResult> {
     // fetchFirmsThermalAnomalies itself, so this doesn't show up as a
     // "failing" source in source_health until FIRMS_MAP_KEY is actually set.
     trackFetch("firms", fetchFirmsThermalAnomalies),
+    // Same rotation-instead-of-all-at-once reasoning as GDELT above, and
+    // for an additional reason here: see docs/TELEGRAM_SOURCES.md — this
+    // reads public Telegram channels in a way their own terms don't
+    // clearly sanction, a deliberate risk the user accepted, so keeping
+    // request volume light matters more than usual, not just for timing.
+    trackFetch("telegram", async () => {
+      const chunkCount = Math.ceil(TELEGRAM_CHANNELS.length / TELEGRAM_CHUNK_SIZE);
+      const chunkIndex = Math.floor(Date.now() / ROTATION_INTERVAL_MS) % chunkCount;
+      const channels = TELEGRAM_CHANNELS.slice(
+        chunkIndex * TELEGRAM_CHUNK_SIZE,
+        chunkIndex * TELEGRAM_CHUNK_SIZE + TELEGRAM_CHUNK_SIZE,
+      );
+
+      const results: DirectItem[][] = [];
+      for (let i = 0; i < channels.length; i++) {
+        if (i > 0) await sleep(TELEGRAM_QUERY_SPACING_MS);
+        try {
+          results.push(
+            await withDeadline(
+              fetchTelegramChannel(channels[i]),
+              TELEGRAM_QUERY_TIMEOUT_MS + 1_000,
+              `telegram(${channels[i].handle})`,
+            ),
+          );
+        } catch (err) {
+          telegramErrors.push(`telegram(${channels[i].handle}): ${err}`);
+          results.push([]);
+        }
+      }
+      const flat = results.flat();
+      if (flat.length === 0 && telegramErrors.length > 0) {
+        throw new Error(telegramErrors.join("; "));
+      }
+      return flat;
+    }),
   ]);
 
-  const errors = [rss, usgs, eonet, gdacs, ioda, firms]
+  const errors = [rss, usgs, eonet, gdacs, ioda, firms, telegram]
     .filter((r) => r.error)
     .map((r) => `${r.source}: ${r.error}`);
   // gdelt.error is only set when every query failed (see above) — in that
   // case gdeltQueryErrors already has the same detail, so use it instead
   // of the single collapsed trackFetch error to keep per-query visibility
-  // either way.
-  errors.push(...gdeltQueryErrors);
+  // either way. Same reasoning applies to telegramErrors.
+  errors.push(...gdeltQueryErrors, ...telegramErrors);
 
-  await recordSourceHealth([gdelt, rss, usgs, eonet, gdacs, ioda, firms]);
+  await recordSourceHealth([gdelt, rss, usgs, eonet, gdacs, ioda, firms, telegram]);
 
   // RSS "world news" feeds carry a rolling window that isn't necessarily
   // all breaking — a general feed can still list something from a couple
@@ -232,6 +276,7 @@ export async function runIngest(): Promise<IngestResult> {
     ...gdacs.items,
     ...ioda.items,
     ...firms.items,
+    ...telegram.items,
   ]);
 
   if (candidates.length === 0 && direct.length === 0) {

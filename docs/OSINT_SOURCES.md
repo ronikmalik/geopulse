@@ -73,13 +73,28 @@ Not integrated. Revisit only if a Partner-tier agreement is ever pursued
 deliberately, with its own paid-licensing conversation — not as a
 free-tier drop-in.
 
-## Investigated and not currently feasible: social/Telegram OSINT
+## Telegram OSINT — pursued anyway, with the ToS conflict documented
 
 The accounts that actually publish "just happened" ground reports fastest
 in practice (X/Twitter OSINT accounts, Telegram channels used by conflict
-monitors) don't have a workable free path: X's API is paid, and Telegram
-channel scraping raises a different ToS/trust problem than every other
-source in this list, which are all official public APIs. Not pursued.
+monitors) don't have a workable free path the way this app's other sources
+do: X's API is paid, and Telegram's own Content Licensing terms restrict
+automated access to content beyond "ordinary, legitimate, and intended
+use... as its user" — a different, more direct ToS conflict than any other
+source in this list, all of which are official public APIs or explicit
+syndication features. Initially not pursued for exactly that reason.
+
+As of 2026-09-04, the user made an explicit, informed decision to build it
+anyway, accepting that risk. `src/lib/sources/telegram.ts` reads public
+channels (never groups or private chats) via Telegram's own no-auth web
+preview, deliberately throttled (rotation + spacing, same discipline as the
+GDELT fix) as both good practice and risk mitigation given the terms
+conflict. The channel list itself isn't guessed — every channel came from
+ISW's own published endnote citations in their daily Russia-Ukraine and
+Iran assessments, on the reasoning that a well-resourced conflict-analysis
+shop's own disclosed sourcing is a defensible starting point. Full channel
+list, tiering, and what was deliberately left out: `docs/TELEGRAM_SOURCES.md`.
+X/Twitter OSINT remains not pursued — no free API path exists there at all.
 
 ## Already live, baseline recording started: military flight tracking
 

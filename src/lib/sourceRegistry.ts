@@ -250,6 +250,21 @@ export const SOURCE_REGISTRY: SourceLicenseInfo[] = [
     apiKeyRequired: true,
     termsLastChecked: "2026-09-02",
   },
+  {
+    id: "telegram",
+    provider: "Telegram public channel web preview (t.me/s/*)",
+    url: "https://telegram.org/tos/content-licensing",
+    license:
+      "Telegram's Content Licensing terms restrict access to user-generated content to \"ordinary, legitimate, and intended use... as its user\" — an automated ingest cron does not fit that description. This is a knowing exception to this registry's normal bar, not an oversight: see docs/TELEGRAM_SOURCES.md for the full reasoning and the explicit decision to proceed anyway.",
+    commercialUse: "no",
+    redistributionAllowed: "no",
+    attributionRequired: true,
+    cachingAllowed: true,
+    maxCacheAgeNotes: "Rotates through a subset of channels per ingest cycle rather than fetching all of them every time — see src/lib/ingest.ts.",
+    rateLimit: "No published limit for the web-preview endpoint; deliberately throttled client-side regardless (spacing + rotation) as a good-citizen measure given the terms conflict above.",
+    apiKeyRequired: false,
+    termsLastChecked: "2026-09-04",
+  },
 ];
 
 export function getSourceLicense(id: string): SourceLicenseInfo | undefined {
