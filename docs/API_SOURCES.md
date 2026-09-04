@@ -17,7 +17,8 @@ limitations.
 | Source | Endpoint | Auth | License / commercial use | Refresh | Adapter | Limitations |
 |---|---|---|---|---|---|---|
 | GDELT DOC 2.0 | `api.gdeltproject.org/api/v2/doc/doc` | none | Public domain, commercial use OK | ~10 min (self-triggered) | `src/lib/sources/gdelt.ts` | 3h timespan window; has shown extended outages this session (verified via direct `curl` from two independent networks — not a Vercel-specific issue) |
-| RSS (BBC, Al Jazeera, Guardian, NYT, NPR, DW, France24, CNA, CBS) | per-outlet RSS URL | none | Publisher-specific; headline+link only, no full-text reproduction | ~10 min | `src/lib/sources/rss.ts` | No official API; treated as syndication, not scraping — each outlet publishes the feed itself |
+| RSS (16 outlets across North America, Europe, Asia-Pacific, Middle East, Africa, Latin America — see `src/lib/sources/rss.ts` for the list) | per-outlet RSS URL | none | Publisher-specific; headline+link only, no full-text reproduction | ~10 min | `src/lib/sources/rss.ts` | No official API; treated as syndication, not scraping — each outlet publishes the feed itself. Bias/reliability vetted per-outlet, see `docs/SOURCE_CREDIBILITY.md` |
+| NASA FIRMS (VIIRS thermal-anomaly detection) | `firms.modaps.eosdis.nasa.gov/api/area/csv` | free `MAP_KEY` (instant signup) | US government work, public domain per general NASA policy — no FIRMS-specific terms page confirming this found, flagged unclear | ~10 min | `src/lib/sources/firms.ts` | Detects a thermal anomaly, not a confirmed cause (fire vs. explosion vs. industrial incident all look the same to it); grid-clustered and thresholded (8+ detections, 500+ MW) to suppress routine small-fire noise — see `docs/OSINT_SOURCES.md` |
 | USGS Earthquake GeoJSON | `earthquake.usgs.gov/.../summary/4.5_day.geojson` | none | US government work, public domain | ~10 min | `src/lib/sources/usgs.ts` | M4.5+ only, rolling 24h/day window feeds |
 | NASA EONET v3 | `eonet.gsfc.nasa.gov/api/v3/events` | none | US government work, public domain | ~10 min | `src/lib/sources/eonet.ts` | Open events only, `days=3` window |
 | GDACS | `gdacs.org/gdacsapi/api/events/geteventlist/SEARCH` | none | Free use; EU/UN joint initiative, no explicit commercial clause published — flagged unclear | ~10 min | `src/lib/sources/gdacs.ts` | Excludes earthquakes (USGS covers those with more precision); has shown extended outages this session |
@@ -39,6 +40,7 @@ limitations.
 | World Bank Worldwide Governance Indicators (WGI) | **Blocked** | Brief's suggested codes (`CC.EST`, `PV.EST`, control/political-stability/rule-of-law estimates) resolve to an archived data source (`WDI Database Archives`) on the standard Indicators API and return "not found" on live query, despite the indicator existing in WGI source id 3. No working query path found without further investigation — possibly requires the World Bank's separate governance data portal rather than the indicators REST API this app already uses. |
 | gpsjam.org | **Blocked** | No documented public endpoint; fetched server-side by their own frontend only. |
 | CoinGecko, GitHub Search, CelesTrak, ECB SDW, Eurostat, BIS | **Removed** | Integrated earlier, then removed — none fed a risk pillar or told an analyst anything about country risk (crypto prices, trending repos, satellite orbits, Eurozone macro indicators). Scope creep from an earlier "everything dashboard" phase; see `src/lib/dataLayers.ts`. |
+| ACLED | **Blocked** | Checked directly against ACLED's own docs: the free (Research) tier's data is materially lagged, and even the paid Partner/Enterprise tier is only a faster *weekly* refresh — the underlying dataset itself is coded roughly a week after events occur, per ACLED's own "Keeping ACLED Data Updated" page. Free-tier terms also restrict building a monetizable public product directly on the data. Doesn't fit the "genuinely live" brief at any tier that's actually free. See `docs/OSINT_SOURCES.md`. |
 
 ## Candidates not yet attempted (roadmap, prioritized)
 
@@ -50,17 +52,12 @@ Grouped by what they'd unlock, highest-value first:
 - UN Comtrade, WTO API, FAOSTAT — structural trade/food-system context.
 
 **Broader conflict/political coverage**
-- ACLED — needs a registered API key. High value (protests/battles/violence with
-  fatality counts), but registration is a decision for the account owner, not
-  something to sign up for silently on their behalf.
 - UCDP — armed-conflict confirmation layer, slower-updating, needs verification.
 
 **Infrastructure & Connectivity depth**
 - Cloudflare Radar — needs an API token (free tier). Would meaningfully improve on
   IODA's noisier outage-anomaly signal with named, categorized outage events.
 - RIPE Atlas/RIPEstat — independent BGP/DNS/reachability confirmation layer.
-- NASA FIRMS — active-fire detections, needs a free `MAP_KEY`. Would deepen the
-  Climate & Environment pillar beyond GDACS/EONET's discrete alerts.
 
 **Cyber & Technology (currently the other zero-country-coverage pillar)**
 - No clear path to *country-attributed* cyber risk from a free source identified yet.

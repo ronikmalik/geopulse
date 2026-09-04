@@ -8,6 +8,7 @@ import { fetchUsgsEarthquakes } from "./sources/usgs";
 import { fetchNasaEonet } from "./sources/eonet";
 import { fetchGdacsAlerts } from "./sources/gdacs";
 import { fetchIodaOutages } from "./sources/ioda";
+import { fetchFirmsThermalAnomalies } from "./sources/firms";
 import type { DirectItem } from "./sources/direct";
 import { classifyByKeywords, isLikelyGeopolitical } from "./classify";
 import { trackFetch, recordSourceHealth } from "./sourceHealth";
@@ -105,7 +106,7 @@ export async function runIngest(): Promise<IngestResult> {
   // in this run's error list either way.
   const gdeltQueryErrors: string[] = [];
 
-  const [gdelt, rss, usgs, eonet, gdacs, ioda] = await Promise.all([
+  const [gdelt, rss, usgs, eonet, gdacs, ioda, firms] = await Promise.all([
     trackFetch("gdelt", async () => {
       const perQuery = await Promise.all(
         Object.values(CATEGORY_QUERIES).map((q) =>
@@ -126,9 +127,13 @@ export async function runIngest(): Promise<IngestResult> {
     trackFetch("eonet", fetchNasaEonet),
     trackFetch("gdacs", fetchGdacsAlerts),
     trackFetch("ioda", fetchIodaOutages),
+    // No-key-configured is a soft no-op (empty array, no throw) inside
+    // fetchFirmsThermalAnomalies itself, so this doesn't show up as a
+    // "failing" source in source_health until FIRMS_MAP_KEY is actually set.
+    trackFetch("firms", fetchFirmsThermalAnomalies),
   ]);
 
-  const errors = [rss, usgs, eonet, gdacs, ioda]
+  const errors = [rss, usgs, eonet, gdacs, ioda, firms]
     .filter((r) => r.error)
     .map((r) => `${r.source}: ${r.error}`);
   // gdelt.error is only set when every query failed (see above) — in that
@@ -137,7 +142,7 @@ export async function runIngest(): Promise<IngestResult> {
   // either way.
   errors.push(...gdeltQueryErrors);
 
-  await recordSourceHealth([gdelt, rss, usgs, eonet, gdacs, ioda]);
+  await recordSourceHealth([gdelt, rss, usgs, eonet, gdacs, ioda, firms]);
 
   // RSS "world news" feeds carry a rolling window that isn't necessarily
   // all breaking — a general feed can still list something from a couple
@@ -158,6 +163,7 @@ export async function runIngest(): Promise<IngestResult> {
     ...eonet.items,
     ...gdacs.items,
     ...ioda.items,
+    ...firms.items,
   ]);
 
   if (candidates.length === 0 && direct.length === 0) {

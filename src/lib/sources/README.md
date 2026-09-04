@@ -1,9 +1,20 @@
 # Source modules
 
 Most files here are wired into `src/lib/ingest.ts` and feed the live `events`
-table: `gdelt.ts`, `rss.ts`, `usgs.ts`, `eonet.ts`, `gdacs.ts`, `ioda.ts`.
-Each event category maps to one of the eight risk pillars — see
+table: `gdelt.ts`, `rss.ts`, `usgs.ts`, `eonet.ts`, `gdacs.ts`, `ioda.ts`,
+`firms.ts`. Each event category maps to one of the eight risk pillars — see
 `src/lib/pillars.ts` and `docs/ROADMAP.md`.
+
+**`firms.ts`** (NASA FIRMS/VIIRS satellite thermal-anomaly detection) is the
+one genuinely "just happened, not reported-and-written-up" signal in this
+list — a direct sensor reading (~3h satellite-to-API latency) rather than a
+published article. Requires a free `FIRMS_MAP_KEY` (email signup, no
+approval wait — https://firms.modaps.eosdis.nasa.gov/api/map_key/); the
+source no-ops (returns nothing, doesn't error) if that env var isn't set.
+See the file's own header comment for what this signal can and can't tell
+you (a thermal anomaly, not a confirmed cause) and `docs/OSINT_SOURCES.md`
+for the fuller writeup, including why ACLED was investigated and NOT
+integrated despite fitting the same brief.
 
 The following modules are **standalone and intentionally not integrated**
 into the events table: `openmeteo.ts`, `adsblol.ts`, `opensky.ts`,
