@@ -255,7 +255,7 @@ export default function Home() {
           <p className="font-mono text-[9px] tracking-widest text-red-800 sm:text-[10px]">
             GLOBAL RISK INTELLIGENCE
           </p>
-          <div className="mt-2 -ml-1 max-w-[calc(100vw-1.5rem)] overflow-x-auto pl-1 pb-1 sm:max-w-none sm:overflow-visible">
+          <div className="mt-2 -ml-1 max-w-[calc(100vw-1.5rem)] overflow-x-auto pl-1 pb-1 [mask-image:linear-gradient(to_right,black_82%,transparent_100%)] sm:max-w-none sm:overflow-visible sm:[mask-image:none]">
             <CategoryFilter active={activeCategories} onToggle={toggleCategory} />
           </div>
         </div>

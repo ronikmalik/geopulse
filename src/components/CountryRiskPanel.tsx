@@ -249,7 +249,7 @@ export default function CountryRiskPanel({
                 <button
                   onClick={() => toggle(r.country)}
                   aria-label={isWatched ? "Remove from watchlist" : "Add to watchlist"}
-                  className={`font-mono text-sm ${
+                  className={`-m-2.5 p-2.5 font-mono text-sm ${
                     isWatched ? "text-red-500" : "text-neutral-700 hover:text-red-700"
                   }`}
                 >
