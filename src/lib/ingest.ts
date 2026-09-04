@@ -15,6 +15,7 @@ import { classifyByKeywords, isLikelyGeopolitical, assessIncidentSeverity } from
 import { trackFetch, recordSourceHealth } from "./sourceHealth";
 import { correlationGroupId } from "./correlation";
 import { archiveClassifications } from "./classificationArchive";
+import { fetchRecentPrimaries, findDuplicateOf, type PrimaryCandidate } from "./eventDedup";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -372,13 +373,91 @@ export async function runIngest(): Promise<IngestResult> {
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
 
-    if (rows.length > 0) {
+    // Cross-outlet duplicate detection (see src/lib/eventDedup.ts) — grouped
+    // by (country, category) since that's the dedup scope, one DB query per
+    // group rather than per item. Within a group, items are walked oldest
+    // to newest so the FIRST report of a story is always the one that ends
+    // up as the primary, matching "show it when u click on the first
+    // reporting in the feed." Same-ingest-cycle duplicates (two outlets
+    // covering the same fresh story in the same 15-minute batch, neither
+    // yet in the DB) are tracked in batchPrimaries alongside the real DB
+    // pool using negative synthetic ids, resolved to real ids after the
+    // primaries' own insert returns them.
+    type Row = (typeof rows)[number];
+    const resolvedRows: (Row & { primaryEventId: number | null })[] = [];
+    const pendingRows: { row: Row; batchPrimaryUrl: string }[] = [];
+
+    const byGroup = new Map<string, Row[]>();
+    for (const r of rows) {
+      const key = `${r.country}:${r.category}`;
+      const group = byGroup.get(key);
+      if (group) group.push(r);
+      else byGroup.set(key, [r]);
+    }
+
+    for (const [key, groupRows] of byGroup) {
+      const [country, category] = key.split(":");
+      groupRows.sort((a, b) => a.publishedAt.getTime() - b.publishedAt.getTime());
+      const latest = groupRows[groupRows.length - 1].publishedAt;
+
+      let dbPool: PrimaryCandidate[] = [];
+      try {
+        dbPool = await fetchRecentPrimaries(country, category, latest);
+      } catch (err) {
+        errors.push(`dedup fetch (${key}): ${err}`);
+      }
+
+      const batchPrimaries: { url: string; title: string; summary: string }[] = [];
+
+      for (const r of groupRows) {
+        const pool: PrimaryCandidate[] = [
+          ...dbPool,
+          ...batchPrimaries.map((b, i) => ({ id: -(i + 1), title: b.title, summary: b.summary })),
+        ];
+        const matchId = findDuplicateOf(r, pool);
+
+        if (matchId === null) {
+          resolvedRows.push({ ...r, primaryEventId: null });
+          batchPrimaries.push({ url: r.url, title: r.title, summary: r.summary });
+        } else if (matchId > 0) {
+          resolvedRows.push({ ...r, primaryEventId: matchId });
+        } else {
+          pendingRows.push({ row: r, batchPrimaryUrl: batchPrimaries[-matchId - 1].url });
+        }
+      }
+    }
+
+    if (resolvedRows.length > 0) {
       const result = await db
         .insert(events)
-        .values(rows)
+        .values(resolvedRows)
         .onConflictDoNothing({ target: events.url })
-        .returning({ id: events.id });
+        .returning({ id: events.id, url: events.url });
       inserted += result.length;
+
+      if (pendingRows.length > 0) {
+        const urlToId = new Map(result.map((r) => [r.url, r.id]));
+        const pendingResolved = pendingRows
+          .map(({ row, batchPrimaryUrl }) => {
+            const primaryId = urlToId.get(batchPrimaryUrl);
+            // The batch-local "primary" this row depends on didn't actually
+            // get a fresh id back (e.g. lost an onConflictDoNothing race
+            // against a concurrent ingest run) — skip rather than insert an
+            // orphaned duplicate with no real primary to attach to.
+            if (!primaryId) return null;
+            return { ...row, primaryEventId: primaryId };
+          })
+          .filter((r): r is NonNullable<typeof r> => r !== null);
+
+        if (pendingResolved.length > 0) {
+          const result2 = await db
+            .insert(events)
+            .values(pendingResolved)
+            .onConflictDoNothing({ target: events.url })
+            .returning({ id: events.id });
+          inserted += result2.length;
+        }
+      }
     }
 
     await archiveClassifications(archiveOutcomes);

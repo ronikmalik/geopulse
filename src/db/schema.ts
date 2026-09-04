@@ -33,12 +33,26 @@ export const events = pgTable(
     // rather than independent signals; nullable because it's computed at
     // ingest time and pre-existing rows predate it.
     correlationGroupId: text("correlation_group_id"),
+    // NULL = this row is a standalone/primary story, shown in the main
+    // feed. Non-null = this row is a same-content report of the primary
+    // event with this id (a different outlet covering the same real
+    // incident) — hidden from the main feed list, surfaced only as an
+    // additional source when the primary is expanded. Computed at ingest
+    // time by src/lib/eventDedup.ts via real title/summary similarity
+    // against recent same-country/same-category events — deliberately NOT
+    // the coarse country:pillar:day correlationGroupId above, which would
+    // merge every distinct story in a pillar on the same day. The FK
+    // constraint itself is added via raw SQL in the migrate route (Drizzle
+    // self-references need an AnyPgColumn callback that adds more
+    // complexity than the raw statement here is worth).
+    primaryEventId: integer("primary_event_id"),
   },
   (table) => [
     index("events_created_at_idx").on(table.createdAt),
     index("events_category_idx").on(table.category),
     index("events_country_idx").on(table.country),
     index("events_correlation_group_idx").on(table.correlationGroupId),
+    index("events_primary_event_id_idx").on(table.primaryEventId),
   ],
 );
 

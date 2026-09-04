@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql, getTableColumns } from "drizzle-orm";
 import { getDb } from "@/db";
 import { events, type EventRow } from "@/db/schema";
 import { pillarForCategory, PILLAR_LIST, PILLAR_WEIGHT, COVERED_PILLARS, type PillarId } from "@/lib/pillars";
@@ -305,14 +305,23 @@ export async function getCountryThreatDetail(country: string): Promise<CountryTh
 // by country — the previous approach — silently came up empty for any
 // country whose events had aged out of that shared window. This queries
 // the DB directly instead, scoped to one country.
-export async function getEventsByCountry(country: string): Promise<EventRow[]> {
+//
+// Only primaries (primary_event_id IS NULL) — cross-outlet duplicates (see
+// src/lib/eventDedup.ts) are hidden from the feed and surfaced only via
+// GET /api/events/duplicates when a card with sourceCount > 0 is expanded.
+export async function getEventsByCountry(
+  country: string,
+): Promise<(EventRow & { sourceCount: number })[]> {
   const db = getDb();
   const iso2 = country.toUpperCase();
   return db
-    .select()
+    .select({
+      ...getTableColumns(events),
+      sourceCount: sql<number>`(select count(*) from ${events} e2 where e2.primary_event_id = ${events.id})`,
+    })
     .from(events)
     .where(
-      sql`${events.country} = ${iso2} and ${events.publishedAt} > now() - interval '${sql.raw(String(LOOKBACK_DAYS))} days'`,
+      sql`${events.country} = ${iso2} and ${events.publishedAt} > now() - interval '${sql.raw(String(LOOKBACK_DAYS))} days' and ${events.primaryEventId} is null`,
     )
     .orderBy(sql`${events.publishedAt} desc`)
     .limit(100);
@@ -352,7 +361,7 @@ export async function getCountryRiskEvents(
     })
     .from(events)
     .where(
-      sql`${events.country} = ${country.toUpperCase()} and ${events.publishedAt} > now() - interval '${sql.raw(String(LOOKBACK_DAYS))} days'`,
+      sql`${events.country} = ${country.toUpperCase()} and ${events.publishedAt} > now() - interval '${sql.raw(String(LOOKBACK_DAYS))} days' and ${events.primaryEventId} is null`,
     )
     .orderBy(sql`${events.publishedAt} desc`)
     .limit(50);

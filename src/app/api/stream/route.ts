@@ -1,8 +1,22 @@
 import { NextRequest, after } from "next/server";
 import { getDb } from "@/db";
 import { events } from "@/db/schema";
-import { desc, gt } from "drizzle-orm";
+import { desc, gt, isNull, and, sql, getTableColumns } from "drizzle-orm";
 import { withCache } from "@/lib/layerCache";
+
+// Cross-outlet duplicates (see src/lib/eventDedup.ts) are hidden from the
+// main feed — only primaries (primaryEventId IS NULL) stream here.
+// sourceCount tells the client whether to show a "N more sources"
+// affordance without a round-trip per card; the actual duplicate rows are
+// fetched on demand via GET /api/events/duplicates when a card with
+// sourceCount > 0 is expanded.
+const PRIMARY_ONLY = isNull(events.primaryEventId);
+const withSourceCount = {
+  ...getTableColumns(events),
+  sourceCount: sql<number>`(select count(*) from ${events} e2 where e2.primary_event_id = ${events.id})`.as(
+    "sourceCount",
+  ),
+};
 
 // Vercel Hobby-tier serverless functions hard-cap at 60s regardless of this
 // export; Pro/Enterprise allow more. Set to the safe lowest common
@@ -97,8 +111,9 @@ export async function GET(req: NextRequest) {
       // Initial backfill so a fresh client sees recent alerts immediately.
       if (!sinceParam) {
         const recent = await db
-          .select()
+          .select(withSourceCount)
           .from(events)
+          .where(PRIMARY_ONLY)
           .orderBy(desc(events.id))
           .limit(INITIAL_BACKFILL_LIMIT);
         const ordered = recent.reverse();
@@ -111,9 +126,9 @@ export async function GET(req: NextRequest) {
       while (!closed && Date.now() - startedAt < MAX_STREAM_MS) {
         try {
           const fresh = await db
-            .select()
+            .select(withSourceCount)
             .from(events)
-            .where(gt(events.id, lastId))
+            .where(and(gt(events.id, lastId), PRIMARY_ONLY))
             .orderBy(events.id)
             .limit(50);
 
