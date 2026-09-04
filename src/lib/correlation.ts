@@ -33,15 +33,18 @@ export function correlationGroupId(
 
 export type ConfidenceTier = "single-source" | "corroborated" | "cross-confirmed";
 
-// Media-derived sources (news wires, text-classified) vs. direct/sensor
-// sources (a seismograph network, a satellite, an internet-measurement
-// platform) — matching the brief's Tier A/B/C reliability framing loosely:
-// agreement WITHIN one type is weaker evidence than agreement ACROSS types,
-// because every GDELT hit and every RSS wire is ultimately reporting on
-// the same underlying reality through the same lens (the news cycle),
-// while USGS/GDACS/EONET/IODA observe independently of what anyone wrote.
+// Media-derived sources (news wires, text-classified, social/channel posts)
+// vs. direct/sensor sources (a seismograph network, a satellite, an
+// internet-measurement platform) — matching the brief's Tier A/B/C
+// reliability framing loosely: agreement WITHIN one type is weaker evidence
+// than agreement ACROSS types, because every GDELT hit, RSS wire, and
+// Telegram post is ultimately reporting on the same underlying reality
+// through the same lens (the news/social cycle), while USGS/GDACS/EONET/IODA
+// observe independently of what anyone wrote or posted.
 function sourceKind(source: string): "media" | "direct" {
-  return source === "gdelt" || source.startsWith("rss:") ? "media" : "direct";
+  return source === "gdelt" || source.startsWith("rss:") || source.startsWith("telegram:")
+    ? "media"
+    : "direct";
 }
 
 // A simple, configurable evidence ladder rather than a hardcoded

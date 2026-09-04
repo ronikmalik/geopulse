@@ -90,6 +90,8 @@ const MIN_CLUSTER_FRP = 500; // megawatts, summed across the cluster
 
 interface Cluster {
   key: string;
+  gLat: number;
+  gLon: number;
   count: number;
   totalFrp: number;
   sumLat: number;
@@ -117,6 +119,8 @@ function clusterDetections(detections: FirmsDetection[]): Cluster[] {
     } else {
       clusters.set(key, {
         key,
+        gLat,
+        gLon,
         count: 1,
         totalFrp: d.frp,
         sumLat: d.lat,
@@ -175,10 +179,17 @@ export async function fetchFirmsThermalAnomalies(): Promise<DirectItem[]> {
   const detections = parseCsv(text).filter((d) => isHighConfidence(d.confidence));
   const clusters = clusterDetections(detections);
 
-  // Same day-bucket dedup-URL strategy as IODA: this is a rolling 24h
-  // summary re-fetched every ingest cycle, not a discrete new event each
-  // time, so the dedup key must be stable within a day or onConflictDoNothing
-  // (events.url, see ingest.ts) never actually catches the repeat.
+  // Same day-bucket dedup-URL strategy as IODA (see the comment there): this
+  // is a rolling 24h summary re-fetched every ingest cycle, not a discrete
+  // new event each time, so the dedup key must be stable within a day or
+  // onConflictDoNothing (events.url, see ingest.ts) never actually catches
+  // the repeat. The URL below must use the cluster's fixed grid cell
+  // (c.gLat/c.gLon), NOT the floating sumLat/count average below — the
+  // average shifts as individual detections enter/leave the rolling 24h
+  // window between cycles, which was silently defeating the dedup and
+  // re-inserting the same ongoing fire as a "new" event every cycle
+  // (exactly the bug the IODA comment describes already having happened
+  // there once).
   const dayBucket = new Date().toISOString().slice(0, 10);
 
   return clusters
@@ -190,7 +201,7 @@ export async function fetchFirmsThermalAnomalies(): Promise<DirectItem[]> {
 
       return {
         source: "firms",
-        url: `https://firms.modaps.eosdis.nasa.gov/map/#d:${dayBucket};l:viirs-snpp;@${lon.toFixed(2)},${lat.toFixed(2)},7z`,
+        url: `https://firms.modaps.eosdis.nasa.gov/map/#d:${dayBucket};l:viirs-snpp;@${c.gLon.toFixed(2)},${c.gLat.toFixed(2)},7z`,
         title: `Large thermal anomaly cluster detected (satellite) near ${lat.toFixed(2)}, ${lon.toFixed(2)}`,
         summary: `NASA FIRMS/VIIRS detected ${c.count} high-confidence thermal anomalies (combined ${Math.round(c.totalFrp)} MW radiative power) clustered in one area within the last 24h. Satellite thermal data alone cannot confirm cause — wildfire, industrial fire, and explosive/conflict-related fire all look the same to this sensor.`,
         category: "natural-disaster",

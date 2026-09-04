@@ -34,7 +34,7 @@ export const DATA_LAYER_LABELS: Record<DataLayerId, string> = {
   gdp: "Economic Exposure (GDP)",
   population: "Population Exposure",
   cyber: "Actively Exploited Vulnerabilities",
-  telegram: "Telegram OSINT (raw channel feed)",
+  telegram: "Telegram OSINT (breaking incidents)",
 };
 
 export const DATA_LAYER_DESCRIPTIONS: Record<DataLayerId, string> = {
@@ -46,7 +46,7 @@ export const DATA_LAYER_DESCRIPTIONS: Record<DataLayerId, string> = {
   gdp: "World Bank — GDP by country. Structural context for how much economic exposure a threat in that country represents.",
   population: "World Bank — population by country. Structural context for how many people a threat in that country could affect.",
   cyber: "CISA KEV — vulnerabilities with confirmed active exploitation, most recent first. Global feed (no country attribution yet) for the Cyber & Technology pillar.",
-  telegram: "The raw feed from the 9 Telegram channels also feeding scored events — every recent post, not just the ones that made it into the Pulse feed. See docs/TELEGRAM_SOURCES.md for the terms-of-service tradeoff this source involves.",
+  telegram: "The same 9 Telegram channels feeding scored events, filtered to breaking incidents only (not a raw channel firehose) — shown here with full channel attribution as context rather than mapped/scored. See docs/TELEGRAM_SOURCES.md for the filter and the terms-of-service tradeoff this source involves.",
 };
 
 // Poll intervals per layer — long enough to respect free-tier rate limits,

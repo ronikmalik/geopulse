@@ -8,6 +8,15 @@ export type ConnectionState = "connecting" | "live" | "disconnected";
 const INITIAL_RECONNECT_MS = 1000;
 const MAX_RECONNECT_MS = 15_000;
 
+// This app is explicitly designed to be left open for extended live
+// monitoring (see api/stream/route.ts's background-ingest trigger) — with
+// no cap, `events` and `seenIds` below grow for as long as the tab stays
+// open, degrading render cost over a long session and making the feed-count
+// badge (Dashboard.tsx's `props.events.length`) climb forever instead of
+// reflecting a recent window. Bounded well above the server's own 100-item
+// initial backfill so normal scrollback never feels truncated.
+const MAX_BUFFERED_EVENTS = 500;
+
 export function useEventStream() {
   const [events, setEvents] = useState<GeoEvent[]>([]);
   const [status, setStatus] = useState<ConnectionState>("connecting");
@@ -58,7 +67,17 @@ export function useEventStream() {
         reconnectDelay = INITIAL_RECONNECT_MS;
         if (seenIds.current.has(row.id)) return;
         seenIds.current.add(row.id);
-        setEvents((prev) => [...prev, row]);
+        setEvents((prev) => {
+          const next = [...prev, row];
+          if (next.length <= MAX_BUFFERED_EVENTS) return next;
+          const trimmed = next.slice(next.length - MAX_BUFFERED_EVENTS);
+          // seenIds must track exactly what's still buffered — otherwise a
+          // dropped-off-the-front event's id stays "seen" forever, so if it
+          // were ever re-sent (e.g. a future backfill window) it would be
+          // silently ignored instead of being added back.
+          seenIds.current = new Set(trimmed.map((e) => e.id));
+          return trimmed;
+        });
         setIncoming((prev) => [...prev, row]);
       });
 

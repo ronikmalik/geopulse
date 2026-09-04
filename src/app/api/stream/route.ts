@@ -46,7 +46,15 @@ function triggerBackgroundIngest(origin: string) {
     BACKGROUND_INGEST_INTERVAL_MS,
     async () => {
       after(() => {
-        fetch(new URL("/api/ingest", origin)).catch((err) => {
+        // /api/ingest is gated by CRON_SECRET (see cronAuth.ts) — this call
+        // was previously sent with no auth at all, so it silently got a 401
+        // on every single invocation in production (fetch() doesn't throw
+        // on non-2xx, so the .catch() below never saw it). This entire
+        // "keep the feed live opportunistically" fallback was dead code
+        // ever since CRON_SECRET was introduced.
+        const secret = process.env.CRON_SECRET;
+        const headers = secret ? { Authorization: `Bearer ${secret}` } : undefined;
+        fetch(new URL("/api/ingest", origin), { headers }).catch((err) => {
           console.error(`Background ingest trigger (from stream) failed: ${err}`);
         });
       });
@@ -122,7 +130,16 @@ export async function GET(req: NextRequest) {
         await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
       }
 
-      controller.close();
+      // If `closed` became true via the client-abort listener (rather than
+      // the MAX_STREAM_MS self-rotation), the runtime may have already run
+      // this stream's own cancel() algorithm on disconnect — closing an
+      // already-cancelled controller throws. Same defensive pattern as
+      // send() above, which guards enqueue() the same way.
+      try {
+        controller.close();
+      } catch {
+        // Already closed/cancelled by the client disconnecting — fine.
+      }
     },
     cancel() {
       // client disconnected
