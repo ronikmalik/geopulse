@@ -162,8 +162,14 @@ const HIGH_SEVERITY = /nuclear (test|strike|weapon)|invasion|massacre|genocide|d
 // drone", "seized the port") rather than the generic word "attack" —
 // missing those was letting real incidents get treated the same as
 // zero-signal topic-adjacent pieces by the MIN_SEVERITY gate below.
+// Territory/kinetic-action verbs added for the Telegram incident filter
+// (see assessIncidentSeverity below and src/lib/sources/telegram.ts) — raw
+// milblogger/MoD channel posts favor this vocabulary ("recaptured",
+// "struck", "neutralized", "liquidated") more than the strike/attack/killed
+// wording RSS headlines typically use. Kept narrow enough not to fire on
+// idiom ("struck a deal") or economic reporting ("hit record highs").
 const MODERATE_SEVERITY =
-  /\bstrike\b|missile (launch|fired|strike)|airstrike|\battack(ed|s)?\b|killed|\bdead\b|casualties|wounded|injured|explosion|bombing|offensive|clashes?|\bcoup\b|martial law|seiz(ed|es|ing)|captur(ed|es|ing)|raid(ed|s)?|storm(ed|s)?|shot down|downed (a |an )?(drone|aircraft|jet|missile)|intercepted|cleared (tunnels|the area)|detained|arrested|evacuat(ed|es|ing|ion)/i;
+  /\bstrikes?\b|missile (launch|fired|strike)|airstrike|\battack(ed|ing|s)?\b|killed|\bdead\b|casualties|wounded|injured|explosion|bombing|offensive|clashes?|\bcoup\b|martial law|seiz(ed|es|ing)(?!\s+(the\s+)?opportunity)|captur(ed|es|ing)(?!\s+(the\s+)?(moment|imagination|attention|essence|hearts?|spirit))|raid(ed|s)?|storm(ed|s)?|shot down|downed (a |an )?(drone|aircraft|jet|missile)|intercepted|cleared (tunnels|the area)|detained|arrested|evacuat(ed|es|ing|ion)|recaptur(ed|es|ing)|\bretook\b|\bretake\b|reclaim(ed|s|ing)|liberat(ed|es|ing)|repel(led|s)?|thwart(ed|s)?|destroy(ed|s)?|neutrali[sz]ed|eliminat(ed|es)|liquidat(ed|es)|struck\b(?! a (deal|balance|chord|pose))|hit by/i;
 const MILD_SEVERITY =
   /warns?|threatens?|escalat|tension|sanctions? (imposed|announced)|protest|unrest|mobiliz|border incident/i;
 
@@ -210,10 +216,15 @@ function categorizeByKeywords(title: string, text: string): NewsCategory | "othe
   return "other";
 }
 
-export function classifyByKeywords(item: RawItem): ClassifiedItem | null {
-  if (NON_EVENT_TITLE_PATTERNS.test(item.title)) return null;
-
-  const text = `${item.title} ${item.snippet}`;
+// Shared by classifyByKeywords below and src/lib/sources/telegram.ts's
+// breaking-incident filter — the "is this actually a reported development,
+// not routine/reflective noise" judgment shouldn't be reimplemented twice.
+// Returns null for anything BENIGN/ONGOING_COVERAGE suppresses (unless it
+// also carries real escalation language), otherwise the 1-4 severity score;
+// callers decide their own inclusion floor (the general feed uses
+// MIN_SEVERITY_TO_INCLUDE=2, Telegram's raw-channel filter uses a stricter
+// bar — see TELEGRAM_MIN_SEVERITY in telegram.ts).
+export function assessIncidentSeverity(text: string): number | null {
   const hasEscalation = HIGH_SEVERITY.test(text) || MODERATE_SEVERITY.test(text);
 
   // A benign/routine signal only suppresses the item if nothing in it also
@@ -222,8 +233,15 @@ export function classifyByKeywords(item: RawItem): ClassifiedItem | null {
   if (BENIGN_PATTERNS.test(text) && !hasEscalation) return null;
   if (ONGOING_COVERAGE_PATTERNS.test(text) && !hasEscalation) return null;
 
-  const severity = keywordSeverity(text);
-  if (severity < MIN_SEVERITY_TO_INCLUDE) return null;
+  return keywordSeverity(text);
+}
+
+export function classifyByKeywords(item: RawItem): ClassifiedItem | null {
+  if (NON_EVENT_TITLE_PATTERNS.test(item.title)) return null;
+
+  const text = `${item.title} ${item.snippet}`;
+  const severity = assessIncidentSeverity(text);
+  if (severity === null || severity < MIN_SEVERITY_TO_INCLUDE) return null;
 
   const category = categorizeByKeywords(item.title, text);
 

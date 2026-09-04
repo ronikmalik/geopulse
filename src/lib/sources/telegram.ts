@@ -2,6 +2,7 @@ import type { Category } from "../categories";
 import type { DirectItem } from "./direct";
 import { COUNTRY_CENTROIDS } from "../countryCentroids";
 import { translateBatch } from "../translate";
+import { assessIncidentSeverity } from "../classify";
 
 // Public-channel scraping via Telegram's own no-auth web preview
 // (t.me/s/<channel>) — no bot token, no login, never touches groups or
@@ -156,6 +157,7 @@ function toDirectItem(
   excerpt: string,
   translated: boolean,
   config: TelegramChannelConfig,
+  severity: number,
 ): DirectItem | null {
   const centroid = COUNTRY_CENTROIDS[config.country];
   if (!centroid) return null;
@@ -179,9 +181,33 @@ function toDirectItem(
     country: config.country,
     lat: centroid.lat,
     lon: centroid.lon,
-    severity: 2,
+    severity,
     publishedAt: post.publishedAt,
   };
+}
+
+// The bar for what actually gets stored: a channel like Rybar or the
+// Ukraine General Staff posts constantly — casualty tallies, procurement
+// news, morale pieces, generic statements — and treating every post as a
+// map-worthy "event" turned this into a raw channel mirror instead of a
+// breaking-news layer (this is what the user flagged: "we are using all of
+// the telegram stuff"). This reuses classify.ts's own incident-severity
+// judgment (BENIGN/ONGOING suppression + escalation-verb scoring) but with
+// a stricter floor than the general feed's MIN_SEVERITY_TO_INCLUDE=2:
+// mild-only language (warnings, sanctions, "tension," protests) is exactly
+// the kind of routine channel chatter this is meant to filter out, so
+// Telegram requires actual incident-level wording — a strike, a capture, a
+// territory reclaimed, a drone shot down — not just topic proximity.
+const TELEGRAM_MIN_SEVERITY = 3;
+
+// Only English or successfully-translated text can be scored against the
+// (English-language) incident keywords at all. Rather than guess at
+// untranslated foreign-language text's severity (or worse, store it
+// unfiltered), posts are dropped outright when no reliable read is
+// possible — consistent with this file's general precision-over-recall
+// stance elsewhere (see docs/TELEGRAM_SOURCES.md).
+function canAssess(config: TelegramChannelConfig, translated: boolean): boolean {
+  return config.language === "en" || translated;
 }
 
 export async function fetchTelegramChannel(
@@ -213,7 +239,13 @@ export async function fetchTelegramChannel(
     }
   }
 
+  if (!canAssess(config, translated)) return [];
+
   return posts
-    .map((p, i) => toDirectItem(p, finalExcerpts[i], translated, config))
+    .map((p, i) => {
+      const severity = assessIncidentSeverity(finalExcerpts[i]);
+      if (severity === null || severity < TELEGRAM_MIN_SEVERITY) return null;
+      return toDirectItem(p, finalExcerpts[i], translated, config, severity);
+    })
     .filter((item): item is DirectItem => item !== null);
 }

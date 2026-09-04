@@ -121,6 +121,26 @@ of the daily math so rounding can't cause an overage. `translateBatch`
 skips translation (same fallback as no key configured) if the batch
 would exceed either the day's share or the hard monthly cap.
 
+## Breaking-only filter
+
+Early versions stored every post from every fetched channel — which, given
+how frequently these channels post (casualty tallies, procurement updates,
+morale pieces, routine statements), made this a raw channel mirror rather
+than a breaking-news layer. The user flagged exactly this: "it seems like we
+are using all of the telegram stuff, like all of it."
+
+`fetchTelegramChannel` (`src/lib/sources/telegram.ts`) now reuses
+`classify.ts`'s `assessIncidentSeverity` — the same BENIGN/ONGOING-coverage
+suppression and escalation-verb scoring the rest of the feed uses — but at a
+stricter floor (`TELEGRAM_MIN_SEVERITY = 3`, vs. the general feed's `2`).
+Mild-only language (warnings, sanctions, "tension," protests) is routine
+channel chatter, not what this layer is for; a post only survives if it
+reads as an actual incident — a strike, a capture, territory reclaimed, a
+drone shot down, casualties, an evacuation — not just topical proximity to
+a conflict. A post can only be scored in English, so a non-English channel's
+posts are dropped outright (not stored unfiltered) on any cycle where
+translation didn't succeed — see `canAssess()`.
+
 ## Framing discipline
 
 Every Telegram-derived event's summary is prefixed with the channel's
