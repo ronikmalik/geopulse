@@ -9,5 +9,8 @@ export const config: VercelConfig = {
     { path: "/api/ingest", schedule: "0 6 * * *" },
     // Daily country_state_history snapshot — see src/lib/history.ts.
     { path: "/api/admin/snapshot", schedule: "0 18 * * *" },
+    // Daily per-country military aircraft count snapshot, building a real
+    // baseline for future surge detection — see src/lib/flightBaseline.ts.
+    { path: "/api/admin/snapshot-flights", schedule: "30 18 * * *" },
   ],
 };

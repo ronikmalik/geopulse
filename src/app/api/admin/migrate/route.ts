@@ -26,6 +26,14 @@ const STATEMENTS = [
   )`,
   sql`CREATE INDEX IF NOT EXISTS country_state_history_country_idx ON country_state_history (country)`,
   sql`CREATE INDEX IF NOT EXISTS country_state_history_snapshot_at_idx ON country_state_history (snapshot_at)`,
+  sql`CREATE TABLE IF NOT EXISTS aircraft_count_history (
+    id SERIAL PRIMARY KEY,
+    country TEXT NOT NULL,
+    snapshot_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    count INTEGER NOT NULL
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS aircraft_count_history_country_idx ON aircraft_count_history (country)`,
+  sql`CREATE INDEX IF NOT EXISTS aircraft_count_history_snapshot_at_idx ON aircraft_count_history (snapshot_at)`,
 ];
 
 export async function GET(req: NextRequest) {

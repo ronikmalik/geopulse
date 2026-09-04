@@ -91,3 +91,29 @@ export const countryStateHistory = pgTable(
 
 export type CountryStateHistoryRow = typeof countryStateHistory.$inferSelect;
 export type NewCountryStateHistoryRow = typeof countryStateHistory.$inferInsert;
+
+// One row per country per daily snapshot of currently-tracked military
+// aircraft (see src/lib/flightBaseline.ts and the /api/admin/snapshot-flights
+// cron) — the same "record it now, judge it later" pattern as
+// countryStateHistory above. There is no anomaly detection yet because
+// there is no baseline yet; this table exists to build one honestly over a
+// few weeks of real counts instead of shipping a surge threshold guessed
+// with no data behind it. See docs/OSINT_SOURCES.md.
+export const aircraftCountHistory = pgTable(
+  "aircraft_count_history",
+  {
+    id: serial("id").primaryKey(),
+    country: text("country").notNull(), // ISO 3166-1 alpha-2, reverse-geocoded from lat/lon
+    snapshotAt: timestamp("snapshot_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    count: integer("count").notNull(),
+  },
+  (table) => [
+    index("aircraft_count_history_country_idx").on(table.country),
+    index("aircraft_count_history_snapshot_at_idx").on(table.snapshotAt),
+  ],
+);
+
+export type AircraftCountHistoryRow = typeof aircraftCountHistory.$inferSelect;
+export type NewAircraftCountHistoryRow = typeof aircraftCountHistory.$inferInsert;

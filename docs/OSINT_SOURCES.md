@@ -81,19 +81,21 @@ monitors) don't have a workable free path: X's API is paid, and Telegram
 channel scraping raises a different ToS/trust problem than every other
 source in this list, which are all official public APIs. Not pursued.
 
-## Already live, not yet upgraded: military flight tracking
+## Already live, baseline recording started: military flight tracking
 
 `src/lib/sources/adsblol.ts` already live-tracks military aircraft
 worldwide via adsb.lol, surfaced today as a passive opt-in Context Layer
 ("Military Aircraft Activity" — see `src/lib/dataLayers.ts`), not as a
-scored event. The real next step — flagging an actual *surge* in tracked
-military aircraft over a region, not just showing the raw count — needs a
-rolling baseline to compare against ("is this more than usual for this
-region"), which the app doesn't have yet. The honest path is the same one
-already built for country risk history
-(`country_state_history` / `src/lib/history.ts`): start recording daily
-per-region aircraft counts now, let a real baseline build over the next
-few weeks, then add genuine anomaly detection once there's something real
-to compare against — instead of shipping a threshold guessed with no data
-behind it. Not built yet; flagged here as the deliberate next step rather
-than skipped silently.
+scored event. Flagging an actual *surge* in tracked military aircraft over
+a region, not just showing the raw count, needs a rolling baseline to
+compare against ("is this more than usual for this region") — which the
+app didn't have. The honest path is the same one already built for country
+risk history (`country_state_history` / `src/lib/history.ts`): as of
+2026-09-04, a daily `/api/admin/snapshot-flights` cron (`vercel.ts`)
+reverse-geocodes every currently-tracked military aircraft's lat/lon to a
+country (`src/lib/geoResolve.ts`) and records per-country counts into
+`aircraft_count_history` (`src/lib/flightBaseline.ts`). This is
+recording only — no anomaly detection yet, because there's no real
+baseline yet. Once a few weeks of daily snapshots exist, the next step is
+genuine surge detection (e.g. today's count vs. a trailing-N-day average
+per country) instead of a threshold guessed with no data behind it.
