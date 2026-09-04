@@ -101,11 +101,26 @@ export async function classifyBatch(
 // title, and location resolution is best-effort text matching rather than
 // an LLM's judgment, but it costs nothing and has no external dependency
 // beyond the news source itself.
+// 2026-09-04: found via the event-dedup work — the same real event (a
+// Russian drone strike on Ukraine's SBU HQ) split across BOTH "other" and
+// "russia-ukraine" because \brussia\b requires the exact word "Russia" and
+// doesn't match "Russian" (the far more common adjective form in
+// headlines: "Russian drone strikes..."), and there was no Ukraine-side
+// keyword at all — a headline leading with "Ukraine"/"Kyiv"/"Zelensky"
+// and never naming Russia by its noun form had nothing to match. Same
+// \bWORD\b-vs-adjective gap existed for us-iran ("Iranian") and
+// china-taiwan ("Taiwanese"). Category is what src/lib/eventDedup.ts
+// groups candidates by before comparing content similarity, so a
+// category miss doesn't just mis-bucket a story for display — it silently
+// prevents genuine duplicates of it from ever being detected at all.
 const CATEGORY_MATCHERS: [NewsCategory, RegExp][] = [
-  ["us-iran", /\biran\b/i],
-  ["russia-ukraine", /\brussia\b|\bkremlin\b|\bputin\b/i],
+  ["us-iran", /iranian|\biran\b/i],
+  [
+    "russia-ukraine",
+    /russian|\brussia\b|kremlin|putin|ukrainian|\bukraine\b|zelensky|zelenskyy|\bkyiv\b/i,
+  ],
   ["israel-palestine", /\bisrael\b|\bgaza\b|\bpalestin|\bhamas\b|\bhezbollah\b/i],
-  ["china-taiwan", /\btaiwan\b/i],
+  ["china-taiwan", /taiwanese|\btaiwan\b/i],
   ["north-korea", /north korea|pyongyang|kim jong/i],
   [
     "political-instability",
