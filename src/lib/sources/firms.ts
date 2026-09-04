@@ -88,10 +88,9 @@ const GRID_SIZE = 0.25;
 const MIN_CLUSTER_DETECTIONS = 8;
 const MIN_CLUSTER_FRP = 500; // megawatts, summed across the cluster
 
-interface Cluster {
-  key: string;
-  gLat: number;
-  gLon: number;
+interface Cell {
+  gi: number; // grid index (lat / GRID_SIZE, rounded) — integer, not the
+  gj: number; // floating-point value, so adjacency comparison is exact
   count: number;
   totalFrp: number;
   sumLat: number;
@@ -100,13 +99,36 @@ interface Cluster {
   latestTime: string;
 }
 
+interface Cluster {
+  anchorGi: number;
+  anchorGj: number;
+  count: number;
+  totalFrp: number;
+  sumLat: number;
+  sumLon: number;
+  latestDate: string;
+  latestTime: string;
+}
+
+// 2026-09-04 fix: this used to key clusters by raw 0.25° grid cell with no
+// merging step, which meant one real contiguous fire region spanning
+// several adjacent cells (routine during Southern Africa's dry-season
+// agricultural burning, observed live: Angola/Namibia each producing a
+// dozen+ separate same-day "cluster" events from what was clearly one
+// burn region) got scored as that many independent hazard events — each
+// adding its own severity into the same pillar's decayed-weight sum,
+// pushing countries to "Extreme" off routine, unremarkable burning rather
+// than anything resembling a real hazard spike. Cells are now merged by
+// 8-connected adjacency (flood fill) into one cluster per contiguous
+// region before the reportability threshold is applied, so a wide burn
+// scar is one event, not ten.
 function clusterDetections(detections: FirmsDetection[]): Cluster[] {
-  const clusters = new Map<string, Cluster>();
+  const cells = new Map<string, Cell>();
   for (const d of detections) {
-    const gLat = Math.round(d.lat / GRID_SIZE) * GRID_SIZE;
-    const gLon = Math.round(d.lon / GRID_SIZE) * GRID_SIZE;
-    const key = `${gLat.toFixed(2)},${gLon.toFixed(2)}`;
-    const existing = clusters.get(key);
+    const gi = Math.round(d.lat / GRID_SIZE);
+    const gj = Math.round(d.lon / GRID_SIZE);
+    const key = `${gi},${gj}`;
+    const existing = cells.get(key);
     if (existing) {
       existing.count += 1;
       existing.totalFrp += d.frp;
@@ -117,10 +139,9 @@ function clusterDetections(detections: FirmsDetection[]): Cluster[] {
         existing.latestTime = d.acqTime;
       }
     } else {
-      clusters.set(key, {
-        key,
-        gLat,
-        gLon,
+      cells.set(key, {
+        gi,
+        gj,
         count: 1,
         totalFrp: d.frp,
         sumLat: d.lat,
@@ -130,15 +151,67 @@ function clusterDetections(detections: FirmsDetection[]): Cluster[] {
       });
     }
   }
-  return [...clusters.values()].filter(
+
+  // Flood-fill 8-connected adjacent cells into one component each.
+  const visited = new Set<string>();
+  const clusters: Cluster[] = [];
+  for (const [key, start] of cells) {
+    if (visited.has(key)) continue;
+    const stack = [start];
+    visited.add(key);
+    const component: Cell[] = [];
+    while (stack.length > 0) {
+      const cell = stack.pop()!;
+      component.push(cell);
+      for (let di = -1; di <= 1; di++) {
+        for (let dj = -1; dj <= 1; dj++) {
+          if (di === 0 && dj === 0) continue;
+          const nKey = `${cell.gi + di},${cell.gj + dj}`;
+          const neighbor = cells.get(nKey);
+          if (neighbor && !visited.has(nKey)) {
+            visited.add(nKey);
+            stack.push(neighbor);
+          }
+        }
+      }
+    }
+
+    // Anchor on the lexicographically smallest cell in the component so the
+    // dedup URL (below) stays stable across ingest cycles even as the fire's
+    // edges grow/shrink — the same stability requirement already documented
+    // for the per-cell dedup key this replaces.
+    const anchor = component.reduce((a, b) =>
+      a.gi < b.gi || (a.gi === b.gi && a.gj < b.gj) ? a : b,
+    );
+    const latest = component.reduce((a, c) =>
+      c.latestDate > a.latestDate || (c.latestDate === a.latestDate && c.latestTime > a.latestTime) ? c : a,
+    );
+
+    clusters.push({
+      anchorGi: anchor.gi,
+      anchorGj: anchor.gj,
+      count: component.reduce((s, c) => s + c.count, 0),
+      totalFrp: component.reduce((s, c) => s + c.totalFrp, 0),
+      sumLat: component.reduce((s, c) => s + c.sumLat, 0),
+      sumLon: component.reduce((s, c) => s + c.sumLon, 0),
+      latestDate: latest.latestDate,
+      latestTime: latest.latestTime,
+    });
+  }
+
+  return clusters.filter(
     (c) => c.count >= MIN_CLUSTER_DETECTIONS && c.totalFrp >= MIN_CLUSTER_FRP,
   );
 }
 
+// Capped at 3 (Medium/High-pillar territory), never 4-5: FIRMS can't
+// confirm cause (a large agricultural burn and something far more serious
+// produce an identical signal — see the header comment), so it can raise a
+// pillar toward High as real corroborating signal but must never alone
+// declare a country "Extreme" the way a confirmed source (GDACS Red alert,
+// a real large earthquake) can. See docs/OSINT_SOURCES.md.
 function clusterSeverity(c: Cluster): number {
-  if (c.count >= 60) return 5;
-  if (c.count >= 30) return 4;
-  if (c.count >= 15) return 3;
+  if (c.count >= 40) return 3;
   return 2;
 }
 
@@ -183,13 +256,12 @@ export async function fetchFirmsThermalAnomalies(): Promise<DirectItem[]> {
   // is a rolling 24h summary re-fetched every ingest cycle, not a discrete
   // new event each time, so the dedup key must be stable within a day or
   // onConflictDoNothing (events.url, see ingest.ts) never actually catches
-  // the repeat. The URL below must use the cluster's fixed grid cell
-  // (c.gLat/c.gLon), NOT the floating sumLat/count average below — the
-  // average shifts as individual detections enter/leave the rolling 24h
-  // window between cycles, which was silently defeating the dedup and
-  // re-inserting the same ongoing fire as a "new" event every cycle
-  // (exactly the bug the IODA comment describes already having happened
-  // there once).
+  // the repeat. The URL below must use the cluster's anchor grid cell, NOT
+  // the floating sumLat/count average — the average shifts as individual
+  // detections enter/leave the rolling 24h window between cycles, which was
+  // silently defeating the dedup and re-inserting the same ongoing fire as
+  // a "new" event every cycle (exactly the bug the IODA comment describes
+  // already having happened there once).
   const dayBucket = new Date().toISOString().slice(0, 10);
 
   return clusters
@@ -199,9 +271,12 @@ export async function fetchFirmsThermalAnomalies(): Promise<DirectItem[]> {
       const country = countryFromLatLon(lat, lon);
       if (!country) return null;
 
+      const anchorLat = c.anchorGi * GRID_SIZE;
+      const anchorLon = c.anchorGj * GRID_SIZE;
+
       return {
         source: "firms",
-        url: `https://firms.modaps.eosdis.nasa.gov/map/#d:${dayBucket};l:viirs-snpp;@${c.gLon.toFixed(2)},${c.gLat.toFixed(2)},7z`,
+        url: `https://firms.modaps.eosdis.nasa.gov/map/#d:${dayBucket};l:viirs-snpp;@${anchorLon.toFixed(2)},${anchorLat.toFixed(2)},7z`,
         title: `Large thermal anomaly cluster detected (satellite) near ${lat.toFixed(2)}, ${lon.toFixed(2)}`,
         summary: `NASA FIRMS/VIIRS detected ${c.count} high-confidence thermal anomalies (combined ${Math.round(c.totalFrp)} MW radiative power) clustered in one area within the last 24h. Satellite thermal data alone cannot confirm cause — wildfire, industrial fire, and explosive/conflict-related fire all look the same to this sensor.`,
         category: "natural-disaster",
