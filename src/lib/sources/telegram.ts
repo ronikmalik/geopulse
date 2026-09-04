@@ -29,7 +29,12 @@ export interface TelegramChannelConfig {
 
 // See docs/TELEGRAM_SOURCES.md for how this list was built (sourced from
 // ISW's own published citations, not guessed) and the reasoning for what
-// was deliberately left out.
+// was deliberately left out. The 2026-09-04 v2 pass (multi-report,
+// multi-theater audit, not just one day) added the block below the divider
+// comment — same bar as v1: unambiguous institutional identity, cited
+// repeatedly by ISW/CTP, not a personal/analyst/milblogger account (those
+// stay in TELEGRAM_SOURCES.md's "Tier 2 candidates" pending individual
+// credibility reads, per the discipline already established for v1).
 export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
   { handle: "GeneralStaffZSU", label: "Ukraine General Staff (official)", country: "UA", category: "russia-ukraine", language: "uk" },
   { handle: "kpszsu", label: "Ukrainian Air Force (official)", country: "UA", category: "russia-ukraine", language: "uk" },
@@ -40,6 +45,17 @@ export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
   { handle: "iribnews", label: "IRIB — Iran state broadcaster", country: "IR", category: "us-iran", language: "fa" },
   { handle: "farsna", label: "Fars News Agency (Iran state-affiliated)", country: "IR", category: "us-iran", language: "fa" },
   { handle: "presstv", label: "Press TV (Iran state media)", country: "IR", category: "us-iran", language: "en" },
+  // --- v2 additions (2026-09-04), see docs/TELEGRAM_SOURCES.md "v2" section ---
+  { handle: "DIUkraine", label: "Ukrainian Defense Intelligence (official)", country: "UA", category: "russia-ukraine", language: "uk" },
+  { handle: "Joint_Forces_Task_Force", label: "Ukrainian Joint Forces (official military)", country: "UA", category: "russia-ukraine", language: "uk" },
+  { handle: "V_Zelenskiy_official", label: "Volodymyr Zelensky (official)", country: "UA", category: "russia-ukraine", language: "uk" },
+  { handle: "medvedev_telegram", label: "Dmitry Medvedev — Deputy Chair, Russian Security Council (official)", country: "RU", category: "russia-ukraine", language: "ru" },
+  { handle: "defapress_ir", label: "Defa Press — Iranian Defense Ministry press organ (official)", country: "IR", category: "us-iran", language: "fa" },
+  { handle: "sepah_pasdaran", label: "IRGC (official)", country: "IR", category: "us-iran", language: "fa" },
+  { handle: "TasnimNewsAgency", label: "Tasnim News (IRGC-affiliated wire)", country: "IR", category: "us-iran", language: "fa" },
+  { handle: "mehrnews", label: "Mehr News Agency (Iran semi-official state media)", country: "IR", category: "us-iran", language: "fa" },
+  { handle: "Nournews_ir", label: "Nour News (Iran Supreme National Security Council-linked)", country: "IR", category: "us-iran", language: "fa" },
+  { handle: "army21ye", label: "Houthi Armed Forces spokesperson (official, unverified claims)", country: "YE", category: "us-iran", language: "ar" },
 ];
 
 interface TelegramPost {
@@ -145,6 +161,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
   uk: "Ukrainian",
   ru: "Russian",
   fa: "Farsi",
+  ar: "Arabic",
 };
 
 function excerptOf(text: string): string {

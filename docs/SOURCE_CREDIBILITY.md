@@ -112,14 +112,16 @@ backfilling with an unvetted source.
 | Haaretz | Schocken family (75%), Leonid Nevzlin (25%, Russian-Israeli businessman) | Left | High | Israeli-domestic-critical counterweight to Times of Israel — same disclosed-lean logic as Meduza/Moscow Times. |
 | ABC News (Australia) | Australian Broadcasting Corporation — public broadcaster, statutorily editorially independent | Left-Center | High | Same disclosed-public-funding/independence model as BBC/DW/France24/RFE/RL. |
 | CBC News (Canada) | Canadian Broadcasting Corporation — public broadcaster, statutorily editorially independent | Left-Center | High | Same model as ABC Australia. |
+| Radio Free Asia | US government, funded via USAGM — same model as RFE/RL | Left-Center | High | Added 2026-09-04. A prior pass listed this as "no working RSS feed found"; the real feed was found behind a redirect (`/english/rss2.xml` → `/arc/outboundfeeds/english/rss/`) during an unrelated ISW-sourcing research pass. Correction, not a new decision. |
 
-26 sources, spanning North America, Europe, Russia/Ukraine/Central Asia
+27 sources, spanning North America, Europe, Russia/Ukraine/Central Asia
 (now meaningfully deeper via RFE/RL, Meduza, and Moscow Times), the
 Middle East (Israeli, Arab-world, and Israeli-critical vantage points),
-South/Southeast Asia, Taiwan, North Korea, Australia, Canada, Africa, and
-Latin America (Argentina only, after Rio Times's removal and MercoPress's
-earlier removal — a real gap; Brazil/wider South America coverage now
-depends on the global wire outlets happening to cover it).
+South/Southeast Asia, Taiwan, North Korea (now RFA alongside NK News),
+Australia, Canada, Africa, and Latin America (Argentina only, after Rio
+Times's removal and MercoPress's earlier removal — a real gap;
+Brazil/wider South America coverage now depends on the global wire
+outlets happening to cover it).
 
 ## Checked and rejected (2026-09-04 expansion pass)
 
@@ -135,8 +137,18 @@ the RFE/RL mold. These were checked and did not make it in:
 | Rudaw | MBFC rates it **Questionable** overall — "promotion of pro-government propaganda" and ownership/funding opacity. Same tier as the already-excluded MercoPress. |
 | Institute for the Study of War (understandingwar.org) | The organization researched at the start of this whole Telegram-sourcing effort — but their own CMS explicitly disables RSS ("we disable the RSS feed for performance reasons," per their server headers). Nothing to wire in. |
 | Voice of America | Same USAGM funding model as RFE/RL, but the feed is **dead**: every article is dated 2026-03-15 — the exact day USAGM funding was cut — and nothing has published since. An 18-month-stale feed, not a live source. |
-| Radio Free Asia | Reportedly still publishing per third-party reporting, but no working RSS feed found at any common or guessed path. |
 | Yonhap News Agency | Real value for Korean-peninsula coverage, but a meaningfully weaker trust model than the others here — MBFC notes the South Korean government directly controls Yonhap and appoints its board (not just funds it under statutory independence, the BBC/DW/RFE/RL model), and rates its factual reporting "Mostly Factual" rather than "High" due to weaker sourcing technique. Held back pending an explicit decision rather than folded in quietly. |
+
+## Checked and rejected (2026-09-04, ISW-sourcing pass)
+
+Surfaced as recurring ISW/CTP citations for theaters this product tracks
+(china-taiwan, north-korea) but not available as a free public feed:
+
+| Source | Why not |
+|---|---|
+| Shafaq News (shafaq.com) | Iraqi/Kurdish news agency, recurring Iran Update citation for Iraqi political developments tied to Iranian-backed militia influence — real coverage gap (no Iraq-specific source at all). Every RSS path tried (`/rss`, `/rss.xml`, `/en/rss`, `/en/feed`, `/feed`) returns the site's normal HTML shell, not a feed — no working RSS discovered. |
+| KCNA Watch (kcnawatch.org) | Run by the NK News team as a KCNA/Rodong Sinmun mirror — the single most-cited North Korea state-media source in ISW's Korean Peninsula Update. Its `/feed/` endpoint 302-redirects to a "free-member-form" signup popup gated behind `signup.koreapro.org` — the feed exists but requires account registration, not a keyless public feed like the rest of this list. |
+| Focus Taiwan (CNA) | Re-checked (was already rejected 2026-09-04 for no discoverable RSS) — still no working feed found at any path. |
 
 ## Non-editorial sources (not applicable)
 

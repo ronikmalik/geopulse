@@ -99,6 +99,13 @@ export const RSS_FEEDS: { name: string; url: string }[] = [
   // North Korea-specific — north-korea previously had no dedicated outlet
   // at all, only GDELT's keyword query.
   { name: "nknews", url: "https://www.nknews.org/feed" },
+  // Asia-Pacific specialist — USAGM-funded (RFE/RL's sister outlet, same
+  // statutory-editorial-independence model), High credibility/High factual
+  // per MBFC. A prior pass (see SOURCE_CREDIBILITY.md's "checked and
+  // rejected" table) found no working feed; the real one lives behind a
+  // redirect at this path, found during the 2026-09-04 ISW-sourcing pass —
+  // corrected there, not a re-litigation of that decision.
+  { name: "rfa", url: "https://www.rfa.org/arc/outboundfeeds/english/rss/" },
   // Middle East — Washington DC-based, Arab-American-founded, HIGH
   // credibility/HIGH factual per MBFC, no foreign-agent registration
   // question. Times of Israel gives the Israeli vantage point; this

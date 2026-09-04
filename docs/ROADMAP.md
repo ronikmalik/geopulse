@@ -78,6 +78,15 @@ correlation engine.**
 6. **Broader source coverage** per `docs/API_SOURCES.md`'s prioritized candidate list
    — ACLED/UCDP for conflict depth, Cloudflare Radar/RIPE/FIRMS for infrastructure
    and climate depth, sanctions feeds for Political & Governance.
+7. **X/Twitter ingestion** — a real structural gap, not a rounding error. A
+   2026-09-04 pass sampling ISW/CTP's own source citations across Russia-Ukraine,
+   Iran, China-Taiwan, and Korea found this product has zero X/Twitter coverage,
+   and that the gap costs noticeably more on China-Taiwan and Korea specifically
+   — those two theaters' primary sourcing (Taiwan's MND, Israeli/Yemen military
+   correspondents, CENTCOM) leans on named X accounts far more than on Telegram
+   or RSS-able outlets, unlike the comparatively Telegram-heavy Russia-Ukraine/Iran
+   theaters this product already covers well. Needs the X API (paid tier for any
+   real read access) — a deliberate cost/scope decision, not a quick add.
 
 ## Design principles (unchanged, worth restating)
 
