@@ -156,8 +156,14 @@ const BENIGN_PATTERNS =
   /port call|goodwill visit|routine (patrol|visit|deployment)|arrives? (in|for)|\bvisits?\b|\bvisiting\b|state visit|travels? to|heads? to|trip to|(joint|annual|routine) (exercise|drill|training)(?!.*(warn|threat|escalat|tension|provoc))|peace talks|peace deal|ceasefire (holds|agreed|announced)|signs? (a |an )?(deal|agreement|treaty)|trade deal|summit|diplomatic visit|meets with|holds talks|anniversary|marks \d+ years?|art (festival|exhibition)|film festival|sporting event|championship/i;
 
 const HIGH_SEVERITY = /nuclear (test|strike|weapon)|invasion|massacre|genocide|declared war/i;
+// Expanded beyond the original "strike/attack/killed" set after reviewing
+// real leaked-through feed output: military developments are often
+// reported with a specific action verb ("cleared tunnels", "downed a
+// drone", "seized the port") rather than the generic word "attack" —
+// missing those was letting real incidents get treated the same as
+// zero-signal topic-adjacent pieces by the MIN_SEVERITY gate below.
 const MODERATE_SEVERITY =
-  /\bstrike\b|missile (launch|fired|strike)|airstrike|\battack(ed|s)?\b|killed|\bdead\b|casualties|explosion|bombing|offensive|clashes?|\bcoup\b|martial law/i;
+  /\bstrike\b|missile (launch|fired|strike)|airstrike|\battack(ed|s)?\b|killed|\bdead\b|casualties|wounded|injured|explosion|bombing|offensive|clashes?|\bcoup\b|martial law|seiz(ed|es|ing)|captur(ed|es|ing)|raid(ed|s)?|storm(ed|s)?|shot down|downed (a |an )?(drone|aircraft|jet|missile)|intercepted|cleared (tunnels|the area)|detained|arrested|evacuat(ed|es|ing|ion)/i;
 const MILD_SEVERITY =
   /warns?|threatens?|escalat|tension|sanctions? (imposed|announced)|protest|unrest|mobiliz|border incident/i;
 
@@ -171,6 +177,22 @@ function keywordSeverity(text: string): number {
   if (MILD_SEVERITY.test(text)) return 2;
   return 1;
 }
+
+// A severity-1 item has none of HIGH/MODERATE/MILD_SEVERITY's language at
+// all — nothing in it reads as an incident, escalation, or even a
+// warning/tension signal, just topical proximity to a flashpoint (a
+// feature profile, a policy-lobbying story, a culture piece that happens
+// to name a country). Reviewing real feed output turned up exactly this
+// pattern slipping through: "The feminist organiser and her everyday
+// rebellions", "Cafe at centre of Israel culture clash agrees to shut on
+// Sabbath" — both passed BENIGN/ONGOING/NON_EVENT_TITLE checks (none of
+// those patterns matched) while containing zero incident language. Gating
+// on severity here — after category/BENIGN/ONGOING filtering, as the last
+// check before an item becomes a stored, feed-visible event — is a
+// precision-over-recall call: some real but mildly-worded developments
+// get dropped along with the noise, but "breaking, not reflective" (the
+// actual brief) needs that trade made in this direction, not the other.
+const MIN_SEVERITY_TO_INCLUDE = 2;
 
 // Title-first, same reasoning as country resolution below: a snippet
 // mentioning Iran in passing (a related-coverage teaser, a source's other
@@ -200,6 +222,9 @@ export function classifyByKeywords(item: RawItem): ClassifiedItem | null {
   if (BENIGN_PATTERNS.test(text) && !hasEscalation) return null;
   if (ONGOING_COVERAGE_PATTERNS.test(text) && !hasEscalation) return null;
 
+  const severity = keywordSeverity(text);
+  if (severity < MIN_SEVERITY_TO_INCLUDE) return null;
+
   const category = categorizeByKeywords(item.title, text);
 
   // The title is far more likely to name the actual subject of the story
@@ -226,6 +251,6 @@ export function classifyByKeywords(item: RawItem): ClassifiedItem | null {
     country,
     lat: centroid.lat,
     lon: centroid.lon,
-    severity: keywordSeverity(text),
+    severity,
   };
 }
