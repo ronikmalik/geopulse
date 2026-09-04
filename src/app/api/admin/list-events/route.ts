@@ -5,6 +5,16 @@ import { events } from "@/db/schema";
 import { isCronAuthorized } from "@/lib/cronAuth";
 
 export const maxDuration = 55;
+// A GET route handler reading searchParams is usually dynamic by default,
+// but two specific query strings here (sourcePrefix=rss:, sourcePrefix=
+// telegram:) got cached empty at Vercel's edge the very first time they
+// were hit — while the app itself still had a real bug — and kept serving
+// that stale cached response on every retry afterward, across multiple
+// unrelated code fixes and redeploys, because the cache key is the exact
+// URL+query string, not tied to which deployment is live. Confirmed via a
+// never-before-hit URL with the same params working immediately.
+// force-dynamic rules this out for good.
+export const dynamic = "force-dynamic";
 
 // Read-only counterpart to /api/admin/purge — built for the same kind of
 // one-off need: auditing already-stored rows against the current
@@ -39,36 +49,21 @@ export async function GET(req: NextRequest) {
     : like(events.source, `${sourcePrefix}%`);
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60_000);
 
-  try {
-    const rows = await db
-      .select({
-        id: events.id,
-        source: events.source,
-        url: events.url,
-        title: events.title,
-        summary: events.summary,
-        category: events.category,
-        country: events.country,
-        severity: events.severity,
-        publishedAt: events.publishedAt,
-        createdAt: events.createdAt,
-      })
-      .from(events)
-      .where(and(sourceFilter, gt(events.publishedAt, cutoff)));
+  const rows = await db
+    .select({
+      id: events.id,
+      source: events.source,
+      url: events.url,
+      title: events.title,
+      summary: events.summary,
+      category: events.category,
+      country: events.country,
+      severity: events.severity,
+      publishedAt: events.publishedAt,
+      createdAt: events.createdAt,
+    })
+    .from(events)
+    .where(and(sourceFilter, gt(events.publishedAt, cutoff)));
 
-    return NextResponse.json({
-      receivedParams: { source, sourcePrefix, days },
-      count: rows.length,
-      rows,
-    });
-  } catch (err) {
-    return NextResponse.json(
-      {
-        receivedParams: { source, sourcePrefix, days },
-        error: String(err),
-        stack: err instanceof Error ? err.stack : null,
-      },
-      { status: 500 },
-    );
-  }
+  return NextResponse.json({ count: rows.length, rows });
 }
