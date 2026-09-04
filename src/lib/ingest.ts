@@ -289,11 +289,17 @@ export async function runIngest(): Promise<IngestResult> {
   const isRecent = (item: RawItem) =>
     Date.now() - item.publishedAt.getTime() < RECENT_WINDOW_MS;
 
+  // GDELT used to be exempted from isLikelyGeopolitical on the assumption
+  // that CATEGORY_QUERIES already scopes every result to an on-topic
+  // search. Live output (2026-09-04) disproved that: a "North Korea"
+  // rotation returned a September 11 retrospective and an unrelated
+  // Indonesia-China piece, both tagged north-korea and inserted once the
+  // severity floor was loosened for GDELT (see classifyGdeltItem). GDELT's
+  // own text search isn't a reliable relevance filter on its own — this
+  // topical net still is, so every source (GDELT included) has to clear it
+  // before the per-source classifier (lenient or strict) even runs.
   const all = dedupeByUrl([...gdelt.items, ...rss.items]);
-  const candidates = all.filter(
-    (item) =>
-      isRecent(item) && (item.source === "gdelt" || isLikelyGeopolitical(item)),
-  );
+  const candidates = all.filter((item) => isRecent(item) && isLikelyGeopolitical(item));
   const direct = dedupeDirectByUrl([
     ...usgs.items,
     ...eonet.items,
