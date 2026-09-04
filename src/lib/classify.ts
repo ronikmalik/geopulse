@@ -259,6 +259,7 @@ const HIGH_SEVERITY =
 // event... it does not necessarily have to be conventional conflict...
 // if the falklands stuff was a LIVE breaking event that just happened
 // then u include it, even if it not an ambush or invasion or something."
+// (See the third pass below for "fighting" and its exclusion.)
 // The bar was never meant to be "is this violent/conflict-coded" — it's
 // "did a concrete, official action just happen" — and sanctions actually
 // being imposed, a diplomat being expelled, a country pulling out of a
@@ -274,8 +275,28 @@ const HIGH_SEVERITY =
 // \bsanctions?\b replaces that requirement entirely — accepting that a
 // pure policy-discussion piece ("Sanctions Bill Stalls in Congress") now
 // also passes, per the explicit new instruction to favor recall here.
+//
+// 2026-09-04, third pass: user flagged a real Yemen headline — "Yemen's
+// Houthis Push Toward Red Sea Strait as Ground Fighting Escalates" — a
+// genuine, significant military advance that scored severity 2 (only
+// "escalat" matched) and, under today's bar, would be silently EXCLUDED
+// entirely rather than merely under-scored. Neither "fighting" (actual
+// combat, not just "tension") nor territorial-advance phrasing ("push
+// toward", "advancing on") had ever been added, despite the user's
+// original "military updates (show of strength)" inclusion criterion
+// covering exactly this. Added bare "fighting" and push/advance-toward
+// constructions — then immediately live-tested against real current
+// headlines (same discipline as every change in this file) and found
+// bare "fighting" pulling in a real false positive: "Trump wants to stop
+// the fighting. Iran has trouble knowing when to quit" — a Haaretz
+// opinion column, not a breaking report, that NON_EVENT_TITLE_PATTERNS
+// doesn't catch (no "opinion:" prefix). "stop/end/halt the fighting" is a
+// recognizable policy/editorial framing distinct from an actual report of
+// fighting happening ("ground fighting escalates", "heavy fighting
+// continues") — excluded via lookbehind rather than dropping "fighting"
+// entirely, which would have reintroduced the original Yemen gap.
 const MODERATE_SEVERITY =
-  /\bstrikes?\b|missile (launch|fired|strike)|airstrike|\battack(ed|ing|s)?\b|killed|\bdead\b|casualties|wounded|injured|explosion|bombing|offensive|clashes?|\bcoup\b|martial law|seiz(ed|es|ing)(?!\s+(the\s+)?opportunity)|captur(ed|es|ing)(?!\s+(the\s+)?(moment|imagination|attention|essence|hearts?|spirit))|raid(ed|s)?|storm(ed|s)?|shot down|downed (a |an )?(drone|aircraft|jet|missile)|intercepted|cleared (tunnels|the area)|detained|arrested|evacuat(ed|es|ing|ion)|recaptur(ed|es|ing)|\bretook\b|\bretake\b|reclaim(ed|s|ing)|liberat(ed|es|ing)|repel(led|s)?|thwart(ed|s)?|destroy(ed|s)?|neutrali[sz]ed|eliminat(ed|es)|liquidat(ed|es)|struck\b(?! a (deal|balance|chord|pose))|hit by|mobiliz|border incident|state of emergency|election fraud|government collapse|\bousted\b|\boverthrown\b|power grab|parliament dissolved|resign(ed|s)? (amid|under|following)|famine|malnutrition|displaced|displacement|refugee crisis|humanitarian crisis|humanitarian emergency|disease outbreak|epidemic|\bexodus\b|flee(s|ing)?|death toll|\boutbreak\b|\bsanctions?\b|expel(led|s)?|recall(ed|s)? (its |the )?ambassador|sever(ed|s)? (diplomatic )?ties|withdr(aw|ew|awn|awing)s? from (the )?(treaty|deal|agreement|pact)|pulls? out of (the )?(treaty|deal|agreement|pact)|vows?[^.]{0,30}(sanctions|retaliation|reprisal)|nationaliz(ed|es|ing)|expropriat(ed|es|ing)/i;
+  /\bstrikes?\b|missile (launch|fired|strike)|airstrike|\battack(ed|ing|s)?\b|killed|\bdead\b|casualties|wounded|injured|explosion|bombing|offensive|clashes?|\bcoup\b|martial law|seiz(ed|es|ing)(?!\s+(the\s+)?opportunity)|captur(ed|es|ing)(?!\s+(the\s+)?(moment|imagination|attention|essence|hearts?|spirit))|raid(ed|s)?|storm(ed|s)?|shot down|downed (a |an )?(drone|aircraft|jet|missile)|intercepted|cleared (tunnels|the area)|detained|arrested|evacuat(ed|es|ing|ion)|recaptur(ed|es|ing)|\bretook\b|\bretake\b|reclaim(ed|s|ing)|liberat(ed|es|ing)|repel(led|s)?|thwart(ed|s)?|destroy(ed|s)?|neutrali[sz]ed|eliminat(ed|es)|liquidat(ed|es)|struck\b(?! a (deal|balance|chord|pose))|hit by|mobiliz|border incident|state of emergency|election fraud|government collapse|\bousted\b|\boverthrown\b|power grab|parliament dissolved|resign(ed|s)? (amid|under|following)|famine|malnutrition|displaced|displacement|refugee crisis|humanitarian crisis|humanitarian emergency|disease outbreak|epidemic|\bexodus\b|flee(s|ing)?|death toll|\boutbreak\b|\bsanctions?\b|expel(led|s)?|recall(ed|s)? (its |the )?ambassador|sever(ed|s)? (diplomatic )?ties|withdr(aw|ew|awn|awing)s? from (the )?(treaty|deal|agreement|pact)|pulls? out of (the )?(treaty|deal|agreement|pact)|vows?[^.]{0,30}(sanctions|retaliation|reprisal)|nationaliz(ed|es|ing)|expropriat(ed|es|ing)|(?<!(stop|end|halt) the )\bfighting\b|push(ed|es)? (toward|into|on)|advanc(ed|es|ing) (toward|into|on)/i;
 const MILD_SEVERITY =
   /warns?|threatens?|escalat|tension|protest|unrest/i;
 
