@@ -118,39 +118,44 @@ export async function runIngest(): Promise<IngestResult> {
   // back, well past this app's old 7s per-query timeout — so some of what
   // source_health was logging as "GDELT down" was actually this app
   // aborting a slow-but-real response, not GDELT rejecting the request.
-  // retries: 0 here (rather than fetchGdelt's own default of 1) because
-  // serialization already means one query's failure doesn't cost the
-  // others anything — a same-query retry would just double the worst-case
-  // wall-clock time for no corresponding benefit.
   //
-  // GDELT_MAX_PHASE_MS bounds the *total* time this sequential fan-out can
-  // spend, not just each query — cron-job.org's own request timeout and
-  // Vercel's practical (not just configured) execution ceiling both cap
-  // how long the whole /api/ingest response can take, and 7 queries at a
-  // generous 15s timeout each could in the worst case (GDELT fully down)
-  // add up to well over either of those. Once the budget is spent, any
-  // remaining categories are skipped for this run rather than attempted —
-  // they'll just get picked up on the next ingest cycle a few minutes
-  // later, same as if this run's ingest simply hadn't happened yet.
+  // But spacing 7 queries out costs wall-clock time this route doesn't
+  // actually have: cron-job.org (the external trigger, see
+  // docs/ARCHITECTURE.md) enforces a **hard 30s request timeout with no
+  // way to raise it** — confirmed directly in its own UI, not assumed.
+  // Sequentially attempting all 7 categories, even at a realistic per-
+  // query timeout, blows well past that. So instead of every category
+  // every cycle, only ROTATION_CHUNK_SIZE categories run per ingest call,
+  // chosen deterministically from the current time so consecutive cycles
+  // (roughly one every 15 min, however this route gets triggered) advance
+  // through the full list — every category still gets a fresh GDELT check
+  // at least once per rotation (currently ~4 cycles, ~1h worst case),
+  // which RSS's continuous coverage of the same topics backstops in the
+  // meantime. retries: 0 (vs. fetchGdelt's own default of 1) since a
+  // same-query retry would just double this already-tight budget for no
+  // benefit — a failed query this cycle gets a fresh attempt next
+  // rotation regardless.
+  const ROTATION_CHUNK_SIZE = 2;
+  const ROTATION_INTERVAL_MS = 15 * 60_000;
   const GDELT_QUERY_SPACING_MS = 1500;
-  const GDELT_MAX_PHASE_MS = 40_000;
+  const GDELT_QUERY_TIMEOUT_MS = 10_000;
   const gdeltQueryErrors: string[] = [];
 
   const [gdelt, rss, usgs, eonet, gdacs, ioda, firms] = await Promise.all([
     trackFetch("gdelt", async () => {
+      const allQueries = Object.values(CATEGORY_QUERIES);
+      const chunkCount = Math.ceil(allQueries.length / ROTATION_CHUNK_SIZE);
+      const chunkIndex = Math.floor(Date.now() / ROTATION_INTERVAL_MS) % chunkCount;
+      const queries = allQueries.slice(
+        chunkIndex * ROTATION_CHUNK_SIZE,
+        chunkIndex * ROTATION_CHUNK_SIZE + ROTATION_CHUNK_SIZE,
+      );
+
       const results: RawItem[][] = [];
-      const queries = Object.values(CATEGORY_QUERIES);
-      const phaseStart = Date.now();
       for (let i = 0; i < queries.length; i++) {
-        if (Date.now() - phaseStart > GDELT_MAX_PHASE_MS) {
-          gdeltQueryErrors.push(
-            `gdelt(${queries[i]}): skipped, GDELT phase budget (${GDELT_MAX_PHASE_MS}ms) exhausted`,
-          );
-          continue;
-        }
         if (i > 0) await sleep(GDELT_QUERY_SPACING_MS);
         try {
-          results.push(await fetchGdelt(queries[i], 15, 0));
+          results.push(await fetchGdelt(queries[i], 15, 0, GDELT_QUERY_TIMEOUT_MS));
         } catch (err) {
           gdeltQueryErrors.push(`gdelt(${queries[i]}): ${err}`);
           results.push([]);

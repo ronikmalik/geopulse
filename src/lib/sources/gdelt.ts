@@ -32,17 +32,18 @@ function sleep(ms: number) {
 
 // A live curl test against GDELT (independent of this app, 2026-09-04)
 // took ~11-13s just to get a response back (a 429) under real load —
-// well past the 7s this was originally set to. ingest.ts now runs the 7
-// category queries sequentially rather than concurrently (see the comment
-// there), so a generous per-query timeout here no longer risks stalling
-// the other 6 queries the way it would have under the old Promise.all
-// fan-out; it only needs to fit within the ingest route's own 300s budget.
+// well past the 7s this was originally set to. This default only applies
+// outside ingest.ts's own fan-out (e.g. ad-hoc calls); ingest.ts passes
+// its own tighter timeoutMs, sized to fit cron-job.org's hard 30s request
+// timeout across a small rotating batch of categories per cycle rather
+// than all 7 every time (see the comment there for why).
 const REQUEST_TIMEOUT_MS = 15_000;
 
 export async function fetchGdelt(
   query: string,
   maxRecords = 20,
   retries = 1,
+  timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<RawItem[]> {
   const params = new URLSearchParams({
     query,
@@ -57,7 +58,7 @@ export async function fetchGdelt(
   try {
     res = await fetch(`${GDELT_DOC_ENDPOINT}?${params.toString()}`, {
       headers: { "User-Agent": "geopulse-globe/1.0" },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
     // Network-level failure (DNS, connect timeout, reset) rather than a
@@ -66,14 +67,14 @@ export async function fetchGdelt(
     const cause = err instanceof Error && err.cause ? ` (${err.cause})` : "";
     if (retries > 0) {
       await sleep(1500);
-      return fetchGdelt(query, maxRecords, retries - 1);
+      return fetchGdelt(query, maxRecords, retries - 1, timeoutMs);
     }
     throw new Error(`GDELT request failed for "${query}": ${err}${cause}`);
   }
 
   if (res.status === 429 && retries > 0) {
     await sleep(2000);
-    return fetchGdelt(query, maxRecords, retries - 1);
+    return fetchGdelt(query, maxRecords, retries - 1, timeoutMs);
   }
 
   if (!res.ok) {
