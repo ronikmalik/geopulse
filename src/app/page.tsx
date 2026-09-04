@@ -6,6 +6,7 @@ import CategoryFilter from "@/components/CategoryFilter";
 import AlertToast from "@/components/AlertToast";
 import Dashboard, { type DashboardTab } from "@/components/Dashboard";
 import { useEventStream } from "@/lib/useEventStream";
+import { usePulsingEvents } from "@/lib/usePulsingEvents";
 import { useCountryRisk } from "@/lib/useCountryRisk";
 import { useLiveLayer } from "@/lib/useLiveLayer";
 import {
@@ -41,6 +42,7 @@ const MOBILE_TABS: { id: DashboardTab; label: string }[] = [
 
 export default function Home() {
   const { events, status, incoming, dismissIncoming } = useEventStream();
+  const pulsingIds = usePulsingEvents(incoming);
   const countryScores = useCountryRisk();
   // All eight pillars' event categories are on by default — this is a
   // global risk platform, not a conflict-theater tracker. The five
@@ -243,6 +245,7 @@ export default function Home() {
             setMobileOpen(true);
           }}
           extraPoints={extraPoints}
+          pulsingIds={pulsingIds}
         />
       </div>
 
