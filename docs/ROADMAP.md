@@ -66,13 +66,16 @@ correlation engine.**
    in daily — the backend piece (ARCHITECTURE.md §6.3) is done, just not surfaced in
    the UI yet.
 4. **A dedicated always-on worker**, decoupled from any single external scheduler.
-   cron-job.org is currently the real primary ingest trigger and is working reliably
-   (see ARCHITECTURE.md §7), with the self-triggering stream-based ingest and a daily
-   Vercel cron as fallbacks — but all three still ultimately depend on this one Vercel
-   deployment. The originally-intended GitHub Actions cron has never fired on its own
-   schedule (root cause undiagnosed) and only runs via manual dispatch. Standing up a
-   dedicated worker service (Railway/Fly.io/Render per the brief) so ingestion isn't
-   dependent on a single third-party scheduler is the top infrastructure item.
+   cron-job.org is the real primary ingest trigger and is working reliably (see
+   ARCHITECTURE.md §7). The originally-intended GitHub Actions cron sat silent for
+   over a week (2026-08-27 to 2026-09-04, root cause never diagnosed) before a
+   forced re-registration of its schedule fixed it on 2026-09-04 — it's now also
+   firing reliably and covering for cron-job.org, alongside the self-triggering
+   stream-based ingest and a daily Vercel cron as further fallbacks. All four still
+   ultimately depend on this one Vercel deployment, so standing up a dedicated
+   worker service (Railway/Fly.io/Render per the brief) so ingestion isn't
+   dependent on Vercel at all remains the top infrastructure item — just a less
+   urgent one now that there are two independent real-time triggers instead of one.
 5. **Admin health panel UI.** The data exists (`GET /api/admin/health`); it just
    isn't rendered anywhere yet.
 6. **Broader source coverage** per `docs/API_SOURCES.md`'s prioritized candidate list

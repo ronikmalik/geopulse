@@ -1,14 +1,15 @@
 name: Ingest live events
 
-# This schedule has not fired even once since it was first added on
-# 2026-08-27, despite the workflow showing "active" via the GitHub API and
-# the repo having no other explanation found (public, Actions enabled,
-# no billing/permissions issue, no ongoing GitHub incident). cron-job.org
-# is the actual primary trigger now (see docs/ARCHITECTURE.md) — this is
-# only a backup. Changed the cron expression on 2026-09-04 specifically to
-# force GitHub to re-register the schedule, on the chance the original
-# registration was stuck; if this also never fires, the issue is GitHub's
-# scheduler itself and not something fixable from this repo.
+# This schedule did not fire even once between 2026-08-27 (when it was
+# first added) and 2026-09-04, despite the workflow showing "active" via
+# the GitHub API and no other explanation found (public, Actions enabled,
+# no billing/permissions issue, no ongoing GitHub incident). The cron
+# expression was changed on 2026-09-04 specifically to force GitHub to
+# re-register the schedule, on the chance the original registration was
+# stuck — and it worked: confirmed firing on schedule the same day (run
+# history shows event=schedule completions). cron-job.org remains the
+# primary trigger (see docs/ARCHITECTURE.md) since it's been reliable
+# throughout, but this backup is now actually live, not theoretical.
 on:
   schedule:
     - cron: "4,19,34,49 * * * *"

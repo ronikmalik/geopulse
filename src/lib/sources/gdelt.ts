@@ -99,9 +99,36 @@ export async function fetchGdelt(
     return fetchGdelt(query, maxRecords, retries - 1, timeoutMs);
   }
 
+  // Was previously "return []" here — silently indistinguishable from "GDELT
+  // has no news right now" in source_health (see recordSourceHealth: a
+  // non-throwing result marks lastSuccessAt/lastItemCount as if the cycle
+  // genuinely succeeded). Direct testing (2026-09-04) found the real GDELT
+  // free-tier behavior doesn't match its own stated "one request every 5
+  // seconds": a single 429 appears to trigger a materially longer, sticky
+  // cooldown — repeat single requests spaced 6s, then tens of seconds apart
+  // kept getting 429 well past what 5s spacing alone would predict, matching
+  // an independent report (github.com/alex9smith/gdelt-doc-api issue #22:
+  // "roughly 60 requests over 90 minutes was enough to trigger a block that
+  // no useful retry interval cleared"). Worse, this app runs on Vercel's
+  // Hobby-tier shared, dynamic outbound-IP pool (confirmed via Vercel's own
+  // networking docs) — not a per-project static IP — so an unrelated
+  // tenant's traffic sharing the same egress IP can trigger a block this
+  // app never caused itself, no matter how conservative ingest.ts's own
+  // rotation/spacing is. Throwing here (instead of swallowing) makes that
+  // visible in source_health as a real error instead of a silently "clean"
+  // empty cycle — the honest state, not a fixable-by-more-backoff one.
+  // GDELT's own recommended fix for genuine high-volume use (their Web
+  // NGrams 3.0 downloadable dataset) doesn't fit this app's small periodic
+  // per-category query shape, so intermittent GDELT gaps are accepted as a
+  // real constraint, backstopped by RSS's continuous coverage of the same
+  // flashpoint categories (see ingest.ts) — not something worth chasing
+  // further with tighter retry logic.
   if (!res.ok) {
-    console.error(`GDELT fetch failed: ${res.status} for query "${query}"`);
-    return [];
+    const detail =
+      res.status === 429
+        ? "429 rate limited (see comment above — likely Vercel's shared egress IP, not this app's own request volume)"
+        : `HTTP ${res.status}`;
+    throw new Error(`GDELT request failed for "${query}": ${detail}`);
   }
 
   const text = await res.text();

@@ -175,10 +175,15 @@ routes), Postgres via Neon, no separate worker service.
 The brief recommends *not* relying on Vercel alone for persistent ingestion workers.
 That recommendation is correct, and this project hit exactly the failure mode it
 warns about: the originally-intended scheduling mechanism (a GitHub Actions cron
-calling `/api/ingest`) has **never fired once** on its own schedule trigger, verified
-against GitHub's own Actions run history — for the entire life of this repository, on
-this deployment or the previous one. Root cause undiagnosed. It now only runs via
-manual `workflow_dispatch` and is kept as a backup, not the primary mechanism.
+calling `/api/ingest`) went **entirely silent for over a week** (added 2026-08-27,
+first fired 2026-09-04) — verified against GitHub's own Actions run history, no
+schedule-triggered runs at all in that window, root cause never diagnosed. It was
+only usable via manual `workflow_dispatch` during that stretch. On 2026-09-04 the
+cron expression in `.github/workflows/ingest.yml` was changed specifically to force
+GitHub to re-register the schedule, and that fixed it — confirmed firing reliably on
+schedule the same day. It's still treated as a backup, not the primary mechanism,
+since cron-job.org (below) has been reliable throughout and there's no reason yet to
+trust GitHub's scheduler not to go silent again the same unexplained way.
 
 The actual primary trigger, as of 2026-09 (confirmed live via `/api/admin/health`
 showing multi-minute-fresh `lastAttemptAt` timestamps), is an external scheduler,
@@ -195,12 +200,14 @@ run on every new connection, gated to at most once per ~10 minutes per warm inst
 Next's `after()` API to guarantee the trigger request actually gets sent rather than
 being silently dropped when the stream's own response completes.
 
-The daily Vercel cron (`vercel.ts`) is a third-tier floor in case both of the above
+The daily Vercel cron (`vercel.ts`) is a third-tier floor in case all of the above
 stop working (Vercel Hobby plan caps custom cron frequency at once/day — this is a
-real platform limit, not a design choice). Fixing GitHub Actions properly, or moving
-ingestion to a dedicated always-on worker (Railway/Fly.io/Render, as the brief
-suggests) so a single third-party scheduler isn't the sole real-time dependency, is
-still the correct long-term fix and is on the roadmap.
+real platform limit, not a design choice). With GitHub Actions' schedule now also
+firing reliably, real-time ingest no longer depends on a single third-party
+scheduler — cron-job.org and GitHub Actions cover for each other. Moving ingestion
+to a dedicated always-on worker (Railway/Fly.io/Render, as the brief suggests) is
+still the cleaner long-term architecture and stays on the roadmap, but it's no
+longer covering for a single point of failure the way it was before 2026-09-04.
 
 **Serverless duration**: Vercel Hobby-tier functions are commonly documented at a 60s
 ceiling; this project's Fluid Compute setting has empirically allowed a full ~60–90s
