@@ -117,3 +117,15 @@ export const aircraftCountHistory = pgTable(
 
 export type AircraftCountHistoryRow = typeof aircraftCountHistory.$inferSelect;
 export type NewAircraftCountHistoryRow = typeof aircraftCountHistory.$inferInsert;
+
+// One row per UTC day this app has called the Google Cloud Translation
+// API — see src/lib/translationUsage.ts. This is what lets
+// translateBatch enforce a hard monthly character cap across serverless
+// invocations that share no in-memory state: the cap only means anything
+// if usage is durable, not counted per cold start.
+export const translationUsage = pgTable("translation_usage", {
+  date: text("date").primaryKey(), // "YYYY-MM-DD", UTC
+  characters: integer("characters").notNull().default(0),
+});
+
+export type TranslationUsageRow = typeof translationUsage.$inferSelect;

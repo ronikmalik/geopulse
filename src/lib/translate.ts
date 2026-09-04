@@ -1,3 +1,5 @@
+import { canAfford, recordUsage } from "./translationUsage";
+
 // Google Cloud Translation API v2 ("Basic"), REST + simple API key — no
 // OAuth/service account needed. Verified against Google's own current
 // docs before implementing (POST, form-encoded body, `q` repeatable for
@@ -25,6 +27,14 @@ export async function translateBatch(
 ): Promise<string[] | null> {
   const apiKey = process.env.GOOGLE_TRANSLATE_API_KEY;
   if (!apiKey || texts.length === 0) return null;
+
+  // Hard cap, checked before every call: 499,000 chars/month, portioned
+  // out daily rather than front-loaded — see src/lib/translationUsage.ts.
+  // A DB read failing here fails safe (skip translation, not skip the
+  // check) since the whole point is never risking an overage.
+  const estimatedChars = texts.reduce((sum, t) => sum + t.length, 0);
+  const affordable = await canAfford(estimatedChars).catch(() => false);
+  if (!affordable) return null;
 
   const body = new URLSearchParams();
   for (const text of texts) body.append("q", text);
@@ -54,6 +64,15 @@ export async function translateBatch(
   const data = (await res.json()) as TranslateApiResponse;
   const translations = data.data?.translations;
   if (!translations || translations.length !== texts.length) return null;
+
+  // Record actual input length billed, not the pre-call estimate — the
+  // two are the same value here (estimatedChars), but computed
+  // independently on purpose so a future change to what gets sent
+  // (e.g. URL-encoding overhead) can't silently desync the budget from
+  // reality.
+  await recordUsage(texts.reduce((sum, t) => sum + t.length, 0)).catch((err) => {
+    console.error(`Failed to record translation usage: ${err}`);
+  });
 
   return translations.map((t) => t.translatedText);
 }

@@ -105,6 +105,22 @@ one batched request per fetch, not one call per post. A translated
 summary is explicitly marked "[translated from Ukrainian]" (etc.) rather
 than presented as the channel's own English phrasing.
 
+Activated 2026-09-04 with a real GCP project (billing enabled — the free
+trial was already used up on this account, so Translation isn't in the
+always-free tier; a real payment method is on file). Given that,
+`src/lib/translationUsage.ts` enforces a hard 499,000 characters/month
+ceiling — 1,000 under Google's actual 500,000/month free allowance, on
+purpose — tracked per UTC day in a `translation_usage` table (state has
+to be durable across serverless invocations, not an in-memory counter
+that resets every cold start) so this can never actually trigger billing.
+The daily allowance is adaptive: whatever's left in the monthly cap,
+divided by however many days remain, recalculated on every check — a
+light day's unused quota rolls into the rest of the month rather than
+being wasted, while the 499,000 ceiling is still checked independently
+of the daily math so rounding can't cause an overage. `translateBatch`
+skips translation (same fallback as no key configured) if the batch
+would exceed either the day's share or the hard monthly cap.
+
 ## Framing discipline
 
 Every Telegram-derived event's summary is prefixed with the channel's
