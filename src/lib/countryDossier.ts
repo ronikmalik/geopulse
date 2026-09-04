@@ -44,12 +44,14 @@ export async function fetchCountryDossier(iso2: string): Promise<CountryDossier 
 
   const countryName = meta?.name ?? gdp?.countryName ?? population?.countryName ?? iso2;
 
+  const region = meta?.region?.trim() || null;
+
   const parts: string[] = [];
-  if (meta?.region) {
+  if (region) {
     parts.push(
-      meta.incomeLevel && meta.incomeLevel !== "Aggregates"
-        ? `${meta.region}, ${meta.incomeLevel.toLowerCase()} economy`
-        : meta.region,
+      meta?.incomeLevel && meta.incomeLevel !== "Aggregates"
+        ? `${region}, ${meta.incomeLevel.toLowerCase()} economy`
+        : region,
     );
   }
   if (gdp?.value != null) {
@@ -62,15 +64,18 @@ export async function fetchCountryDossier(iso2: string): Promise<CountryDossier 
     parts.push(`capital ${meta.capitalCity}`);
   }
 
+  // Some World Bank capital names already end in a period (e.g. "Washington
+  // D.C."), so don't double it up with the sentence-closing one.
+  const body = parts.join(" · ");
   const summary =
     parts.length > 0
-      ? `${countryName} — ${parts.join(" · ")}.`
+      ? `${countryName} — ${body}${body.endsWith(".") ? "" : "."}`
       : `${countryName} — no World Bank data available.`;
 
   return {
     country: iso2.toUpperCase(),
     countryName,
-    region: meta?.region ?? null,
+    region,
     incomeLevel: meta?.incomeLevel ?? null,
     capitalCity: meta?.capitalCity ?? null,
     gdpUsd: gdp?.value != null ? { value: gdp.value, year: gdp.year } : null,
