@@ -21,6 +21,15 @@ export const maxDuration = 55;
 // inserted under an old, looser threshold (e.g. severity 2, before
 // MIN_SEVERITY_TO_INCLUDE went to 3) needed purging without also deleting
 // the same source's legitimate severity-3+ rows alongside them.
+//
+// Optional `url` narrows to exactly one row (still scoped to `source` too,
+// so this can never become a general delete-by-url tool for someone else's
+// data) — added the same day for a single already-inserted row that a
+// content-pattern fix (not a severity change) made obsolete: a propaganda-
+// commentary post that scored severity 3 before RHETORICAL_ARGUMENT_
+// PATTERNS in classify.ts excluded it. Deleting it is permanent — a future
+// re-fetch of the same still-in-window Telegram post will correctly be
+// rejected by the now-fixed classifier and won't reinsert it.
 export async function GET(req: NextRequest) {
   if (!isCronAuthorized(req)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -34,12 +43,15 @@ export async function GET(req: NextRequest) {
   if (maxSeverityParam && (!Number.isInteger(maxSeverity) || maxSeverity === null)) {
     return NextResponse.json({ error: "maxSeverity must be an integer" }, { status: 400 });
   }
+  const url = req.nextUrl.searchParams.get("url");
 
   const db = getDb();
-  const condition =
-    maxSeverity !== null
-      ? and(eq(events.source, source), lt(events.severity, maxSeverity + 1))
-      : eq(events.source, source);
-  const result = await db.delete(events).where(condition).returning({ id: events.id });
-  return NextResponse.json({ source, maxSeverity, deleted: result.length });
+  const conditions = [eq(events.source, source)];
+  if (maxSeverity !== null) conditions.push(lt(events.severity, maxSeverity + 1));
+  if (url) conditions.push(eq(events.url, url));
+  const result = await db
+    .delete(events)
+    .where(and(...conditions))
+    .returning({ id: events.id });
+  return NextResponse.json({ source, maxSeverity, url, deleted: result.length });
 }
