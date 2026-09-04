@@ -11,6 +11,7 @@ import {
   type MomentumDirection,
 } from "@/lib/threat";
 import { CATEGORY_LABELS, type Category } from "@/lib/categories";
+import { sourceLabel } from "@/lib/sourceLabels";
 
 type ConfidenceTier = "single-source" | "corroborated" | "cross-confirmed";
 
@@ -437,6 +438,9 @@ export default function CountryRiskPanel({
                           <p className="mt-0.5 line-clamp-2 text-[11px] text-neutral-300">
                             {e.summary}
                           </p>
+                          <span className="mt-0.5 block font-mono text-[9px] text-neutral-600">
+                            Source: {sourceLabel(e.source)}
+                          </span>
                           {e.clusterSize > 1 && (
                             <span
                               className={`mt-1 inline-block font-mono text-[9px] uppercase tracking-wider ${

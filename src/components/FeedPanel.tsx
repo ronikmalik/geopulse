@@ -2,6 +2,7 @@
 
 import type { GeoEvent } from "@/lib/types";
 import { CATEGORY_LABELS, type Category } from "@/lib/categories";
+import { sourceLabel } from "@/lib/sourceLabels";
 
 interface FeedPanelProps {
   events: GeoEvent[];
@@ -44,12 +45,14 @@ export default function FeedPanel({
             Listening for signals…
           </p>
         )}
-        {sorted.map((event) => (
+        {sorted.map((event) => {
+          const isSelected = selectedId === event.id;
+          return (
           <button
             key={event.id}
             onClick={() => onSelect(event)}
             className={`block w-full border-b border-red-950 px-4 py-3 text-left transition hover:bg-red-950/30 ${
-              selectedId === event.id ? "bg-red-950/40" : ""
+              isSelected ? "bg-red-950/40" : ""
             }`}
           >
             <div className="flex items-center justify-between gap-2">
@@ -64,7 +67,7 @@ export default function FeedPanel({
             <div className="mt-1 font-mono text-xs text-red-300">
               {event.location}
             </div>
-            <p className="mt-1 line-clamp-2 text-sm text-neutral-300">
+            <p className={`mt-1 text-sm text-neutral-300 ${isSelected ? "" : "line-clamp-2"}`}>
               {event.summary}
             </p>
             <div className="mt-1.5 flex gap-0.5">
@@ -77,8 +80,25 @@ export default function FeedPanel({
                 />
               ))}
             </div>
+            {isSelected && (
+              <div className="mt-2 flex items-center justify-between gap-2 border-t border-red-950/70 pt-2">
+                <span className="font-mono text-[10px] uppercase tracking-wider text-neutral-500">
+                  Source: <span className="text-neutral-300">{sourceLabel(event.source)}</span>
+                </span>
+                <a
+                  href={event.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="font-mono text-[10px] uppercase tracking-wider text-red-500 hover:text-red-400"
+                >
+                  View original →
+                </a>
+              </div>
+            )}
           </button>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
