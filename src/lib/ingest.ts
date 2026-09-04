@@ -18,6 +18,23 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// A live run showed a single GDELT query taking ~23s despite being passed
+// a 10s timeoutMs — fetchGdelt's internal `AbortSignal.timeout()` did not
+// reliably cut the request off within the requested budget against an
+// unresponsive-but-not-quite-timed-out-itself endpoint. Racing it against
+// our own setTimeout here enforces the deadline from this loop's side
+// regardless of what the fetch call is actually doing internally — the
+// abandoned fetchGdelt call keeps running in the background (a dangling
+// promise, not truly cancelled) but can no longer hold up the ingest run.
+function withDeadline<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label}: deadline (${ms}ms) exceeded`)), ms),
+    ),
+  ]);
+}
+
 function dedupeByUrl(items: RawItem[]): RawItem[] {
   const seen = new Map<string, RawItem>();
   for (const item of items) seen.set(item.url, item);
@@ -155,7 +172,13 @@ export async function runIngest(): Promise<IngestResult> {
       for (let i = 0; i < queries.length; i++) {
         if (i > 0) await sleep(GDELT_QUERY_SPACING_MS);
         try {
-          results.push(await fetchGdelt(queries[i], 15, 0, GDELT_QUERY_TIMEOUT_MS));
+          results.push(
+            await withDeadline(
+              fetchGdelt(queries[i], 15, 0, GDELT_QUERY_TIMEOUT_MS),
+              GDELT_QUERY_TIMEOUT_MS + 1_000,
+              `gdelt(${queries[i]})`,
+            ),
+          );
         } catch (err) {
           gdeltQueryErrors.push(`gdelt(${queries[i]}): ${err}`);
           results.push([]);
