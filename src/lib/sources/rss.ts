@@ -106,6 +106,16 @@ export const RSS_FEEDS: { name: string; url: string }[] = [
   // redirect at this path, found during the 2026-09-04 ISW-sourcing pass —
   // corrected there, not a re-litigation of that decision.
   { name: "rfa", url: "https://www.rfa.org/arc/outboundfeeds/english/rss/" },
+  // South Korea's national wire service — real value for Korean-peninsula
+  // coverage, a recurring ISW Korean Peninsula Update citation. Included
+  // with a disclosed caveat: MBFC notes the SK government directly
+  // controls Yonhap and appoints its board (not just funds it under
+  // statutory independence, the BBC/DW/RFE/RL model here), rating it
+  // "Mostly Factual" rather than "High." Same "state-linked, disclosed,
+  // included anyway" precedent already used for Iran's IRIB/Fars/Press TV
+  // and Russia's mod_russia in the Telegram layer — held back in an
+  // earlier pass pending this explicit call; see SOURCE_CREDIBILITY.md.
+  { name: "yonhap", url: "https://en.yna.co.kr/RSS/news.xml" },
   // Middle East — Washington DC-based, Arab-American-founded, HIGH
   // credibility/HIGH factual per MBFC, no foreign-agent registration
   // question. Times of Israel gives the Israeli vantage point; this

@@ -193,9 +193,16 @@ and still unresolved. No new distinct Iraqi militia channel was found.
   accounts than Telegram (e.g. Taiwan's `@MoNDefense`) — essentially zero
   Telegram citations in either theater's sample. RFA, Focus Taiwan, KCNA
   Watch (kcnawatch.org, an NK News-run KCNA/Rodong Sinmun mirror), Yonhap,
-  and Chosun Ilbo were the recurring non-Telegram sources — see
-  `API_SOURCES.md`/`SOURCE_CREDIBILITY.md` for whether these get wired in
-  as RSS feeds.
+  and Chosun Ilbo were the recurring non-Telegram sources. **Resolved
+  2026-09-04**: RFA and Yonhap are now both wired into `rss.ts` (see
+  `SOURCE_CREDIBILITY.md`) — Focus Taiwan and KCNA Watch stay out (no
+  working keyless feed), Chosun Ilbo stays out (Korean-only, no English
+  RSS path and this pipeline has no translation step, unlike Telegram's).
+- The X/Twitter accounts named above (`CENTCOM`, `manniefabian`,
+  `BarakRavid`, `idfonline`, `BashaReport`, `@MoNDefense`) are recorded in
+  this session's persistent memory for recall in a future session, per the
+  user's explicit request — not wired in, since that needs the X API
+  decision above.
 - **Structural gap worth naming plainly**: GeoPulse has zero X/Twitter
   ingestion, and this pass found that gap costs more coverage on the
   China-Taiwan and Korea theaters specifically than on Russia-Ukraine/Iran,
