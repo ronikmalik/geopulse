@@ -287,6 +287,53 @@ export const COUNTRY_NAME_TO_ALPHA2: Record<string, string> = {
   pezeshkian: "IR",
   erdogan: "TR",
   "mohammed bin salman": "SA",
+
+  // Named armed groups/cartels — added 2026-09-05 alongside classify.ts's
+  // REGIONAL_ACTORS keyword expansion, for the exact same reason cities/
+  // leaders are here: a story naming the group ("Boko Haram kills a dozen
+  // in northeastern Nigeria") often never uses the plain country name at
+  // all, so without this it clears the topical gate and severity check
+  // but still fails to resolve a country and gets dropped anyway. Only
+  // safe, low-collision, mostly-single-country group names are here —
+  // multi-country groups (JNIM/ISWAP span the Sahel/Lake Chad region with
+  // no one right answer) and bare short acronyms that collide with an
+  // unrelated common meaning (RSF/Reporters Without Borders, ADF/
+  // Australia's Defence Force) are deliberately left out, resolved
+  // instead by whatever actual country name the article names directly.
+  "boko haram": "NG",
+  iswap: "NG",
+  "al-shabaab": "SO",
+  "al shabaab": "SO",
+  "al-shabab": "SO",
+  tplf: "ET",
+  m23: "CD",
+  "allied democratic forces": "CD",
+  codeco: "CD",
+  seleka: "CF",
+  "anti-balaka": "CF",
+  "rapid support forces": "SD",
+  houthi: "YE",
+  houthis: "YE",
+  "ansar allah": "YE",
+  "hayat tahrir al-sham": "SY",
+  taliban: "AF",
+  "isis-k": "AF",
+  "khorasan province": "AF",
+  "tehrik-i-taliban": "PK",
+  "pakistani taliban": "PK",
+  naxalite: "IN",
+  naxals: "IN",
+  "lashkar-e-taiba": "IN",
+  "jaish-e-mohammed": "IN",
+  pkk: "TR",
+  "abu sayyaf": "PH",
+  "new people's army": "PH",
+  "arakan army": "MM",
+  "sendero luminoso": "PE",
+  farc: "CO",
+  "clan del golfo": "CO",
+  "sinaloa cartel": "MX",
+  "jalisco new generation": "MX",
 };
 
 const NAMES_BY_LENGTH_DESC = Object.keys(COUNTRY_NAME_TO_ALPHA2).sort(

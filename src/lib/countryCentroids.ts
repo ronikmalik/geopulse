@@ -30,6 +30,7 @@ export const COUNTRY_CENTROIDS: Record<string, { name: string; lat: number; lon:
   KH: { name: "Cambodia", lat: 11.5564, lon: 104.9282 },
   CM: { name: "Cameroon", lat: 3.848, lon: 11.5021 },
   CA: { name: "Canada", lat: 45.4215, lon: -75.6972 },
+  CF: { name: "Central African Republic", lat: 4.3947, lon: 18.5582 },
   TD: { name: "Chad", lat: 12.1348, lon: 15.0557 },
   CL: { name: "Chile", lat: -33.4489, lon: -70.6693 },
   CN: { name: "China", lat: 39.9042, lon: 116.4074 },

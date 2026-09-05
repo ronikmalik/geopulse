@@ -34,8 +34,35 @@ const CLASSIFIABLE_CATEGORIES = [...NEWS_CATEGORIES, "other"] as const;
 // al-Shabaab reporting) — bare "displaced"/"displacement" added to match
 // what CATEGORY_MATCHERS' humanitarian pattern below already accepts, so
 // this shallower gate isn't stricter than the deeper logic it feeds.
-const KEYWORDS =
-  /iran|israel|gaza|palestin|hamas|hezbollah|lebanon|russia|ukraine|kremlin|putin|zelensk|taiwan|beijing|china.*military|north korea|kim jong|pyongyang|missile|airstrike|nuclear|sanctions|troops|invasion|ceasefire|drone strike|coup|martial law|insurgency|rebel|militia|terroris|extremis|militant|gunmen|jihadist|uprising|unrest|crackdown|junta|regime|embargo|blockade|airspace violation|border clash|skirmish|mobiliz|annex|separatist|secession|genocide|war crime|refugee crisis|mass displacement|\bdisplaced\b|displacement|gang violence|organized crime|cyberattack|state-sponsored hacking|impeach|disputed election|election fraud|corruption scandal|opposition leader|supreme court|constitutional court|court (rules?|ruling|strikes down|upholds|blocks)/i;
+// 2026-09-05, second pass: user asked for a genuine country-by-country
+// sweep, not just the generic vocabulary above — "notice how we were
+// missing key stuff for nigeria, we are probably missing stuff for every
+// country... find the buzzwords we need to include." Went region by
+// region for every country/theater with an active named insurgency,
+// cartel, or armed political-instability actor NOT already covered by a
+// flashpoint keyword or the generic terms above. Named groups matter
+// specifically because real wire coverage of e.g. a Boko Haram attack
+// routinely never uses generic words like "terrorist" at all — it names
+// the group instead — so without this list, isLikelyGeopolitical has no
+// way to recognize the story as a candidate regardless of how the
+// severity/category logic downstream would otherwise handle it.
+//
+// Short acronyms that collide with unrelated common meanings are
+// deliberately EXCLUDED here even when the group is real and significant
+// (e.g. bare "RSF" also means Reporters Sans Frontières/Reporters Without
+// Borders in press-freedom coverage; bare "ADF" also means Australia's
+// Defence Force) — full names are used instead, safe because they're
+// multi-word. This mirrors the file's existing caution around bare
+// short tokens (see countryNames.ts's US/UK/UAE case-sensitivity
+// handling) applied one level earlier, at the topical gate itself.
+const REGIONAL_ACTORS =
+  "boko haram|iswap|jnim|al-shabaab|al shabaab|tplf|\\bm23\\b|allied democratic forces|codeco|s[ée]l[ée]ka|anti-balaka|rapid support forces|houthi|ansar allah|hayat tahrir al-sham|\\bhts\\b|islamic state|\\bisis\\b|al-qaeda|\\btaliban\\b|isis-k|khorasan province|tehrik-i-taliban|pakistani taliban|naxalite|maoist rebels|lashkar-e-taiba|jaish-e-mohammed|\\bpkk\\b|abu sayyaf|new people's army|arakan army|sendero luminoso|\\bfarc\\b|clan del golfo|sinaloa cartel|jalisco new generation|\\bms-13\\b|barrio 18";
+
+const KEYWORDS = new RegExp(
+  "iran|israel|gaza|palestin|hamas|hezbollah|lebanon|russia|ukraine|kremlin|putin|zelensk|taiwan|beijing|china.*military|north korea|kim jong|pyongyang|missile|airstrike|nuclear|sanctions|troops|invasion|ceasefire|drone strike|coup|martial law|insurgency|rebel|militia|terroris|extremis|militant|gunmen|jihadist|paramilitary|warlord|civil war|ethnic cleansing|massacre|cartel|uprising|unrest|crackdown|junta|regime|embargo|blockade|airspace violation|border clash|skirmish|mobiliz|annex|separatist|secession|genocide|war crime|refugee crisis|mass displacement|\\bdisplaced\\b|displacement|gang violence|organized crime|cyberattack|state-sponsored hacking|impeach|disputed election|election fraud|corruption scandal|opposition leader|supreme court|constitutional court|court (rules?|ruling|strikes down|upholds|blocks)|"
+    + REGIONAL_ACTORS,
+  "i",
+);
 
 export function isLikelyGeopolitical(item: RawItem): boolean {
   return KEYWORDS.test(item.title) || KEYWORDS.test(item.snippet);
@@ -298,7 +325,7 @@ const BENIGN_PATTERNS =
 // would also lose genuinely fresh massacre reports that don't happen to
 // also use "killed"/"dead"/"casualties".
 const HIGH_SEVERITY =
-  /nuclear (test|strike|weapon)|invad(ed|es|ing)|launch(ed|es)? (a |an )?invasion|(?<!october 7[,\s]{0,4})(?<!hamas\s)massacre|genocide|declared war/i;
+  /nuclear (test|strike|weapon)|invad(ed|es|ing)|launch(ed|es)? (a |an )?invasion|(?<!october 7[,\s]{0,4})(?<!hamas\s)massacre|genocide|ethnic cleansing|declared war/i;
 // Expanded beyond the original "strike/attack/killed" set after reviewing
 // real leaked-through feed output: military developments are often
 // reported with a specific action verb ("cleared tunnels", "downed a
@@ -368,8 +395,28 @@ const HIGH_SEVERITY =
 // fighting happening ("ground fighting escalates", "heavy fighting
 // continues") — excluded via lookbehind rather than dropping "fighting"
 // entirely, which would have reintroduced the original Yemen gap.
+// 2026-09-05: found via the regional-buzzwords deep dive — several verbs
+// here only matched a SPECIFIC inflection, not the bare/base form, a real
+// bug that's been silently dropping ordinary headlines this whole
+// session, not just the new regional examples that surfaced it:
+// "clashes?" is "clashe" + optional "s" (the "?" only applies to the one
+// preceding character), so it matched "clashes"/"clashe" but never bare
+// "clash" — "TPLF forces clash with Ethiopian troops" scored severity 1.
+// Same gap for "killed" (never matched present-tense "kills," and bare
+// "kill" is needed too — "gunmen kill police chief" is plural-subject
+// present tense with no suffix at all) and "captur(ed|es|ing)" (never
+// matched bare "capture"). Fixed by grouping the suffix instead of just
+// the last letter — "kill" specifically gets idiom exclusions the same
+// way "struck"/"seized"/"captured" already do above, since bare "kill" is
+// common outside conflict reporting ("kill the bill," "kill switch,"
+// "killing it" as praise). Also added: shell(ed/ing/s)
+// (artillery bombardment), kidnap(ped/ping/s), ambush(ed/es/ing) — all
+// real, common conflict-reporting verbs missing entirely; "cartel
+// violence" as its own compound phrase rather than bare "violence" (too
+// broad — would fire on unrelated domestic-violence/gun-violence crime
+// stories that aren't conflict-relevant).
 const MODERATE_SEVERITY =
-  /\bstrikes?\b|missile (launch|fired|strike)|airstrike|\battack(ed|ing|s)?\b|killed|\bdead\b|casualties|wounded|injured|explosion|bombing|offensive|clashes?|\bcoup\b|martial law|seiz(ed|es|ing)(?!\s+(the\s+)?opportunity)|captur(ed|es|ing)(?!\s+(the\s+)?(moment|imagination|attention|essence|hearts?|spirit))|raid(ed|s)?|storm(ed|s)?|shot down|downed (a |an )?(drone|aircraft|jet|missile)|intercepted|cleared (tunnels|the area)|detained|arrested|evacuat(ed|es|ing|ion)|recaptur(ed|es|ing)|\bretook\b|\bretake\b|reclaim(ed|s|ing)|liberat(ed|es|ing)|repel(led|s)?|thwart(ed|s)?|destroy(ed|s)?|neutrali[sz]ed|eliminat(ed|es)|liquidat(ed|es)|struck\b(?! a (deal|balance|chord|pose))|hit by|mobiliz|border incident|state of emergency|election fraud|disputed election|government collapse|\bousted\b|\boverthrown\b|power grab|parliament dissolved|resign(ed|s)? (amid|under|following)|impeach(ment|ed)?|corruption scandal|gang violence|organized crime|court (rules?|ruling|strikes down|upholds|blocks)|famine|malnutrition|displaced|displacement|refugee crisis|humanitarian crisis|humanitarian emergency|disease outbreak|epidemic|\bexodus\b|flee(s|ing)?|death toll|\boutbreak\b|\bsanctions?\b|expel(led|s)?|recall(ed|s)? (its |the )?ambassador|sever(ed|s)? (diplomatic )?ties|withdr(aw|ew|awn|awing)s? from (the )?(treaty|deal|agreement|pact)|pulls? out of (the )?(treaty|deal|agreement|pact)|vows?[^.]{0,30}(sanctions|retaliation|reprisal)|nationaliz(ed|es|ing)|expropriat(ed|es|ing)|(?<!(stop|end|halt) the )\bfighting\b|push(ed|es)? (toward|into|on)|advanc(ed|es|ing) (toward|into|on)/i;
+  /\bstrikes?\b|missile (launch|fired|strike)|airstrike|\battack(ed|ing|s)?\b|kill(s|ed|ing)?(?!\s+(the\s+)?(bill|switch|time|mood|buzz|vibe|it))|\bdead\b|casualties|wounded|injured|explosion|bombing|offensive|(?<!culture )clash(es)?|\bcoup\b|martial law|seiz(ed|es|ing)(?!\s+(the\s+)?opportunity)|captur(e|ed|es|ing)(?!\s+(the\s+)?(moment|imagination|attention|essence|hearts?|spirit))|raid(ed|s)?|storm(ed|s)?|shot down|downed (a |an )?(drone|aircraft|jet|missile)|intercepted|cleared (tunnels|the area)|detained|arrested|evacuat(ed|es|ing|ion)|recaptur(ed|es|ing)|\bretook\b|\bretake\b|reclaim(ed|s|ing)|liberat(ed|es|ing)|repel(led|s)?|thwart(ed|s)?|destroy(ed|s)?|neutrali[sz]ed|eliminat(ed|es)|liquidat(ed|es)|struck\b(?! a (deal|balance|chord|pose))|hit by|shell(ed|ing|s)?|kidnap(ped|ping|s)?|ambush(ed|es|ing)?|mobiliz|border incident|state of emergency|election fraud|disputed election|government collapse|\bousted\b|\boverthrown\b|power grab|parliament dissolved|resign(ed|s)? (amid|under|following)|impeach(ment|ed)?|corruption scandal|gang violence|cartel violence|organized crime|court (rules?|ruling|strikes down|upholds|blocks)|famine|malnutrition|displaced|displacement|refugee crisis|humanitarian crisis|humanitarian emergency|disease outbreak|epidemic|\bexodus\b|flee(s|ing)?|death toll|\boutbreak\b|\bsanctions?\b|expel(led|s)?|recall(ed|s)? (its |the )?ambassador|sever(ed|s)? (diplomatic )?ties|withdr(aw|ew|awn|awing)s? from (the )?(treaty|deal|agreement|pact)|pulls? out of (the )?(treaty|deal|agreement|pact)|vows?[^.]{0,30}(sanctions|retaliation|reprisal)|nationaliz(ed|es|ing)|expropriat(ed|es|ing)|(?<!(stop|end|halt) the )\bfighting\b|push(ed|es)? (toward|into|on)|advanc(ed|es|ing) (toward|into|on)/i;
 const MILD_SEVERITY =
   /warns?|threatens?|escalat|tension|protest|unrest/i;
 
