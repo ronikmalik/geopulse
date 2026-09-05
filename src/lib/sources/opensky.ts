@@ -71,9 +71,18 @@ export async function fetchOpenSkyStates(
     throw new Error(`OpenSky request failed: ${err}`);
   }
 
+  // Was previously "console.error + return []" here — indistinguishable
+  // from "genuinely zero aircraft over Europe/Middle East right now",
+  // which never happens for a live bounding box this size. Confirmed live
+  // (2026-09-04): a direct request from outside Vercel got real aircraft
+  // data back immediately, while this app's own deployed route kept
+  // returning an empty array — the same Vercel-shared-outbound-IP pattern
+  // already diagnosed for GDELT's 429s. Throwing here lets the route
+  // catch it and surface a real `error` field instead of silently
+  // reporting "0 aircraft tracked" as if that were a normal live reading.
   if (!res.ok) {
-    console.error(`OpenSky fetch failed: ${res.status}`);
-    return [];
+    const body = await res.text().catch(() => "");
+    throw new Error(`OpenSky fetch failed: ${res.status} ${body.slice(0, 200)}`);
   }
 
   const data = (await res.json()) as OpenSkyResponse;

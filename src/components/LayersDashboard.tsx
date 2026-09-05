@@ -29,6 +29,7 @@ interface LayersDashboardProps {
   onToggleDataLayer: (id: DataLayerId) => void;
   flights: FlightsResponse | null;
   commercialFlights: CommercialFlightsResponse | null;
+  commercialFlightsError: string | null;
   weather: WeatherResponse | null;
   gdp: GdpResponse | null;
   population: PopulationResponse | null;
@@ -70,6 +71,7 @@ export default function LayersDashboard({
   onToggleDataLayer,
   flights,
   commercialFlights,
+  commercialFlightsError,
   weather,
   gdp,
   population,
@@ -85,6 +87,13 @@ export default function LayersDashboard({
       );
     }
     if (id === "commercial-flights" && commercialFlights) {
+      if (commercialFlightsError) {
+        return (
+          <span className="mt-1 block text-[11px] text-red-500">
+            Unavailable right now ({commercialFlightsError}) — not a genuine zero
+          </span>
+        );
+      }
       return (
         <span className="mt-1 block text-[11px] text-neutral-500">
           {commercialFlights.aircraft.length} aircraft tracked

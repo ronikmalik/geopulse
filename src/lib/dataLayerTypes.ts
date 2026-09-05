@@ -25,6 +25,12 @@ export interface PopulationResponse {
 
 export interface CommercialFlightsResponse {
   aircraft: TrackedAircraft[];
+  // Set when the upstream OpenSky fetch failed — an empty aircraft array
+  // alone is indistinguishable from "genuinely no traffic right now",
+  // which never happens for a live Europe/Middle East bounding box, so
+  // this route surfaces the real reason instead of masking it (same
+  // principle as GDELT's 429 fix elsewhere in this app).
+  error?: string;
 }
 
 export interface ForexRate {

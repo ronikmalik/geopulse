@@ -58,6 +58,7 @@ interface DashboardProps {
   onToggleDataLayer: (id: DataLayerId) => void;
   flights: FlightsResponse | null;
   commercialFlights: CommercialFlightsResponse | null;
+  commercialFlightsError: string | null;
   weather: WeatherResponse | null;
   gdp: GdpResponse | null;
   population: PopulationResponse | null;
@@ -170,6 +171,7 @@ export default function Dashboard(props: DashboardProps) {
             onToggleDataLayer={props.onToggleDataLayer}
             flights={props.flights}
             commercialFlights={props.commercialFlights}
+            commercialFlightsError={props.commercialFlightsError}
             weather={props.weather}
             gdp={props.gdp}
             population={props.population}

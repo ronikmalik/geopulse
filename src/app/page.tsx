@@ -215,6 +215,7 @@ export default function Home() {
     onToggleDataLayer: toggleDataLayer,
     flights: flightsLayer.data,
     commercialFlights: commercialFlightsLayer.data,
+    commercialFlightsError: commercialFlightsLayer.error,
     weather: weatherLayer.data,
     gdp: gdpLayer.data,
     population: populationLayer.data,

@@ -25,7 +25,13 @@ export function useLiveLayer<T>(
         const json = (await res.json()) as T;
         if (!cancelled) {
           setData(json);
-          setError(null);
+          // Some /api/layers/* routes deliberately return HTTP 200 with an
+          // empty result plus an `error` field on an upstream failure
+          // (see commercial-flights route.ts) — an empty array alone can't
+          // be told apart from a genuinely empty live reading, so surface
+          // this the same way an HTTP-level failure would be.
+          const bodyError = (json as { error?: unknown }).error;
+          setError(typeof bodyError === "string" ? bodyError : null);
         }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
