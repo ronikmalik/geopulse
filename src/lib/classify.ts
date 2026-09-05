@@ -4,6 +4,7 @@ import { NEWS_CATEGORIES, type NewsCategory } from "./categories";
 import type { RawItem } from "./sources/gdelt";
 import { resolveCountryFromText } from "./countryNames";
 import { COUNTRY_CENTROIDS } from "./countryCentroids";
+import { isCountryInSourceRegion } from "./regionScope";
 
 // LLM classification only ever assigns news-query-driven categories (plus
 // "other") — the feed-driven categories (earthquake, natural-disaster) are
@@ -643,6 +644,16 @@ export function classifyByKeywords(item: RawItem): ClassifiedItem | null {
     resolvedCountry ??
     (category !== "other" ? CATEGORY_FALLBACK_COUNTRY[category] : undefined);
   if (!country) return null;
+
+  // A regional specialist outlet (Premium Times, Al-Monitor, Taipei
+  // Times, etc.) exists in this list for deep, credible coverage of its
+  // own theater — not as a general-purpose global wire. A story it ran
+  // about a country outside that theater (e.g. Premium Times, Nigeria's
+  // paper, running a piece centered on the US) is out of scope for that
+  // source and gets dropped here, rather than inserted as a real event
+  // misattributed to an outlet with no actual standing to report it. See
+  // src/lib/regionScope.ts.
+  if (!isCountryInSourceRegion(item.source, country)) return null;
 
   const centroid = COUNTRY_CENTROIDS[country];
   if (!centroid) return null;
