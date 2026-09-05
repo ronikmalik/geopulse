@@ -249,6 +249,20 @@ const TELEGRAM_MIN_SEVERITY = MIN_SEVERITY_TO_INCLUDE;
 const CONFLICT_ACTION_PATTERN =
   /\bstrikes?\b|missile (launch|fired|strike)|airstrike|(?<!threatens? to )(?<!vows? to )\battack(ed|ing|s)?\b|\bkilled\b|\bdead\b|casualties|wounded|injured|explosion|bombing|clashes?|shot down|downed (a |an )?(drone|aircraft|jet|missile)|intercepted|cleared (tunnels|the area)|(?<!threatens? to )\bstruck\b|hit by|\bfighting\b|recaptur(ed|es|ing)|\bretook\b|\bretake\b|reclaim(ed|s|ing)|liberat(ed|es|ing)|repel(led|s)?|thwart(ed|s)?|destroy(ed|s)?|neutrali[sz]ed|eliminat(ed|es)|liquidat(ed|es)|raid(ed|s)?|storm(ed|s)?|mobiliz|border incident/i;
 
+// User follow-up correction, same conversation (2026-09-05): "iran's
+// direct threats for conflict should be kept" — CONFLICT_ACTION_PATTERN's
+// "threatens/vows to" exclusion was too broad. A state or military actor
+// directly threatening imminent conflict ("Iranian Army advises US to pay
+// price of aggression, leave region") IS itself real geopolitical signal,
+// distinct from the vague diplomatic sparring this filter exists to catch
+// ("Israel threatens economic, political response to London" — a policy
+// dispute, not a conflict threat). This pattern is deliberately narrower
+// than CONFLICT_ACTION_PATTERN's exclusion would suggest: it requires the
+// threatened action itself be military/violent (attack, strike, retaliate,
+// consequences/reprisal), not just the presence of the word "threatens."
+const DIRECT_THREAT_PATTERN =
+  /\bpay(s)? (the )?price\b|\bvows? to (attack|strike|retaliate)\b|\bthreatens? to (attack|strike|retaliate)\b|\bwarns? of (retaliation|reprisal|consequences)\b|\bwill retaliate\b/i;
+
 // Only English or successfully-translated text can be scored against the
 // (English-language) incident keywords at all. Rather than guess at
 // untranslated foreign-language text's severity (or worse, store it
@@ -305,7 +319,8 @@ export async function fetchTelegramChannel(
       const kept =
         severity !== null &&
         severity >= TELEGRAM_MIN_SEVERITY &&
-        CONFLICT_ACTION_PATTERN.test(finalExcerpts[i]);
+        (CONFLICT_ACTION_PATTERN.test(finalExcerpts[i]) ||
+          DIRECT_THREAT_PATTERN.test(finalExcerpts[i]));
       archiveOutcomes.push({
         source: `telegram:${config.handle}`,
         url: `https://t.me/${p.id}`,
