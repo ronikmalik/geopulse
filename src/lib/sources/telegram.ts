@@ -222,6 +222,33 @@ function toDirectItem(
 // sync with it — one consistent "truly breaking" bar across every source.
 const TELEGRAM_MIN_SEVERITY = MIN_SEVERITY_TO_INCLUDE;
 
+// User's explicit request (2026-09-05): "i dont like that slop is still
+// flowing through iranian state presstv... make sure only live breaking
+// news conflict events go through." classify.ts's shared MODERATE_SEVERITY
+// (used by severity scoring above) deliberately accepts bare "sanctions"
+// and other administrative/policy language unconditionally — a real,
+// separately-confirmed decision for RSS/GDELT ("i like the sanctions
+// article" for a substantive US-sanctions-a-bank story earlier this
+// session). The problem is Telegram-specific: raw channel posts routinely
+// bundle a throwaway policy mention into an otherwise rhetorical/editorial
+// post ("Trump lifts sanctions on notorious Al Qaeda figures as America
+// prepares for 25th [9/11 anniversary]...") which scored severity 3 purely
+// from "sanctions," with zero actual conflict action in the post. Scoped
+// to Telegram only — not a change to classify.ts's shared patterns, which
+// would regress that RSS/GDELT feedback.
+//
+// Requires genuine kinetic/conflict-action language on top of the existing
+// severity floor, rather than replacing it — every real example checked
+// (drone strikes, airstrikes, deadly wedding strike, fierce fighting in
+// Yemen, a Russian drone hitting Ukraine's SBU) already uses this exact
+// vocabulary, so this doesn't narrow real coverage. The "threatens/vows to"
+// lookbehind exists because "Trump once again threatens to attack Iran's
+// Pickaxe Mountain" contains the word "attack" but describes a possible
+// future action, not one that happened — same distinction classify.ts
+// already draws elsewhere for "stop/end/halt the fighting" style rhetoric.
+const CONFLICT_ACTION_PATTERN =
+  /\bstrikes?\b|missile (launch|fired|strike)|airstrike|(?<!threatens? to )(?<!vows? to )\battack(ed|ing|s)?\b|\bkilled\b|\bdead\b|casualties|wounded|injured|explosion|bombing|clashes?|shot down|downed (a |an )?(drone|aircraft|jet|missile)|intercepted|cleared (tunnels|the area)|(?<!threatens? to )\bstruck\b|hit by|\bfighting\b|recaptur(ed|es|ing)|\bretook\b|\bretake\b|reclaim(ed|s|ing)|liberat(ed|es|ing)|repel(led|s)?|thwart(ed|s)?|destroy(ed|s)?|neutrali[sz]ed|eliminat(ed|es)|liquidat(ed|es)|raid(ed|s)?|storm(ed|s)?|mobiliz|border incident/i;
+
 // Only English or successfully-translated text can be scored against the
 // (English-language) incident keywords at all. Rather than guess at
 // untranslated foreign-language text's severity (or worse, store it
@@ -275,7 +302,10 @@ export async function fetchTelegramChannel(
   const items = posts
     .map((p, i) => {
       const severity = assessIncidentSeverity(finalExcerpts[i]);
-      const kept = severity !== null && severity >= TELEGRAM_MIN_SEVERITY;
+      const kept =
+        severity !== null &&
+        severity >= TELEGRAM_MIN_SEVERITY &&
+        CONFLICT_ACTION_PATTERN.test(finalExcerpts[i]);
       archiveOutcomes.push({
         source: `telegram:${config.handle}`,
         url: `https://t.me/${p.id}`,
