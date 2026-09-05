@@ -185,6 +185,16 @@ export default function GlobeView({
         .ringsData([])
         .ringLat((d) => (d as GeoEvent).lat)
         .ringLng((d) => (d as GeoEvent).lon)
+        // three-globe's ring layer defaults to altitude 0.0015 — below this
+        // globe's polygonAltitude(0.004) country-fill layer below, so every
+        // ring was rendering underneath that semi-opaque surface and never
+        // actually visible, regardless of pulsingIds. Found while verifying
+        // the 2026-09-05 "I want the pulses to ripple" fix live: the hook
+        // logic was correct, but nothing had ever been able to render on
+        // top of the country fill. 0.006 sits above the polygon layer and
+        // below the lowest point-marker altitude (~0.012), so a ripple
+        // reads as "on the ground," not floating above the markers.
+        .ringAltitude(0.006)
         .ringColor(() => (t: number) => `rgba(255,45,45,${1 - t})`)
         .ringMaxRadius(4)
         .ringPropagationSpeed(2.2)
