@@ -87,6 +87,16 @@ export const RSS_FEEDS: { name: string; url: string }[] = [
     name: "cna-world",
     url: "https://www.channelnewsasia.com/api/v1/rss-outbound-feed?_format=xml",
   },
+  // India-specific — dedicated India outlet. Re-added 2026-09-05 after a
+  // fresh credibility re-check (was removed 2026-09-04 at user request,
+  // not for a trust finding): still Left-Center / Mostly Factual / High
+  // Credibility per MBFC, independent Kasturi & Sons family ownership, no
+  // ownership or legal-entanglement issue — same bar every other kept
+  // source here clears. See SOURCE_CREDIBILITY.md.
+  {
+    name: "the-hindu",
+    url: "https://www.thehindu.com/news/national/feeder/default.rss",
+  },
   // Taiwan-specific — china-taiwan previously had no dedicated regional
   // outlet (cna-world above is Singapore's Channel News Asia, general
   // Asia-Pacific, not Taiwan-focused). Disclosed pro-Taiwan-independence
