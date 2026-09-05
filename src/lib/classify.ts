@@ -55,8 +55,25 @@ const CLASSIFIABLE_CATEGORIES = [...NEWS_CATEGORIES, "other"] as const;
 // multi-word. This mirrors the file's existing caution around bare
 // short tokens (see countryNames.ts's US/UK/UAE case-sensitivity
 // handling) applied one level earlier, at the topical gate itself.
+// 2026-09-05, third pass: user asked specifically about Iran's "Axis of
+// Resistance" network — Hezbollah/Hamas/Houthis were already covered
+// (flashpoint vocabulary), but the Iran-aligned Iraqi militias that
+// routinely claim attacks on US forces (and get named, not described
+// generically) had zero coverage: Kata'ib Hezbollah, Asa'ib Ahl al-Haq,
+// Harakat Hezbollah al-Nujaba, and the umbrella name "Islamic Resistance
+// in Iraq" these groups collectively claim attacks under. Same for IRGC/
+// Quds Force itself (Iran's own military-industrial actor abroad — a
+// headline like "IRGC commander killed in strike on Damascus" doesn't
+// necessarily say "Iran" at all) and Palestinian Islamic Jihad (a
+// distinct Gaza-based group from Hamas, also Axis-of-Resistance-aligned).
+// ISIS-Sinai and Syrian Democratic Forces added in the same pass as
+// adjacent Middle East gaps the same review surfaced.
+const IRAN_PROXY_ACTORS =
+  "irgc|quds force|revolutionary guard|islamic jihad|kata'?ib hezbollah|asa'?ib ahl al-haq|al-nujaba|islamic resistance in iraq";
+
 const REGIONAL_ACTORS =
-  "boko haram|iswap|jnim|al-shabaab|al shabaab|tplf|\\bm23\\b|allied democratic forces|codeco|s[ée]l[ée]ka|anti-balaka|rapid support forces|houthi|ansar allah|hayat tahrir al-sham|\\bhts\\b|islamic state|\\bisis\\b|al-qaeda|\\btaliban\\b|isis-k|khorasan province|tehrik-i-taliban|pakistani taliban|naxalite|maoist rebels|lashkar-e-taiba|jaish-e-mohammed|\\bpkk\\b|abu sayyaf|new people's army|arakan army|sendero luminoso|\\bfarc\\b|clan del golfo|sinaloa cartel|jalisco new generation|\\bms-13\\b|barrio 18";
+  "boko haram|iswap|jnim|al-shabaab|al shabaab|tplf|\\bm23\\b|allied democratic forces|codeco|s[ée]l[ée]ka|anti-balaka|rapid support forces|houthi|ansar allah|hayat tahrir al-sham|\\bhts\\b|syrian democratic forces|islamic state|\\bisis\\b|isis-sinai|sinai province|al-qaeda|\\btaliban\\b|isis-k|khorasan province|tehrik-i-taliban|pakistani taliban|naxalite|maoist rebels|lashkar-e-taiba|jaish-e-mohammed|\\bpkk\\b|abu sayyaf|new people's army|arakan army|sendero luminoso|\\bfarc\\b|clan del golfo|sinaloa cartel|jalisco new generation|\\bms-13\\b|barrio 18|"
+  + IRAN_PROXY_ACTORS;
 
 const KEYWORDS = new RegExp(
   "iran|israel|gaza|palestin|hamas|hezbollah|lebanon|russia|ukraine|kremlin|putin|zelensk|taiwan|beijing|china.*military|north korea|kim jong|pyongyang|missile|airstrike|nuclear|sanctions|troops|invasion|ceasefire|drone strike|coup|martial law|insurgency|rebel|militia|terroris|extremis|militant|gunmen|jihadist|paramilitary|warlord|civil war|ethnic cleansing|massacre|cartel|uprising|unrest|crackdown|junta|regime|embargo|blockade|airspace violation|border clash|skirmish|mobiliz|annex|separatist|secession|genocide|war crime|refugee crisis|mass displacement|\\bdisplaced\\b|displacement|gang violence|organized crime|cyberattack|state-sponsored hacking|impeach|disputed election|election fraud|corruption scandal|opposition leader|supreme court|constitutional court|court (rules?|ruling|strikes down|upholds|blocks)|"
@@ -158,7 +175,18 @@ export async function classifyBatch(
 // category miss doesn't just mis-bucket a story for display — it silently
 // prevents genuine duplicates of it from ever being detected at all.
 const CATEGORY_MATCHERS: [NewsCategory, RegExp][] = [
-  ["us-iran", /iranian|\biran\b/i],
+  // Iran-proxy actors checked here, not just bare "iranian|iran" — a
+  // headline naming Kata'ib Hezbollah or the IRGC directly often never
+  // says "Iran" at all, and checked before israel-palestine below because
+  // "Kata'ib Hezbollah" would otherwise collide with that matcher's bare
+  // "hezbollah" (a real find from the 2026-09-05 Axis-of-Resistance
+  // review: "Kata'ib Hezbollah claims rocket attack on US base in Iraq"
+  // was categorizing as israel-palestine, an Iraq/Iran story with no
+  // Israel-Palestine connection at all).
+  [
+    "us-iran",
+    /iranian|\biran\b|irgc|quds force|revolutionary guard|kata'?ib hezbollah|asa'?ib ahl al-haq|al-nujaba|islamic resistance in iraq/i,
+  ],
   [
     "russia-ukraine",
     /russian|\brussia\b|kremlin|putin|ukrainian|\bukraine\b|zelensky|zelenskyy|\bkyiv\b/i,
@@ -415,8 +443,24 @@ const HIGH_SEVERITY =
 // violence" as its own compound phrase rather than bare "violence" (too
 // broad — would fire on unrelated domestic-violence/gun-violence crime
 // stories that aren't conflict-relevant).
+//
+// 2026-09-05, third pass (Axis of Resistance review): "fired rockets"/
+// "rocket fire"/"rocket attack" added — extremely common Israel-Gaza
+// phrasing ("Palestinian Islamic Jihad fires rockets toward Israeli
+// border towns") that had no severity signal at all before. "drone
+// strike" added as its own compound — KEYWORDS already treated it as a
+// topical signal, but MODERATE_SEVERITY only had one-word "airstrike"
+// and "downed a drone" (a drone being shot down, the opposite direction),
+// never a strike carried out BY a drone. "targeted in/by a strike/attack/
+// raid" added narrowly (not bare "targeted," which is common outside
+// conflict reporting — "targeted advertising," "targeted approach").
+// Retaliation-vow pattern broadened from "vows" only to also accept
+// "threatens" — "Asa'ib Ahl al-Haq threatens retaliation against US
+// troops" is the same real-threat signal as classify.ts's Telegram-
+// specific DIRECT_THREAT_PATTERN already recognizes, just missing here
+// for RSS/GDELT's own severity scoring.
 const MODERATE_SEVERITY =
-  /\bstrikes?\b|missile (launch|fired|strike)|airstrike|\battack(ed|ing|s)?\b|kill(s|ed|ing)?(?!\s+(the\s+)?(bill|switch|time|mood|buzz|vibe|it))|\bdead\b|casualties|wounded|injured|explosion|bombing|offensive|(?<!culture )clash(es)?|\bcoup\b|martial law|seiz(ed|es|ing)(?!\s+(the\s+)?opportunity)|captur(e|ed|es|ing)(?!\s+(the\s+)?(moment|imagination|attention|essence|hearts?|spirit))|raid(ed|s)?|storm(ed|s)?|shot down|downed (a |an )?(drone|aircraft|jet|missile)|intercepted|cleared (tunnels|the area)|detained|arrested|evacuat(ed|es|ing|ion)|recaptur(ed|es|ing)|\bretook\b|\bretake\b|reclaim(ed|s|ing)|liberat(ed|es|ing)|repel(led|s)?|thwart(ed|s)?|destroy(ed|s)?|neutrali[sz]ed|eliminat(ed|es)|liquidat(ed|es)|struck\b(?! a (deal|balance|chord|pose))|hit by|shell(ed|ing|s)?|kidnap(ped|ping|s)?|ambush(ed|es|ing)?|mobiliz|border incident|state of emergency|election fraud|disputed election|government collapse|\bousted\b|\boverthrown\b|power grab|parliament dissolved|resign(ed|s)? (amid|under|following)|impeach(ment|ed)?|corruption scandal|gang violence|cartel violence|organized crime|court (rules?|ruling|strikes down|upholds|blocks)|famine|malnutrition|displaced|displacement|refugee crisis|humanitarian crisis|humanitarian emergency|disease outbreak|epidemic|\bexodus\b|flee(s|ing)?|death toll|\boutbreak\b|\bsanctions?\b|expel(led|s)?|recall(ed|s)? (its |the )?ambassador|sever(ed|s)? (diplomatic )?ties|withdr(aw|ew|awn|awing)s? from (the )?(treaty|deal|agreement|pact)|pulls? out of (the )?(treaty|deal|agreement|pact)|vows?[^.]{0,30}(sanctions|retaliation|reprisal)|nationaliz(ed|es|ing)|expropriat(ed|es|ing)|(?<!(stop|end|halt) the )\bfighting\b|push(ed|es)? (toward|into|on)|advanc(ed|es|ing) (toward|into|on)/i;
+  /\bstrikes?\b|missile (launch|fired|strike)|airstrike|\battack(ed|ing|s)?\b|kill(s|ed|ing)?(?!\s+(the\s+)?(bill|switch|time|mood|buzz|vibe|it))|\bdead\b|casualties|wounded|injured|explosion|bombing|offensive|(?<!culture )clash(es)?|fir(ed|es|ing) rockets?|rocket (fire|attack)|drone strike|targeted (in|by) (a |an )?(strike|attack|raid)|\bcoup\b|martial law|seiz(ed|es|ing)(?!\s+(the\s+)?opportunity)|captur(e|ed|es|ing)(?!\s+(the\s+)?(moment|imagination|attention|essence|hearts?|spirit))|raid(ed|s)?|storm(ed|s)?|shot down|downed (a |an )?(drone|aircraft|jet|missile)|intercepted|cleared (tunnels|the area)|detained|arrested|evacuat(ed|es|ing|ion)|recaptur(ed|es|ing)|\bretook\b|\bretake\b|reclaim(ed|s|ing)|liberat(ed|es|ing)|repel(led|s)?|thwart(ed|s)?|destroy(ed|s)?|neutrali[sz]ed|eliminat(ed|es)|liquidat(ed|es)|struck\b(?! a (deal|balance|chord|pose))|hit by|shell(ed|ing|s)?|kidnap(ped|ping|s)?|ambush(ed|es|ing)?|mobiliz|border incident|state of emergency|election fraud|disputed election|government collapse|\bousted\b|\boverthrown\b|power grab|parliament dissolved|resign(ed|s)? (amid|under|following)|impeach(ment|ed)?|corruption scandal|gang violence|cartel violence|organized crime|court (rules?|ruling|strikes down|upholds|blocks)|famine|malnutrition|displaced|displacement|refugee crisis|humanitarian crisis|humanitarian emergency|disease outbreak|epidemic|\bexodus\b|flee(s|ing)?|death toll|\boutbreak\b|\bsanctions?\b|expel(led|s)?|recall(ed|s)? (its |the )?ambassador|sever(ed|s)? (diplomatic )?ties|withdr(aw|ew|awn|awing)s? from (the )?(treaty|deal|agreement|pact)|pulls? out of (the )?(treaty|deal|agreement|pact)|(vows?|threatens?)[^.]{0,30}(sanctions|retaliation|reprisal)|nationaliz(ed|es|ing)|expropriat(ed|es|ing)|(?<!(stop|end|halt) the )\bfighting\b|push(ed|es)? (toward|into|on)|advanc(ed|es|ing) (toward|into|on)/i;
 const MILD_SEVERITY =
   /warns?|threatens?|escalat|tension|protest|unrest/i;
 

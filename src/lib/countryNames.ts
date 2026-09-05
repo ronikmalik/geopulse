@@ -334,6 +334,30 @@ export const COUNTRY_NAME_TO_ALPHA2: Record<string, string> = {
   "clan del golfo": "CO",
   "sinaloa cartel": "MX",
   "jalisco new generation": "MX",
+
+  // Iran's "Axis of Resistance" network + adjacent Middle East gaps —
+  // added 2026-09-05 after a direct question about whether this coverage
+  // existed. Hezbollah/Hamas/Houthis were already handled (flashpoint
+  // vocabulary above); these are the pieces that weren't: IRGC/Quds Force
+  // is Iran's own military actor abroad, not a "country name" in the
+  // usual sense, but a headline naming it often doesn't say "Iran" at
+  // all. The Iraqi Shia militias (Kata'ib Hezbollah, Asa'ib Ahl al-Haq,
+  // Harakat Hezbollah al-Nujaba) and the umbrella name they jointly claim
+  // attacks under ("Islamic Resistance in Iraq") resolve to Iraq, the
+  // country where they operate — not Iran, which funds/arms them but
+  // isn't where the story's event happens.
+  irgc: "IR",
+  "quds force": "IR",
+  "islamic jihad": "PS",
+  "kata'ib hezbollah": "IQ",
+  "kataib hezbollah": "IQ",
+  "asa'ib ahl al-haq": "IQ",
+  "asaib ahl al-haq": "IQ",
+  "al-nujaba": "IQ",
+  "islamic resistance in iraq": "IQ",
+  "syrian democratic forces": "SY",
+  "isis-sinai": "EG",
+  "sinai province": "EG",
 };
 
 const NAMES_BY_LENGTH_DESC = Object.keys(COUNTRY_NAME_TO_ALPHA2).sort(
