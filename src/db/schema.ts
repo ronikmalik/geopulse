@@ -188,3 +188,33 @@ export const classificationArchive = pgTable(
 
 export type ClassificationArchiveRow = typeof classificationArchive.$inferSelect;
 export type NewClassificationArchiveRow = typeof classificationArchive.$inferInsert;
+
+// A non-English Telegram post that couldn't be translated this ingest
+// cycle — today's character budget was already spent, or the Translate
+// API call itself failed — parked here instead of being silently dropped.
+// See src/lib/pendingTranslation.ts: drained on a later cycle once budget
+// frees up (or the API recovers), oldest first; rows that sit unprocessed
+// past PENDING_TRANSLATION_MAX_AGE_MS are expired without ever being
+// translated, since by then it's no longer "live breaking" content.
+export const pendingTranslation = pgTable(
+  "pending_translation",
+  {
+    id: serial("id").primaryKey(),
+    url: text("url").notNull().unique(),
+    // Full channel config (language/category/country/label) is looked up
+    // fresh from TELEGRAM_CHANNELS by handle at drain time rather than
+    // duplicated here, so it can't go stale relative to that list.
+    handle: text("handle").notNull(),
+    excerpt: text("excerpt").notNull(), // original-language excerpt, already sanitized
+    publishedAt: timestamp("published_at", { withTimezone: true }).notNull(),
+    discoveredAt: timestamp("discovered_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("pending_translation_discovered_at_idx").on(table.discoveredAt),
+  ],
+);
+
+export type PendingTranslationRow = typeof pendingTranslation.$inferSelect;
+export type NewPendingTranslationRow = typeof pendingTranslation.$inferInsert;

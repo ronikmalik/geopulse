@@ -52,6 +52,15 @@ const STATEMENTS = [
   )`,
   sql`CREATE INDEX IF NOT EXISTS classification_archive_kept_idx ON classification_archive (kept)`,
   sql`CREATE INDEX IF NOT EXISTS classification_archive_archived_at_idx ON classification_archive (archived_at)`,
+  sql`CREATE TABLE IF NOT EXISTS pending_translation (
+    id SERIAL PRIMARY KEY,
+    url TEXT NOT NULL UNIQUE,
+    handle TEXT NOT NULL,
+    excerpt TEXT NOT NULL,
+    published_at TIMESTAMPTZ NOT NULL,
+    discovered_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS pending_translation_discovered_at_idx ON pending_translation (discovered_at)`,
   sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS primary_event_id INTEGER REFERENCES events(id)`,
   sql`CREATE INDEX IF NOT EXISTS events_primary_event_id_idx ON events (primary_event_id)`,
 ];

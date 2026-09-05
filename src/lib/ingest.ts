@@ -9,7 +9,11 @@ import { fetchNasaEonet } from "./sources/eonet";
 import { fetchGdacsAlerts } from "./sources/gdacs";
 import { fetchIodaOutages } from "./sources/ioda";
 import { fetchFirmsThermalAnomalies } from "./sources/firms";
-import { fetchTelegramChannel, TELEGRAM_CHANNELS } from "./sources/telegram";
+import {
+  fetchTelegramChannel,
+  drainPendingTelegramTranslations,
+  TELEGRAM_CHANNELS,
+} from "./sources/telegram";
 import type { DirectItem } from "./sources/direct";
 import {
   classifyByKeywords,
@@ -181,8 +185,9 @@ export async function runIngest(): Promise<IngestResult> {
   const gdeltQueryErrors: string[] = [];
 
   // Same rotation cadence as GDELT (ROTATION_INTERVAL_MS) but its own chunk
-  // size — 9 channels at 3 per cycle covers the full list roughly every
-  // 45 min, comfortably faster than GDELT's 7-category rotation needs.
+  // size — 18 channels (as of the 2026-09-04 v2 pass) at 3 per cycle
+  // covers the full list roughly every 90 min, comfortably faster than
+  // GDELT's 7-category rotation needs.
   const TELEGRAM_CHUNK_SIZE = 3;
   const TELEGRAM_QUERY_SPACING_MS = 800;
   const TELEGRAM_QUERY_TIMEOUT_MS = 7_000;
@@ -238,6 +243,17 @@ export async function runIngest(): Promise<IngestResult> {
     // clearly sanction, a deliberate risk the user accepted, so keeping
     // request volume light matters more than usual, not just for timing.
     trackFetch("telegram", async () => {
+      // Drained first, independent of whichever channel chunk is up this
+      // cycle — a post parked here (see src/lib/pendingTranslation.ts)
+      // has been waiting since a prior cycle couldn't afford or complete
+      // its translation, so it gets first claim on whatever budget this
+      // cycle has rather than waiting for its own channel's rotation turn
+      // to come back around too.
+      const drained = await drainPendingTelegramTranslations().catch((err) => {
+        telegramErrors.push(`telegram(pending-drain): ${err}`);
+        return [];
+      });
+
       const chunkCount = Math.ceil(TELEGRAM_CHANNELS.length / TELEGRAM_CHUNK_SIZE);
       const chunkIndex = Math.floor(Date.now() / ROTATION_INTERVAL_MS) % chunkCount;
       const channels = TELEGRAM_CHANNELS.slice(
@@ -261,11 +277,16 @@ export async function runIngest(): Promise<IngestResult> {
           results.push([]);
         }
       }
-      const flat = results.flat();
-      if (flat.length === 0 && telegramErrors.length > 0) {
+      const combined = [...drained, ...results.flat()];
+      // Only treated as a failed cycle if truly nothing came out of it —
+      // a successful drain still counts as "telegram worked this cycle"
+      // even if this cycle's own rotation chunk errored; the per-channel
+      // errors themselves remain visible via telegramErrors regardless
+      // (folded into the top-level errors array below).
+      if (combined.length === 0 && telegramErrors.length > 0) {
         throw new Error(telegramErrors.join("; "));
       }
-      return flat;
+      return combined;
     }),
   ]);
 

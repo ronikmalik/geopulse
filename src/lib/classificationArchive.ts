@@ -1,4 +1,4 @@
-import { sql, and, eq, gt } from "drizzle-orm";
+import { sql, and, eq, gt, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { classificationArchive } from "@/db/schema";
 import { isKnownIncidentVocabulary } from "./classify";
@@ -33,6 +33,23 @@ export async function archiveClassifications(
   } catch (err) {
     console.error(`archiveClassifications failed: ${err}`);
   }
+}
+
+// Batch existence check against a set of URLs, run before spending any
+// translation budget on them — a post already archived here (kept or
+// dropped) was already fully scored in a prior cycle, so re-translating
+// it a second time (e.g. because two independent schedulers both hit
+// /api/ingest within the same 15-minute Telegram rotation window, see
+// docs/ARCHITECTURE.md) would burn real quota for zero new signal. See
+// src/lib/sources/telegram.ts.
+export async function getArchivedUrls(urls: string[]): Promise<Set<string>> {
+  if (urls.length === 0) return new Set();
+  const db = getDb();
+  const rows = await db
+    .select({ url: classificationArchive.url })
+    .from(classificationArchive)
+    .where(inArray(classificationArchive.url, urls));
+  return new Set(rows.map((r) => r.url));
 }
 
 // Common English stopwords plus wire-service/RSS boilerplate that would

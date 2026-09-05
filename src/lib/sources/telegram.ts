@@ -3,7 +3,17 @@ import type { DirectItem } from "./direct";
 import { COUNTRY_CENTROIDS } from "../countryCentroids";
 import { translateBatch } from "../translate";
 import { assessIncidentSeverity, MIN_SEVERITY_TO_INCLUDE } from "../classify";
-import { archiveClassifications, type ClassificationOutcome } from "../classificationArchive";
+import {
+  archiveClassifications,
+  getArchivedUrls,
+  type ClassificationOutcome,
+} from "../classificationArchive";
+import {
+  enqueuePendingTranslations,
+  getPendingBatch,
+  deletePending,
+  expireStalePending,
+} from "../pendingTranslation";
 
 // Public-channel scraping via Telegram's own no-auth web preview
 // (t.me/s/<channel>) — no bot token, no login, never touches groups or
@@ -273,11 +283,40 @@ function canAssess(config: TelegramChannelConfig, translated: boolean): boolean 
   return config.language === "en" || translated;
 }
 
+// Shared between the live fetch path below and the pending-translation
+// drain (drainPendingTelegramTranslations) so the two can never silently
+// diverge on what counts as a kept incident.
+function isKeptConflictPost(excerpt: string, severity: number | null): boolean {
+  return (
+    severity !== null &&
+    severity >= TELEGRAM_MIN_SEVERITY &&
+    (CONFLICT_ACTION_PATTERN.test(excerpt) || DIRECT_THREAT_PATTERN.test(excerpt))
+  );
+}
+
 export async function fetchTelegramChannel(
   config: TelegramChannelConfig,
 ): Promise<DirectItem[]> {
   const html = await fetchChannelHtml(config.handle);
-  const posts = parseChannelHtml(html);
+  const allPosts = parseChannelHtml(html);
+  if (allPosts.length === 0) return [];
+
+  // Telegram's web preview always returns the channel's ~20 most recent
+  // posts, not "what's new since the last fetch" — with two independent
+  // schedulers now hitting /api/ingest (cron-job.org's own schedule plus
+  // the GitHub Actions backup, which sat silently dead from 2026-08-27
+  // until it was fixed on 2026-09-04 — see ingest.yml and
+  // docs/ARCHITECTURE.md), the exact same posts routinely get fetched
+  // twice within the same 15-minute rotation bucket. Anything already in
+  // classification_archive was already fully scored (kept or dropped) in
+  // a prior cycle, so it's filtered out before translation is even
+  // attempted, not just before insertion — this is what actually stopped
+  // the character budget from being burned twice over on identical text
+  // (see the 2026-09-05 "why did translation usage spike" investigation).
+  const archivedUrls = await getArchivedUrls(
+    allPosts.map((p) => `https://t.me/${p.id}`),
+  ).catch(() => new Set<string>());
+  const posts = allPosts.filter((p) => !archivedUrls.has(`https://t.me/${p.id}`));
   if (posts.length === 0) return [];
 
   const excerpts = posts.map((p) => excerptOf(p.text));
@@ -285,8 +324,8 @@ export async function fetchTelegramChannel(
   // Batch-translate the whole channel's excerpts in one request rather
   // than per-post — see src/lib/translate.ts. Soft-degrades to the
   // original-language excerpts (translated: false) if no key is
-  // configured, the API call fails, or the channel is already English
-  // (presstv) — never blocks ingest on translation being available.
+  // configured or the channel is already English (presstv) — never
+  // blocks ingest on translation being available.
   let finalExcerpts = excerpts;
   let translated = false;
   if (config.language !== "en") {
@@ -299,6 +338,23 @@ export async function fetchTelegramChannel(
         sanitizeForStorage(t) || excerpts[i],
       );
       translated = true;
+    } else {
+      // Couldn't translate this cycle — today's character budget is
+      // already spent, or the Translate API call itself failed. Rather
+      // than drop live content just because quota happens to be tight
+      // right now (user, 2026-09-05: "dont remove stuff just because we
+      // run out of translation tokens"), park these brand-new posts for
+      // drainPendingTelegramTranslations to retry on a later cycle, once
+      // budget frees up or the API recovers.
+      await enqueuePendingTranslations(
+        posts.map((p, i) => ({
+          url: `https://t.me/${p.id}`,
+          handle: config.handle,
+          excerpt: excerpts[i],
+          publishedAt: p.publishedAt,
+        })),
+      ).catch((err) => console.error(`enqueuePendingTranslations failed: ${err}`));
+      return [];
     }
   }
 
@@ -316,11 +372,7 @@ export async function fetchTelegramChannel(
   const items = posts
     .map((p, i) => {
       const severity = assessIncidentSeverity(finalExcerpts[i]);
-      const kept =
-        severity !== null &&
-        severity >= TELEGRAM_MIN_SEVERITY &&
-        (CONFLICT_ACTION_PATTERN.test(finalExcerpts[i]) ||
-          DIRECT_THREAT_PATTERN.test(finalExcerpts[i]));
+      const kept = isKeptConflictPost(finalExcerpts[i], severity);
       archiveOutcomes.push({
         source: `telegram:${config.handle}`,
         url: `https://t.me/${p.id}`,
@@ -337,6 +389,81 @@ export async function fetchTelegramChannel(
     .filter((item): item is DirectItem => item !== null);
 
   await archiveClassifications(archiveOutcomes);
+
+  return items;
+}
+
+// Companion to the queuing branch above: works through whatever's parked
+// in pending_translation, oldest first, one post at a time — a small
+// per-post batch rather than one big all-or-nothing translateBatch call
+// so a nearly-exhausted daily budget can still afford *some* of the
+// backlog instead of the whole group failing canAfford together (see
+// src/lib/translate.ts). Called once per ingest cycle from ingest.ts,
+// independent of which 3-channel chunk the live rotation is currently on,
+// so backlog doesn't have to wait for its own channel's turn to come back
+// around. Stops at the first failure (budget exhausted, or a real API
+// error) rather than trying every remaining row — if it's budget, later
+// rows would fail too; if it's a transient API error, the rest retry next
+// cycle regardless.
+const MAX_DRAIN_PER_CYCLE = 20;
+
+export async function drainPendingTelegramTranslations(): Promise<DirectItem[]> {
+  await expireStalePending().catch((err) =>
+    console.error(`expireStalePending failed: ${err}`),
+  );
+
+  const pending = await getPendingBatch(MAX_DRAIN_PER_CYCLE).catch(() => []);
+  if (pending.length === 0) return [];
+
+  const configByHandle = new Map(TELEGRAM_CHANNELS.map((c) => [c.handle, c]));
+  const archiveOutcomes: ClassificationOutcome[] = [];
+  const items: DirectItem[] = [];
+  const processedUrls: string[] = [];
+
+  for (const row of pending) {
+    const config = configByHandle.get(row.handle);
+    if (!config) {
+      // Channel was removed from TELEGRAM_CHANNELS since this was queued
+      // — nothing left to reconstruct label/category/country from.
+      processedUrls.push(row.url);
+      continue;
+    }
+
+    const result = await translateBatch([row.excerpt], config.language).catch(() => null);
+    if (!result) break;
+
+    const translatedExcerpt = sanitizeForStorage(result[0]) || row.excerpt;
+    const severity = assessIncidentSeverity(translatedExcerpt);
+    const kept = isKeptConflictPost(translatedExcerpt, severity);
+
+    archiveOutcomes.push({
+      source: `telegram:${config.handle}`,
+      url: row.url,
+      title: translatedExcerpt.slice(0, 200),
+      snippet: translatedExcerpt,
+      kept,
+      severity: severity ?? 1,
+      category: kept ? config.category : null,
+      publishedAt: row.publishedAt,
+    });
+
+    if (kept) {
+      const postId = row.url.slice("https://t.me/".length);
+      const item = toDirectItem(
+        { id: postId, text: row.excerpt, publishedAt: row.publishedAt },
+        translatedExcerpt,
+        true,
+        config,
+        severity as number,
+      );
+      if (item) items.push(item);
+    }
+
+    processedUrls.push(row.url);
+  }
+
+  await archiveClassifications(archiveOutcomes);
+  await deletePending(processedUrls);
 
   return items;
 }
