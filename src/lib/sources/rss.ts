@@ -140,6 +140,53 @@ export const RSS_FEEDS: { name: string; url: string }[] = [
   },
   { name: "premium-times-nigeria", url: "https://www.premiumtimesng.com/feed" },
   { name: "africanews", url: "https://www.africanews.com/feed/rss" },
+  // Conflict/security specialist — closes a real gap none of the three
+  // above fill (general-interest, not conflict-focused): Sahel jihadist
+  // violence (Boko Haram/ISWAP/JNIM), Horn of Africa (al-Shabaab), DRC/
+  // M23, Sudan's civil war. Royal African Society (UK charity)-owned,
+  // High/High per MBFC, zero failed fact-checks. Added 2026-09-05.
+  { name: "african-arguments", url: "https://africanarguments.org/feed/" },
+  // Southern Africa investigative specialist — Least Biased/Mostly
+  // Factual/High Credibility per MBFC, cleanly disclosed independent
+  // ownership. Adds a Southern Africa vantage this list didn't have
+  // (existing Africa sources skew Pan-African/West African). Added
+  // 2026-09-05.
+  { name: "daily-maverick", url: "https://www.dailymaverick.co.za/dmrss/" },
+  // South Asia / Southeast Asia — Pakistan and Afghanistan conflict
+  // coverage (TTP, Baluchistan insurgency, ISIS-K) turned out to be a
+  // real, honest gap after this pass: Dawn, The Express Tribune, and The
+  // News International were all checked and rejected (see
+  // SOURCE_CREDIBILITY.md's "2026-09-05 conflict/terrorism specialist
+  // pass" table) — MBFC docks all three to Medium Credibility or worse
+  // specifically for documented government/military censorship pressure,
+  // not just a bias lean. TOLOnews, Khaama Press, and BenarNews (RFA's
+  // Southeast Asia arm) are unrated by any tracker. Nothing wired in for
+  // this sub-theater rather than backfilling with an unvetted source.
+  //
+  // Southeast Asia — Philippines (Abu Sayyaf/Marawi-legacy insurgency,
+  // Mindanao). Rappler: Maria Ressa's outlet (2021 Nobel Peace Prize),
+  // Left-Center/High/High Credibility per MBFC — the government
+  // harassment/legal pressure MBFC notes was directed AT Rappler for its
+  // critical reporting, evidence of editorial independence under
+  // pressure, not a compromise of it. Added 2026-09-05.
+  { name: "rappler-philippines", url: "https://www.rappler.com/philippines/feed/" },
+  // Southeast Asia — Indonesia (domestic terrorism, JI/ISIS-linked
+  // cells). Tempo: Left-Center/High/High Credibility per MBFC, disclosed
+  // corporate ownership (Tempo Media Group), zero failed fact-checks,
+  // known for anti-corruption watchdog reporting (its "conflict with
+  // political authorities" MBFC notes is the same independence signal as
+  // Rappler's, not a red flag). English edition specifically — this
+  // pipeline has no translation step (see the Chosun Ilbo rejection
+  // below), and Tempo's default feed is Indonesian-language. Added
+  // 2026-09-05.
+  { name: "tempo-indonesia", url: "https://rss.tempo.co/en" },
+  // Southeast Asia — Myanmar's civil war is a real, honest gap: The
+  // Irrawaddy (Left-Center/High/High Credibility per MBFC, exactly the
+  // right specialist) sits behind a Cloudflare bot-challenge on every RSS
+  // path tried (`Cf-Mitigated: challenge` header, confirmed via curl) —
+  // a technical gap, not a trust one. Myanmar Now and Frontier Myanmar
+  // are both unrated by any tracker. See SOURCE_CREDIBILITY.md.
+  //
   // Latin America
   { name: "buenos-aires-times", url: "https://www.batimes.com.ar/feed" },
 ];

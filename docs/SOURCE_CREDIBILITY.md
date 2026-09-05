@@ -114,15 +114,36 @@ backfilling with an unvetted source.
 | Radio Free Asia | US government, funded via USAGM — same model as RFE/RL | Left-Center | High | Added 2026-09-04. A prior pass listed this as "no working RSS feed found"; the real feed was found behind a redirect (`/english/rss2.xml` → `/arc/outboundfeeds/english/rss/`) during an unrelated ISW-sourcing research pass. Correction, not a new decision. |
 | Yonhap News Agency | South Korean government — directly controls Yonhap and appoints its board (not just statutory-independence funding, the BBC/DW/RFE/RL model) | Not separately tracked as "Least Biased/Left/Right" by MBFC | Mostly Factual | Added 2026-09-04. Held back in the 2026-09-04 expansion pass pending an explicit decision on whether a government-appointed-board outlet clears the bar; resolved by applying the same "state-linked, disclosed, included and framed accordingly" precedent already used for Iran's IRIB/Fars/Press TV and Russia's `mod_russia` in the Telegram layer, rather than the stricter "statutory independence" bar BBC/DW/RFE/RL clear. Closes the last major Korean-peninsula gap alongside NK News/RFA. |
 | The Hindu | Kasturi & Sons Limited (independent family ownership), ad/subscription funded | Left-Center | High Credibility / Mostly Factual | Removed 2026-09-04 at user request (not a credibility finding), re-added 2026-09-05 after a fresh re-check confirmed the rating held: still two disclosed MBFC-noted issues (one failed fact-check on a filovirus/coronavirus claim, one misleading nationalism/Nazi-terminology claim) and a transparency gap (national desk doesn't byline authors or hyperlink sources) — neither rises above what's already tolerated for other kept sources here (e.g. NYT's opinion-piece fact-check notes), and MBFC's own overall verdict remains High Credibility. India's only dedicated outlet in this list; Times of India was rejected on factual-accuracy grounds (see Removed). |
+| African Arguments | Royal African Society (UK charity), supported by Open Society Foundation, Miles Morland Foundation, Garfield Weston Foundation, #AfricaNoFilter | Left-Center | High Credibility / High Factual | Added 2026-09-05, conflict/terrorism specialist pass. Pan-African security/politics analysis specialist — closes the Sahel (Boko Haram/ISWAP/JNIM), Horn of Africa (al-Shabaab), DRC/M23, and Sudan civil-war gap none of the existing three Africa sources (general-interest) fill. Zero failed fact-checks; MBFC's one flagged concern (loaded language in headlines) is a bias-lean note, not a trust finding. |
+| Daily Maverick | Independent, no media-group/political/religious affiliation; Alan Knott-Craig (founder/investor), Styli Charalambous (publisher/CEO) | Least Biased | High Credibility / Mostly Factual | Added 2026-09-05. Southern Africa investigative specialist — adds a vantage this list didn't have (existing Africa sources skew Pan-African/West African: AllAfrica, Premium Times, Africanews). |
+| Rappler | Rappler Holdings Corp — Dolphin Fire Group (31.21%), Maria Ressa (23.77%), Hatchd Group (17.86%), Benjamin So (17.86%) | Left-Center | High Credibility / High Factual | Added 2026-09-05, conflict/terrorism specialist pass. Philippines specialist — closes the Mindanao/Abu Sayyaf/Marawi-legacy insurgency gap. Maria Ressa won the 2021 Nobel Peace Prize; the Duterte-era government harassment/legal pressure MBFC notes was directed at Rappler for its reporting — evidence of editorial independence under pressure, not a compromise of it, same framing already applied to Meduza/Moscow Times' in-exile status. Philippines-specific feed used (not the general-interest feed, which mixes in entertainment coverage). |
+| Tempo | Tempo Media Group / PT Info Media Digital, revenue via advertising/subscriptions/circulation | Left-Center | High Credibility / High Factual | Added 2026-09-05, conflict/terrorism specialist pass. Indonesia specialist — closes the Indonesia domestic-terrorism (JI/ISIS-linked cells) gap. Zero failed fact-checks; known for anti-corruption watchdog journalism that MBFC notes has caused "conflict with political authorities" — same independence signal as Rappler's, not a red flag. English edition specifically (`rss.tempo.co/en`) — the default feed is Indonesian-language and this pipeline has no translation step (see the Chosun Ilbo rejection below). |
 
-28 sources, spanning North America, Europe, Russia/Ukraine/Central Asia
+32 sources, spanning North America, Europe, Russia/Ukraine/Central Asia
 (now meaningfully deeper via RFE/RL, Meduza, and Moscow Times), the
 Middle East (Israeli, Arab-world, and Israeli-critical vantage points),
-South Asia (The Hindu), Southeast Asia, Taiwan, North Korea (now RFA and
-Yonhap alongside NK News), Australia, Canada, Africa, and Latin America
-(Argentina only, after Rio Times's removal and MercoPress's earlier
-removal — a real gap; Brazil/wider South America coverage now depends on
-the global wire outlets happening to cover it).
+South Asia (The Hindu), Southeast Asia (now Rappler/Philippines and
+Tempo/Indonesia alongside CNA), Taiwan, North Korea (now RFA and Yonhap
+alongside NK News), Australia, Canada, Africa (now African Arguments and
+Daily Maverick alongside AllAfrica/Premium Times/Africanews), and Latin
+America (Argentina only, after Rio Times's removal and MercoPress's
+earlier removal — a real gap; Brazil/wider South America coverage now
+depends on the global wire outlets happening to cover it).
+
+Real gaps remaining after the 2026-09-05 conflict/terrorism specialist
+pass, stated plainly rather than papered over: **Pakistan and
+Afghanistan** (South Asia's actual terrorism theater — TTP, Baluchistan
+insurgency, ISIS-K — has no dedicated outlet at all; every Pakistani
+English-language candidate checked was docked to Medium Credibility or
+worse specifically for documented government/military censorship, and
+every Afghan candidate is unrated by any tracker). **A dedicated Gulf/
+Yemen/Houthi specialist** — Al-Monitor covers the wider Arab world, but
+every Gulf-specific candidate checked was either unrated or flagged for
+state-linked propaganda/opacity. **Myanmar's civil war** — The Irrawaddy
+clears the credibility bar cleanly but is blocked by a Cloudflare bot-
+challenge on every RSS path, a technical gap, not a trust one. **Sudan's
+civil war specifically** — Radio Dabanga and Sudan Tribune were both
+checked and didn't clear the bar (see below).
 
 ## Checked and rejected (2026-09-04 expansion pass)
 
@@ -150,6 +171,36 @@ Surfaced as recurring ISW/CTP citations for theaters this product tracks
 | KCNA Watch (kcnawatch.org) | Run by the NK News team as a KCNA/Rodong Sinmun mirror — the single most-cited North Korea state-media source in ISW's Korean Peninsula Update. Its `/feed/` endpoint 302-redirects to a "free-member-form" signup popup gated behind `signup.koreapro.org` — the feed exists but requires account registration, not a keyless public feed like the rest of this list. |
 | Focus Taiwan (CNA) | Re-checked (was already rejected 2026-09-04 for no discoverable RSS) — still no working feed found at any path. |
 | Chosun Ilbo | South Korea's largest-circulation paper, another recurring Korean-peninsula candidate. Found one working feed (`chosun.com/arc/outboundfeeds/rss/?outputType=xml`, verified live, 200 OK, real articles) — but it's Korean-language only (`<language>ko</language>`, all article text in Hangul); no English edition RSS path found (`english.chosun.com/rss.xml` and variants all 404). Unlike the Telegram layer, this RSS pipeline (`rss.ts`) has no translation step — that only exists for `telegram.ts` via `translateBatch`. Not usable without building that, so held out rather than ingesting untranslated Korean text. |
+
+## Checked and rejected (2026-09-05 conflict/terrorism specialist pass)
+
+Looking specifically for conflict/terrorism specialists in theaters this
+list was light on: Africa, Middle East, South Asia, Southeast Asia. Two
+made it in (African Arguments, Daily Maverick for Africa; Rappler, Tempo
+for Southeast Asia — see the Kept table above). These were checked and
+did not:
+
+| Source | Theater | Why not |
+|---|---|---|
+| HumAngle | Africa (Nigeria/Sahel conflict specialist) | Not rated by MBFC, AllSides, or Ad Fontes at all — exactly the editorial fit this pass was looking for, but unverifiable under the "would a third party vouch for this" standard, same as Rio Times. |
+| The Defense Post | Global defense/conflict | MBFC rates it High Credibility, but explicitly docks its factual rating to Mostly Factual for "lack of ownership transparency" — the outlet does not disclose who owns or funds it at all. Same category of concern that excluded Middle East Eye. |
+| Radio Dabanga | Africa (Sudan civil war specialist) | MBFC: Mixed factual, Medium Credibility — undisclosed ownership/funding specifics and "circular reporting" from a narrow, unverified local source pool. |
+| Sudan Tribune | Africa (Sudan civil war) | MBFC: Mostly Factual but Medium Credibility, with an explicit sourcing-transparency flag ("reliance on quotes without attribution or verifiable sources"). Below the bar every currently-kept source clears. |
+| Mail & Guardian | Africa (South Africa) | MBFC: Mixed factual, Medium Credibility, multiple failed fact-checks — same tier as the already-rejected Times of India. |
+| The Irrawaddy | Southeast Asia (Myanmar civil war specialist) | Clears the credibility bar cleanly (Left-Center/High/High Credibility, independent, in-exile, donation-funded — same model as Meduza/Moscow Times) but every RSS path returns a Cloudflare bot-challenge (`Cf-Mitigated: challenge` header, confirmed via curl with multiple user agents) — a technical gap, not a trust one. Worth revisiting if they ever whitelist automated RSS access. |
+| Myanmar Now | Southeast Asia (Myanmar) | Not rated by MBFC, AllSides, or Ad Fontes. |
+| Frontier Myanmar | Southeast Asia (Myanmar) | Not rated by MBFC, AllSides, or Ad Fontes. |
+| The Jakarta Post | Southeast Asia (Indonesia) | MBFC rates it High Credibility overall, but explicitly docks its factual score for "a lack of transparency with ownership" — the individual owner behind PT Niskala Media Tenggara isn't disclosed. Held to the same disclosure standard every other kept source clears (Tempo, added instead, names its actual ownership). |
+| Dawn | South Asia (Pakistan) | MBFC: Medium Credibility specifically because "the military censors media outlets through denial of advertising revenue and intimidation," resulting in an "inability to accurately report on the government." A documented editorial-independence problem, not just a bias lean. |
+| The Express Tribune | South Asia (Pakistan) | MBFC: Medium Credibility with an explicit note that it "operates under government censorship in Pakistan, which affects its editorial independence." |
+| The News International | South Asia (Pakistan) | MBFC: Mixed factual — "promotion of state propaganda," owner arrested amid accusations of government retaliation against critical coverage, poor sourcing (relies on its own sister outlets rather than independent verification). |
+| TOLOnews | South Asia (Afghanistan) | Not rated by MBFC, AllSides, or Ad Fontes. Also now operates under Taliban rule since 2021 — an obvious editorial-independence question even if it were rated. |
+| Khaama Press | South Asia (Afghanistan) | Not rated by MBFC, AllSides, or Ad Fontes (a minor, non-qualifying tracker rates it "Centre," but that doesn't meet this list's verification bar). |
+| BenarNews | Southeast Asia (RFA's Southeast Asia arm) | Same disclosed USAGM government-funding model already accepted for RFA/RFE-RL, but not rated by MBFC, AllSides, or Ad Fontes at all — the funding-disclosure precedent doesn't substitute for an actual third-party credibility check. |
+| Amwaj Media | Middle East (Gulf/Iran/Iraq specialist) | Editorially exactly the right fit — no MBFC, AllSides, or Ad Fontes rating found at all. |
+| Iran International | Middle East (Iran/Gulf) | MBFC: Medium Credibility, Mixed factual — documented Saudi-government-linked funding (early investors reported tied to Mohammed bin Salman) that MBFC says itself "raise[s] concerns about editorial independence." Same shape of issue that excluded Al Jazeera and Middle East Eye, from the opposite political direction. |
+| Arab News | Middle East (Saudi Arabia) | MBFC: **Questionable Source** / Low Credibility — Saudi state-owned (via the Public Investment Fund), "excessive government censorship... pro-state propaganda." |
+| The National (UAE) | Middle East (Gulf) | MBFC: **Questionable** / Low Credibility — poor sourcing, state propaganda, censorship. |
 
 ## Non-editorial sources (not applicable)
 

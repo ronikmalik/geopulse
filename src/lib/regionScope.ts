@@ -78,6 +78,10 @@ const RSS_SOURCE_REGION: Record<string, Region> = {
   "rss:allafrica": "africa",
   "rss:premium-times-nigeria": "africa",
   "rss:africanews": "africa",
+  "rss:african-arguments": "africa",
+  "rss:daily-maverick": "africa",
+  "rss:rappler-philippines": "asia-pacific",
+  "rss:tempo-indonesia": "asia-pacific",
   "rss:buenos-aires-times": "latin-america",
 };
 
