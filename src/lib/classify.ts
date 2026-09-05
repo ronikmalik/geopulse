@@ -17,8 +17,25 @@ const CLASSIFIABLE_CATEGORIES = [...NEWS_CATEGORIES, "other"] as const;
 // BENIGN_PATTERNS, so widening this list to cover more of "all relevant
 // live news" (not just the five original flashpoints) doesn't by itself
 // let routine/non-threat items through as risk signals.
+//
+// 2026-09-05: user flagged that political-instability and humanitarian —
+// this app's own core pillars — were getting missed for countries outside
+// the five named flashpoints, specifically because this net was tuned to
+// their vocabulary (missile/airstrike/nuclear/drone strike) rather than
+// the words real wire coverage actually uses for instability/humanitarian
+// stories elsewhere: "Zimbabwe's ruling party wins disputed election amid
+// fraud allegations," "Peru's president faces impeachment vote after
+// corruption scandal," and "Haiti gang violence displaces thousands" all
+// failed this net entirely before reaching severity scoring — not a
+// Western bias by intent, just narrower coverage than the two pillars
+// this is supposed to feed. "gunmen"/"militant(s)" added because African/
+// Latin American attack coverage routinely uses these instead of the
+// generic "terrorist"/"extremist" already here (e.g. Boko Haram/ISWAP/
+// al-Shabaab reporting) — bare "displaced"/"displacement" added to match
+// what CATEGORY_MATCHERS' humanitarian pattern below already accepts, so
+// this shallower gate isn't stricter than the deeper logic it feeds.
 const KEYWORDS =
-  /iran|israel|gaza|palestin|hamas|hezbollah|lebanon|russia|ukraine|kremlin|putin|zelensk|taiwan|beijing|china.*military|north korea|kim jong|pyongyang|missile|airstrike|nuclear|sanctions|troops|invasion|ceasefire|drone strike|coup|martial law|insurgency|rebel|militia|terroris|extremis|uprising|unrest|crackdown|junta|regime|embargo|blockade|airspace violation|border clash|skirmish|mobiliz|annex|separatist|secession|genocide|war crime|refugee crisis|mass displacement|cyberattack|state-sponsored hacking/i;
+  /iran|israel|gaza|palestin|hamas|hezbollah|lebanon|russia|ukraine|kremlin|putin|zelensk|taiwan|beijing|china.*military|north korea|kim jong|pyongyang|missile|airstrike|nuclear|sanctions|troops|invasion|ceasefire|drone strike|coup|martial law|insurgency|rebel|militia|terroris|extremis|militant|gunmen|jihadist|uprising|unrest|crackdown|junta|regime|embargo|blockade|airspace violation|border clash|skirmish|mobiliz|annex|separatist|secession|genocide|war crime|refugee crisis|mass displacement|\bdisplaced\b|displacement|gang violence|organized crime|cyberattack|state-sponsored hacking|impeach|disputed election|election fraud|corruption scandal|opposition leader|supreme court|constitutional court|court (rules?|ruling|strikes down|upholds|blocks)/i;
 
 export function isLikelyGeopolitical(item: RawItem): boolean {
   return KEYWORDS.test(item.title) || KEYWORDS.test(item.snippet);
@@ -124,7 +141,13 @@ const CATEGORY_MATCHERS: [NewsCategory, RegExp][] = [
   ["north-korea", /north korea|pyongyang|kim jong/i],
   [
     "political-instability",
-    /\bcoup\b|martial law|state of emergency|election fraud|government collapse|ousted|overthrown/i,
+    // impeach/disputed-election/corruption-scandal added 2026-09-05 — see
+    // the KEYWORDS comment above for why (real examples like "Peru's
+    // president faces impeachment vote after corruption scandal" and
+    // "Zimbabwe's ruling party wins disputed election amid fraud
+    // allegations" weren't reaching this matcher at all before that fix,
+    // and wouldn't have categorized correctly even if they had).
+    /\bcoup\b|martial law|state of emergency|election fraud|disputed election|government collapse|ousted|overthrown|impeach(ment|ed)?|corruption scandal|supreme court|constitutional court|court (rules?|ruling|strikes down|upholds|blocks)/i,
   ],
   [
     "humanitarian",
@@ -134,7 +157,12 @@ const CATEGORY_MATCHERS: [NewsCategory, RegExp][] = [
     // but this category matcher required the exact phrase "disease
     // outbreak", which real headlines naming the specific disease
     // (cholera, measles, Ebola outbreak) don't use.
-    /famine|food insecurity|malnutrition|refugee|displaced|displacement|humanitarian crisis|humanitarian emergency|\boutbreak\b|epidemic|exodus|flee(s|ing)?/i,
+    //
+    // "gang violence"/"organized crime" added 2026-09-05 — a real example
+    // ("Haiti gang violence displaces thousands from the capital")
+    // describes a genuine humanitarian displacement crisis without using
+    // any of the phrases already here.
+    /famine|food insecurity|malnutrition|refugee|displaced|displacement|humanitarian crisis|humanitarian emergency|\boutbreak\b|epidemic|exodus|flee(s|ing)?|gang violence|organized crime/i,
   ],
 ];
 
@@ -341,7 +369,7 @@ const HIGH_SEVERITY =
 // continues") — excluded via lookbehind rather than dropping "fighting"
 // entirely, which would have reintroduced the original Yemen gap.
 const MODERATE_SEVERITY =
-  /\bstrikes?\b|missile (launch|fired|strike)|airstrike|\battack(ed|ing|s)?\b|killed|\bdead\b|casualties|wounded|injured|explosion|bombing|offensive|clashes?|\bcoup\b|martial law|seiz(ed|es|ing)(?!\s+(the\s+)?opportunity)|captur(ed|es|ing)(?!\s+(the\s+)?(moment|imagination|attention|essence|hearts?|spirit))|raid(ed|s)?|storm(ed|s)?|shot down|downed (a |an )?(drone|aircraft|jet|missile)|intercepted|cleared (tunnels|the area)|detained|arrested|evacuat(ed|es|ing|ion)|recaptur(ed|es|ing)|\bretook\b|\bretake\b|reclaim(ed|s|ing)|liberat(ed|es|ing)|repel(led|s)?|thwart(ed|s)?|destroy(ed|s)?|neutrali[sz]ed|eliminat(ed|es)|liquidat(ed|es)|struck\b(?! a (deal|balance|chord|pose))|hit by|mobiliz|border incident|state of emergency|election fraud|government collapse|\bousted\b|\boverthrown\b|power grab|parliament dissolved|resign(ed|s)? (amid|under|following)|famine|malnutrition|displaced|displacement|refugee crisis|humanitarian crisis|humanitarian emergency|disease outbreak|epidemic|\bexodus\b|flee(s|ing)?|death toll|\boutbreak\b|\bsanctions?\b|expel(led|s)?|recall(ed|s)? (its |the )?ambassador|sever(ed|s)? (diplomatic )?ties|withdr(aw|ew|awn|awing)s? from (the )?(treaty|deal|agreement|pact)|pulls? out of (the )?(treaty|deal|agreement|pact)|vows?[^.]{0,30}(sanctions|retaliation|reprisal)|nationaliz(ed|es|ing)|expropriat(ed|es|ing)|(?<!(stop|end|halt) the )\bfighting\b|push(ed|es)? (toward|into|on)|advanc(ed|es|ing) (toward|into|on)/i;
+  /\bstrikes?\b|missile (launch|fired|strike)|airstrike|\battack(ed|ing|s)?\b|killed|\bdead\b|casualties|wounded|injured|explosion|bombing|offensive|clashes?|\bcoup\b|martial law|seiz(ed|es|ing)(?!\s+(the\s+)?opportunity)|captur(ed|es|ing)(?!\s+(the\s+)?(moment|imagination|attention|essence|hearts?|spirit))|raid(ed|s)?|storm(ed|s)?|shot down|downed (a |an )?(drone|aircraft|jet|missile)|intercepted|cleared (tunnels|the area)|detained|arrested|evacuat(ed|es|ing|ion)|recaptur(ed|es|ing)|\bretook\b|\bretake\b|reclaim(ed|s|ing)|liberat(ed|es|ing)|repel(led|s)?|thwart(ed|s)?|destroy(ed|s)?|neutrali[sz]ed|eliminat(ed|es)|liquidat(ed|es)|struck\b(?! a (deal|balance|chord|pose))|hit by|mobiliz|border incident|state of emergency|election fraud|disputed election|government collapse|\bousted\b|\boverthrown\b|power grab|parliament dissolved|resign(ed|s)? (amid|under|following)|impeach(ment|ed)?|corruption scandal|gang violence|organized crime|court (rules?|ruling|strikes down|upholds|blocks)|famine|malnutrition|displaced|displacement|refugee crisis|humanitarian crisis|humanitarian emergency|disease outbreak|epidemic|\bexodus\b|flee(s|ing)?|death toll|\boutbreak\b|\bsanctions?\b|expel(led|s)?|recall(ed|s)? (its |the )?ambassador|sever(ed|s)? (diplomatic )?ties|withdr(aw|ew|awn|awing)s? from (the )?(treaty|deal|agreement|pact)|pulls? out of (the )?(treaty|deal|agreement|pact)|vows?[^.]{0,30}(sanctions|retaliation|reprisal)|nationaliz(ed|es|ing)|expropriat(ed|es|ing)|(?<!(stop|end|halt) the )\bfighting\b|push(ed|es)? (toward|into|on)|advanc(ed|es|ing) (toward|into|on)/i;
 const MILD_SEVERITY =
   /warns?|threatens?|escalat|tension|protest|unrest/i;
 
