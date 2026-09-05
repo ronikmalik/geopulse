@@ -24,6 +24,7 @@ import {
 import { trackFetch, recordSourceHealth } from "./sourceHealth";
 import { correlationGroupId } from "./correlation";
 import { archiveClassifications } from "./classificationArchive";
+import { archiveFeedItems } from "./feedArchive";
 import { fetchRecentPrimaries, findDuplicateOf, type PrimaryCandidate } from "./eventDedup";
 
 function sleep(ms: number): Promise<void> {
@@ -114,6 +115,14 @@ export async function insertDirectItems(
       .values(rows)
       .onConflictDoNothing({ target: events.url })
       .returning({ id: events.id });
+
+    // Durable ML-archive copy, independent of `events`' own future
+    // retention — see src/lib/feedArchive.ts. Archiving all of `fresh`
+    // rather than just what `result` confirms is fine: feed_archive
+    // dedupes by url too, and anything that lost the events insert race
+    // to a concurrent run was already archived by that run.
+    await archiveFeedItems(rows);
+
     return { inserted: result.length, error: null };
   } catch (err) {
     return { inserted: 0, error: String(err) };
@@ -471,6 +480,26 @@ export async function runIngest(): Promise<IngestResult> {
       }
     }
 
+    // Durable ML-archive copy of every RSS/GDELT row that actually
+    // reaches `events` — same feed_archive table insertDirectItems writes
+    // to, independent of `events`' own future retention (see
+    // src/lib/feedArchive.ts). Deliberately includes cross-outlet
+    // duplicates (rows with a non-null primaryEventId), not just each
+    // story's primary — outlet-count for a story is itself a real signal
+    // for future trend/anomaly work, not noise to collapse away.
+    const toFeedArchiveRow = (r: Row) => ({
+      source: r.source,
+      url: r.url,
+      title: r.title,
+      summary: r.summary,
+      category: r.category,
+      country: r.country,
+      lat: r.lat,
+      lon: r.lon,
+      severity: r.severity,
+      publishedAt: r.publishedAt,
+    });
+
     if (resolvedRows.length > 0) {
       const result = await db
         .insert(events)
@@ -478,6 +507,7 @@ export async function runIngest(): Promise<IngestResult> {
         .onConflictDoNothing({ target: events.url })
         .returning({ id: events.id, url: events.url });
       inserted += result.length;
+      await archiveFeedItems(resolvedRows.map(toFeedArchiveRow));
 
       if (pendingRows.length > 0) {
         const urlToId = new Map(result.map((r) => [r.url, r.id]));
@@ -500,6 +530,7 @@ export async function runIngest(): Promise<IngestResult> {
             .onConflictDoNothing({ target: events.url })
             .returning({ id: events.id });
           inserted += result2.length;
+          await archiveFeedItems(pendingResolved.map(toFeedArchiveRow));
         }
       }
     }

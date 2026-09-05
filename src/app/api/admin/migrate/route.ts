@@ -61,6 +61,23 @@ const STATEMENTS = [
     discovered_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
   sql`CREATE INDEX IF NOT EXISTS pending_translation_discovered_at_idx ON pending_translation (discovered_at)`,
+  sql`CREATE TABLE IF NOT EXISTS feed_archive (
+    id SERIAL PRIMARY KEY,
+    source TEXT NOT NULL,
+    url TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    category TEXT NOT NULL,
+    country TEXT,
+    lat DOUBLE PRECISION NOT NULL,
+    lon DOUBLE PRECISION NOT NULL,
+    severity SMALLINT NOT NULL,
+    published_at TIMESTAMPTZ NOT NULL,
+    archived_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS feed_archive_country_idx ON feed_archive (country)`,
+  sql`CREATE INDEX IF NOT EXISTS feed_archive_source_idx ON feed_archive (source)`,
+  sql`CREATE INDEX IF NOT EXISTS feed_archive_published_at_idx ON feed_archive (published_at)`,
   sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS primary_event_id INTEGER REFERENCES events(id)`,
   sql`CREATE INDEX IF NOT EXISTS events_primary_event_id_idx ON events (primary_event_id)`,
 ];

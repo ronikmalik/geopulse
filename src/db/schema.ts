@@ -218,3 +218,43 @@ export const pendingTranslation = pgTable(
 
 export type PendingTranslationRow = typeof pendingTranslation.$inferSelect;
 export type NewPendingTranslationRow = typeof pendingTranslation.$inferInsert;
+
+// Durable copy of every item that ever actually made it into `events` —
+// across every source kind (RSS, GDELT, Telegram, USGS, EONET, GDACS,
+// IODA, FIRMS) — for future ML trend/anomaly work over a country's risk
+// history (see src/lib/feedArchive.ts, and country_state_history above
+// for the pulse-score-over-time half of that same goal). Deliberately not
+// scoped down to just each story's primary report the way the live feed
+// display is: a duplicate report of the same real-world story from a
+// second outlet is itself a signal (more outlets covering something is
+// meaningful), so this keeps every row `events` gets, primary or not.
+// User decision (2026-09-05): keep this table unpruned — no retention
+// job — since the whole point is enough history to see multi-week trend
+// shifts; revisit only if storage actually becomes a real constraint.
+export const feedArchive = pgTable(
+  "feed_archive",
+  {
+    id: serial("id").primaryKey(),
+    source: text("source").notNull(),
+    url: text("url").notNull().unique(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull(),
+    category: text("category").notNull(),
+    country: text("country"), // ISO 3166-1 alpha-2, nullable — some direct/institutional sources don't resolve one
+    lat: doublePrecision("lat").notNull(),
+    lon: doublePrecision("lon").notNull(),
+    severity: smallint("severity").notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true }).notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("feed_archive_country_idx").on(table.country),
+    index("feed_archive_source_idx").on(table.source),
+    index("feed_archive_published_at_idx").on(table.publishedAt),
+  ],
+);
+
+export type FeedArchiveRow = typeof feedArchive.$inferSelect;
+export type NewFeedArchiveRow = typeof feedArchive.$inferInsert;
