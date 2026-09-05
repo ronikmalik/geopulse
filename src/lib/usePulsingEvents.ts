@@ -1,58 +1,49 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { GeoEvent } from "@/lib/types";
 
-// How long a freshly-arrived event keeps pulsing on the globe before
-// settling into a plain static marker — long enough to actually notice,
-// short enough that the globe doesn't accumulate a permanent wall of rings
-// over a long-running session.
-const PULSE_DURATION_MS = 60_000;
-const PRUNE_INTERVAL_MS = 5_000;
-
-// Tracks which event ids should currently render a pulsing ring on the
-// globe: every event the live SSE stream delivers in real time (`incoming`
-// from useEventStream) pulses once, for PULSE_DURATION_MS, then stops —
-// distinct from the full backfilled `events` list, which shouldn't all
-// light up at once just because the page loaded.
+// User request (2026-09-05): "I want the pulses to ripple." The old design
+// only rippled an event for 60 seconds right when it happened to stream in
+// live during the current browser tab's session (usePulsingEvents used to
+// take `incoming`, useEventStream's live-delivery-only queue) — so a page
+// freshly loaded with a 20-minute-old backfilled item sat completely
+// static, and most events most users ever saw never rippled at all.
 //
-// seenRef is permanent (never pruned) specifically so a since-expired id
-// can't get its pulse revived — `incoming` only grows over a session (it's
-// a dismissable toast queue, not deduped against past state the way
-// `events` is), so without this guard, re-scanning the full array on every
-// change would re-schedule already-expired events indefinitely.
-export function usePulsingEvents(incoming: GeoEvent[]): Set<number> {
-  const seenRef = useRef<Set<number>>(new Set());
-  const expiryRef = useRef<Map<number, number>>(new Map());
+// Now derived from the event's own real-world age instead: any event still
+// within RECENT_WINDOW_MS of its publishedAt ripples on an ongoing loop
+// (globe.gl's ringsData repeats automatically — see Globe.tsx), regardless
+// of whether it arrived via live SSE or the initial backfill. Recomputed
+// on an interval rather than only when `events` changes, since "is this
+// still recent" is a moving target purely from the passage of time.
+const RECENT_WINDOW_MS = 3 * 60 * 60_000; // 3 hours
+const RECHECK_INTERVAL_MS = 30_000;
+
+export function usePulsingEvents(events: GeoEvent[]): Set<number> {
   const [pulsingIds, setPulsingIds] = useState<Set<number>>(new Set());
 
   useEffect(() => {
-    const now = Date.now();
-    let added = false;
-    for (const e of incoming) {
-      if (!seenRef.current.has(e.id)) {
-        seenRef.current.add(e.id);
-        expiryRef.current.set(e.id, now + PULSE_DURATION_MS);
-        added = true;
-      }
-    }
-    if (added) setPulsingIds(new Set(expiryRef.current.keys()));
-  }, [incoming]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
+    function recompute() {
       const now = Date.now();
-      let changed = false;
-      for (const [id, expiry] of expiryRef.current) {
-        if (expiry <= now) {
-          expiryRef.current.delete(id);
-          changed = true;
+      const next = new Set<number>();
+      for (const e of events) {
+        // publishedAt travels over JSON (SSE/fetch) as a plain string
+        // despite GeoEvent's Date-typed field — same treatment FeedPanel/
+        // CountryRiskPanel already give it.
+        const publishedAt = new Date(
+          e.publishedAt as unknown as string,
+        ).getTime();
+        if (!Number.isNaN(publishedAt) && now - publishedAt < RECENT_WINDOW_MS) {
+          next.add(e.id);
         }
       }
-      if (changed) setPulsingIds(new Set(expiryRef.current.keys()));
-    }, PRUNE_INTERVAL_MS);
+      setPulsingIds(next);
+    }
+
+    recompute();
+    const interval = setInterval(recompute, RECHECK_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, []);
+  }, [events]);
 
   return pulsingIds;
 }

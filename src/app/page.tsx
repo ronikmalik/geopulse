@@ -42,7 +42,7 @@ const MOBILE_TABS: { id: DashboardTab; label: string }[] = [
 
 export default function Home() {
   const { events, status, incoming, dismissIncoming } = useEventStream();
-  const pulsingIds = usePulsingEvents(incoming);
+  const pulsingIds = usePulsingEvents(events);
   const countryScores = useCountryRisk();
   // All eight pillars' event categories are on by default — this is a
   // global risk platform, not a conflict-theater tracker. The five

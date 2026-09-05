@@ -59,9 +59,10 @@ interface GlobeViewProps {
   selectedCountry?: string | null;
   onCountryClick?: (country: string) => void;
   extraPoints?: ExtraMapPoint[];
-  // Event ids that should currently render a pulsing ring — every event
-  // the live feed delivers in real time gets one, at its exact plotted
-  // lat/lon, for a bounded window (see src/lib/usePulsingEvents.ts). Not
+  // Event ids that should currently render a pulsing ring, at their exact
+  // plotted lat/lon — every event still within its recent-age window
+  // ripples continuously, regardless of whether it arrived via live SSE
+  // or the initial backfill (see src/lib/usePulsingEvents.ts). Not
   // provided → no rings, same as before this existed.
   pulsingIds?: Set<number>;
 }
@@ -286,9 +287,9 @@ export default function GlobeView({
     if (!globe || !ready) return;
     globe.pointsData([...events, ...extraPoints]);
 
-    // Every event the live feed just delivered pulses at its exact plotted
-    // location (regardless of severity/category) — see usePulsingEvents.
-    // Filtered against `events` (not the raw incoming list) so a category
+    // Every still-recent event pulses at its exact plotted location
+    // (regardless of severity/category) — see usePulsingEvents. Filtered
+    // against `events` (the already-category-filtered list) so a category
     // the user has toggled off never rings either, matching the fact that
     // it's not plotted as a point in the first place.
     globe.ringsData(
