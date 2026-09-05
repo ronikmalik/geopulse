@@ -111,12 +111,23 @@ export function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
 // looks like at scale.
 export const SIMILARITY_THRESHOLD = 0.15;
 
-// Duplicate coverage of the same incident from different outlets
-// realistically clusters within a couple of days of the original report,
-// not weeks — bounding the lookback keeps the candidate-comparison pool
-// small (this is an O(n) scan per new item, not indexed) and avoids ever
-// matching a new item against a much older, merely similar-sounding story.
-const DEDUP_LOOKBACK_HOURS = 48;
+// User feedback (2026-09-05): the original 48h window was catching more
+// than the same-incident-different-outlets case it was built for — a
+// genuine follow-up development ("Ukraine escalates" ... "Ukraine
+// escalates further" a few hours later) could score above
+// SIMILARITY_THRESHOLD against the earlier report (both largely stripped
+// down to the same one or two substantive tokens once country names and
+// generic incident vocabulary are excluded — see tokenizeForSimilarity),
+// and 48h was easily wide enough to let that match, hiding a real distinct
+// development as if it were a re-report of the same one. The dedup this
+// exists for — multiple outlets picking up the exact same wire story —
+// realistically clusters within roughly an hour on a real breaking story,
+// not hours later; explicit user direction was "only reject if reported
+// on just very very recently." 90 minutes is comfortably inside "same
+// news cycle, multiple outlets" while comfortably outside "a few hours
+// later" — a real escalation update now surfaces as its own item instead
+// of being folded into the original as a hidden duplicate source.
+const DEDUP_LOOKBACK_MINUTES = 90;
 
 export interface PrimaryCandidate {
   id: number;
@@ -134,7 +145,7 @@ export async function fetchRecentPrimaries(
   beforeOrAt: Date,
 ): Promise<PrimaryCandidate[]> {
   const db = getDb();
-  const since = new Date(beforeOrAt.getTime() - DEDUP_LOOKBACK_HOURS * 60 * 60_000);
+  const since = new Date(beforeOrAt.getTime() - DEDUP_LOOKBACK_MINUTES * 60_000);
   const rows = await db
     .select({ id: events.id, title: events.title, summary: events.summary })
     .from(events)
