@@ -283,15 +283,49 @@ function canAssess(config: TelegramChannelConfig, translated: boolean): boolean 
   return config.language === "en" || translated;
 }
 
+// User request (2026-09-06): "presstv is giving actual filth still...
+// make it so that channel exclusively about iran getting attacked or
+// iran threatening to attack others. i want nothing about israel
+// palestine especially." Scoped to presstv alone — Iran's own state
+// broadcaster — not the general Telegram bar every other channel still
+// uses, and not a change to classify.ts's israel-palestine category
+// itself (RSS/GDELT coverage of that conflict is untouched; this is
+// specifically about what Iran's state media is allowed to surface here).
+//
+// Hard veto first: any Gaza/Palestine/West Bank/Hamas mention drops the
+// post outright, even if it also uses kinetic-action language or names
+// Iran in passing ("Iran's FM comments on Gaza ceasefire") — that's
+// exactly the "filth" being described, Press TV using Israel-Palestine
+// commentary as content rather than reporting real Iran-conflict news.
+// Only past that gate does the normal conflict-action/direct-threat check
+// apply, with the added requirement that Iran/Iranian actually be named —
+// Iran has to be the one attacked or the one threatening, not merely
+// present in an unrelated regional story.
+const PRESSTV_EXCLUDE_PATTERN =
+  /\bgaza\b|\bpalestin(e|ian)s?\b|west bank|\bhamas\b/i;
+const PRESSTV_IRAN_MENTION_PATTERN = /\biran(ian)?\b/i;
+
+function isPressTvInScope(excerpt: string): boolean {
+  return (
+    !PRESSTV_EXCLUDE_PATTERN.test(excerpt) &&
+    PRESSTV_IRAN_MENTION_PATTERN.test(excerpt)
+  );
+}
+
 // Shared between the live fetch path below and the pending-translation
 // drain (drainPendingTelegramTranslations) so the two can never silently
 // diverge on what counts as a kept incident.
-function isKeptConflictPost(excerpt: string, severity: number | null): boolean {
-  return (
+function isKeptConflictPost(
+  excerpt: string,
+  severity: number | null,
+  handle: string,
+): boolean {
+  const baseKept =
     severity !== null &&
     severity >= TELEGRAM_MIN_SEVERITY &&
-    (CONFLICT_ACTION_PATTERN.test(excerpt) || DIRECT_THREAT_PATTERN.test(excerpt))
-  );
+    (CONFLICT_ACTION_PATTERN.test(excerpt) || DIRECT_THREAT_PATTERN.test(excerpt));
+  if (!baseKept) return false;
+  return handle === "presstv" ? isPressTvInScope(excerpt) : true;
 }
 
 export async function fetchTelegramChannel(
@@ -372,7 +406,7 @@ export async function fetchTelegramChannel(
   const items = posts
     .map((p, i) => {
       const severity = assessIncidentSeverity(finalExcerpts[i]);
-      const kept = isKeptConflictPost(finalExcerpts[i], severity);
+      const kept = isKeptConflictPost(finalExcerpts[i], severity, config.handle);
       archiveOutcomes.push({
         source: `telegram:${config.handle}`,
         url: `https://t.me/${p.id}`,
@@ -434,7 +468,7 @@ export async function drainPendingTelegramTranslations(): Promise<DirectItem[]> 
 
     const translatedExcerpt = sanitizeForStorage(result[0]) || row.excerpt;
     const severity = assessIncidentSeverity(translatedExcerpt);
-    const kept = isKeptConflictPost(translatedExcerpt, severity);
+    const kept = isKeptConflictPost(translatedExcerpt, severity, config.handle);
 
     archiveOutcomes.push({
       source: `telegram:${config.handle}`,
