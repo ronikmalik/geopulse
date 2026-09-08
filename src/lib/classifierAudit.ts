@@ -68,9 +68,12 @@ const SLICE_DEADLINE_MS = 8_000;
 // inside its 55s maxDuration for the DB round-trips and response
 // serialization around it.
 const FULL_AUDIT_DEADLINE_MS = 45_000;
-// A 1-point severity disagreement is normal judgment noise; only a
-// 2+ point gap (e.g. stored 1, Gemini says 3) is worth a human's time.
-const SEVERITY_MISMATCH_THRESHOLD = 2;
+// User correction (2026-09-08): don't treat a 1-point gap as noise to
+// ignore — flag any disagreement at all and let the reviewer (Claude, on
+// its own recurring cadence — see classifierAudit's own header comment)
+// judge whether it holds up, rather than silently discarding it before
+// anyone sees it.
+const SEVERITY_MISMATCH_THRESHOLD = 1;
 
 interface KeptCandidate {
   id: number;
