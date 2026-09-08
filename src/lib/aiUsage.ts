@@ -9,7 +9,7 @@ import { aiUsage } from "@/db/schema";
 // retries next cycle. Kept deliberately parallel in shape to
 // translationUsage.ts (todayUtc, onConflictDoUpdate increment) even though
 // there's no cap math here, so the two are easy to compare at a glance.
-export type AiUsageKind = "embedding" | "brief";
+export type AiUsageKind = "embedding" | "brief" | "audit";
 
 function todayUtc(): string {
   return new Date().toISOString().slice(0, 10);

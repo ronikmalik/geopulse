@@ -24,5 +24,8 @@ export const config: VercelConfig = {
     // Gemini calls, which /api/ingest's cron-job.org 30s external trigger
     // has no room for. See src/lib/countryBriefs.ts.
     { path: "/api/admin/generate-briefs", schedule: "0 19 * * *" },
+    // Daily Gemini-assisted classifier audit — after briefs, on the same
+    // 55s-admin-route-budget reasoning. See src/lib/classifierAudit.ts.
+    { path: "/api/admin/audit-classifier", schedule: "0 20 * * *" },
   ],
 };

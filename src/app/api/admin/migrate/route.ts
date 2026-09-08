@@ -100,6 +100,23 @@ const STATEMENTS = [
   )`,
   sql`CREATE INDEX IF NOT EXISTS country_briefs_country_idx ON country_briefs (country)`,
   sql`CREATE INDEX IF NOT EXISTS country_briefs_generated_at_idx ON country_briefs (generated_at)`,
+  sql`CREATE TABLE IF NOT EXISTS classifier_audit (
+    id SERIAL PRIMARY KEY,
+    archive_id INTEGER NOT NULL UNIQUE,
+    kind TEXT NOT NULL,
+    source TEXT NOT NULL,
+    title TEXT NOT NULL,
+    snippet TEXT NOT NULL,
+    severity INTEGER NOT NULL,
+    reasoning TEXT NOT NULL,
+    suggested_fix TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    review_note TEXT,
+    reviewed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS classifier_audit_status_idx ON classifier_audit (status)`,
+  sql`CREATE INDEX IF NOT EXISTS classifier_audit_created_at_idx ON classifier_audit (created_at)`,
 ];
 
 export async function GET(req: NextRequest) {

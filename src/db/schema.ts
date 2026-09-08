@@ -342,3 +342,51 @@ export const countryBriefs = pgTable(
 );
 
 export type CountryBriefRow = typeof countryBriefs.$inferSelect;
+
+// Findings from src/lib/classifierAudit.ts's daily Gemini pass over
+// classification_archive — the AI-assisted successor to
+// /api/admin/vocabulary-report's pure word-frequency approach, same
+// non-negotiable boundary that route's own doc comment already
+// establishes: this NEVER writes back into classify.ts automatically.
+// Editorial judgment for a product whose premise is being defensible to
+// a skeptical reader doesn't survive full automation, and an LLM auditor
+// specifically adds a new manipulation surface a frequency count never
+// had — a malicious article's body text could contain actual prompt-
+// injection content aimed at the auditor. Every row here is a proposal
+// a human reviews (see GET /api/admin/classifier-audit and its /review
+// sub-route) before anything in classify.ts changes, same discipline
+// every real vocabulary change already goes through.
+// One row per audited archive item (archiveId is UNIQUE) — a row is
+// only ever created when Gemini actually flags something, not one row
+// per item considered, so this table's size reflects genuine findings,
+// not audit volume.
+export const classifierAudit = pgTable(
+  "classifier_audit",
+  {
+    id: serial("id").primaryKey(),
+    archiveId: integer("archive_id").notNull().unique(),
+    kind: text("kind").notNull(), // "false_positive" | "false_negative"
+    source: text("source").notNull(),
+    title: text("title").notNull(),
+    snippet: text("snippet").notNull(),
+    severity: integer("severity").notNull(),
+    reasoning: text("reasoning").notNull(),
+    // Only ever set for false_negative findings — Gemini's hypothesis for
+    // which specific word/phrase/pattern the keyword classifier is
+    // missing, the actual "fine-tuning fuel" a human turns into a real
+    // classify.ts change.
+    suggestedFix: text("suggested_fix"),
+    status: text("status").notNull().default("pending"), // pending | approved | rejected | applied
+    reviewNote: text("review_note"),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("classifier_audit_status_idx").on(table.status),
+    index("classifier_audit_created_at_idx").on(table.createdAt),
+  ],
+);
+
+export type ClassifierAuditRow = typeof classifierAudit.$inferSelect;
