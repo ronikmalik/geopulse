@@ -50,9 +50,14 @@ export async function GET(req: NextRequest) {
   // resolveCountryFromText false-positive misattributed before it was
   // fixed) needs a country-only query, not just a per-source one.
   const country = req.nextUrl.searchParams.get("country");
-  if (!source && !sourcePrefix && !country) {
+  // Added 2026-09-08 — diagnosing a user report that the political-
+  // instability/humanitarian layer categories show almost nothing live,
+  // which needed a direct per-category count/listing rather than
+  // guessing from classify.ts's matcher logic alone.
+  const category = req.nextUrl.searchParams.get("category");
+  if (!source && !sourcePrefix && !country && !category) {
     return NextResponse.json(
-      { error: "missing ?source=, ?sourcePrefix=, or ?country=" },
+      { error: "missing ?source=, ?sourcePrefix=, ?country=, or ?category=" },
       { status: 400 },
     );
   }
@@ -77,6 +82,7 @@ export async function GET(req: NextRequest) {
   if (source) filters.push(eq(events.source, source));
   else if (sourcePrefix) filters.push(like(events.source, `${sourcePrefix}%`));
   if (country) filters.push(eq(events.country, country.toUpperCase()));
+  if (category) filters.push(eq(events.category, category));
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60_000);
 
   const rows = await db
@@ -88,6 +94,9 @@ export async function GET(req: NextRequest) {
       category: events.category,
       severity: events.severity,
       publishedAt: events.publishedAt,
+      country: events.country,
+      reviewStatus: events.reviewStatus,
+      primaryEventId: events.primaryEventId,
     })
     .from(events)
     .where(and(...filters, gt(events.publishedAt, cutoff), gt(events.id, afterId)))
