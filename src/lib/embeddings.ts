@@ -25,7 +25,13 @@ const OUTPUT_DIMENSIONALITY = 768;
 // above). Caps concurrency so a large backfill run doesn't fire 100
 // simultaneous requests at once; embeddingBackfill.ts's own per-cycle
 // limit is separately sized to fit its time budget.
-const CONCURRENCY = 8;
+//
+// Checked live against AI Studio's own Rate Limit dashboard (2026-09-08):
+// the embedding model's free-tier cap is 100 RPM, and usage was sitting
+// at exactly 100/100 — maxed, zero headroom, one concurrent caller
+// elsewhere away from 429s. RPD headroom is huge (336/1000 used), so
+// this wasn't a volume problem, just zero slack in the burst rate.
+const CONCURRENCY = 4;
 
 interface EmbedContentResponse {
   embedding?: { values?: number[] };

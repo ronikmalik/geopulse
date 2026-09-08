@@ -56,7 +56,22 @@ const REQUEST_TIMEOUT_MS = 20_000;
 // deadline (not this number) is what actually bounds a run's total work.
 const FETCH_LIMIT = 200;
 const BATCH_SIZE = 20;
-const CONCURRENCY = 4;
+// Checked live against AI Studio's own Rate Limit dashboard (2026-09-08):
+// gemini-3.5-flash-lite's free-tier cap is 15 RPM, and real production
+// logs showed 429s — 18/15 RPM, bursting past it — from exactly this
+// generateContent call shared by processKeptCandidates/
+// processDroppedCandidates/reviewPendingEvents all running concurrently
+// (see ingest.ts's Promise.allSettled) plus the widened 30-day audit
+// backlog (see KEPT_AUDIT_WINDOW_DAYS) driving the standalone route to
+// fire many rounds back-to-back in one 45s sweep. RPD headroom is huge
+// (96/500 used) — this was never a total-volume problem, purely a
+// burst-rate one, so the fix is pacing, not doing less work.
+const CONCURRENCY = 2;
+// Space consecutive rounds out instead of firing them back-to-back —
+// same idea as GDELT_QUERY_SPACING_MS/TELEGRAM_QUERY_SPACING_MS
+// elsewhere in this app for the identical reason (a rate-limited
+// upstream API, bursty-by-default client code).
+const ROUND_SPACING_MS = 4_000;
 const SNIPPET_CHARS = 300;
 // Dropped items (false_negative candidates) stay recency-scoped —
 // recovering week-old "missed" news isn't worth much, this was always
@@ -189,6 +204,10 @@ function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
   return out;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // The real pillar taxonomy this product tracks — not just conflict/war.
@@ -401,6 +420,7 @@ async function processKeptCandidates(
   const batches = chunk(candidates, BATCH_SIZE);
   for (let i = 0; i < batches.length; i += CONCURRENCY) {
     if (Date.now() > deadlineAt) break; // remainder stays unaudited, picked up next call
+    if (i > 0) await sleep(ROUND_SPACING_MS);
     const round = batches.slice(i, i + CONCURRENCY);
     const results = await Promise.all(
       round.map((batch) => callGeminiJson<RawKeptAssessment>(buildKeptAuditPrompt(batch), apiKey)),
@@ -459,6 +479,7 @@ async function processDroppedCandidates(
 
   for (let i = 0; i < batches.length; i += CONCURRENCY) {
     if (Date.now() > deadlineAt) break; // remainder stays unaudited, picked up next call
+    if (i > 0) await sleep(ROUND_SPACING_MS);
     const round = batches.slice(i, i + CONCURRENCY);
     const results = await Promise.all(
       round.map((batch) => callGeminiJson<RawDroppedFinding>(buildFalseNegativePrompt(batch), apiKey)),
@@ -701,6 +722,7 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
         const batches = chunk(candidates, BATCH_SIZE);
         for (let i = 0; i < batches.length; i += CONCURRENCY) {
           if (Date.now() > deadlineAt) break;
+          if (i > 0) await sleep(ROUND_SPACING_MS);
           const round = batches.slice(i, i + CONCURRENCY);
           const results = await Promise.all(
             round.map((batch) => callGeminiJson<RawKeptAssessment>(buildKeptAuditPrompt(batch), apiKey)),
