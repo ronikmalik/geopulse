@@ -16,6 +16,13 @@ import { isCronAuthorized } from "@/lib/cronAuth";
 // admin mutation in this repo (admin/purge, admin/migrate) — simplest to
 // trigger via the admin-call.yml GitHub Actions workflow, which has no
 // request-body support.
+//
+// Optional ?overrideSeverity=<1-5> and/or ?overrideCountry=<alpha-2>
+// (2026-09-08) let the reviewer apply ITS OWN corrected value instead of
+// whatever Gemini suggested — see ReviewOverrides's doc comment in
+// classifierAudit.ts. Calling this again with an override on a finding
+// that's already "applied" genuinely re-applies with the new value; it's
+// not a no-op.
 const VALID_STATUSES = new Set<ReviewStatus>(["approved", "rejected", "applied"]);
 
 export async function GET(req: NextRequest) {
@@ -34,7 +41,18 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const result = await reviewAuditFinding(id, statusParam as ReviewStatus, note);
+  const overrideSeverityParam = req.nextUrl.searchParams.get("overrideSeverity");
+  const overrideCountryParam = req.nextUrl.searchParams.get("overrideCountry");
+  const overrideSeverity = overrideSeverityParam ? Number(overrideSeverityParam) : undefined;
+  if (overrideSeverityParam && (!Number.isInteger(overrideSeverity) || overrideSeverity! < 1 || overrideSeverity! > 5)) {
+    return NextResponse.json({ error: "overrideSeverity must be an integer 1-5" }, { status: 400 });
+  }
+  const overrides =
+    overrideSeverity != null || overrideCountryParam
+      ? { severity: overrideSeverity, country: overrideCountryParam?.toUpperCase() }
+      : undefined;
+
+  const result = await reviewAuditFinding(id, statusParam as ReviewStatus, note, overrides);
   if (!result.found) return NextResponse.json({ error: "finding not found" }, { status: 404 });
   return NextResponse.json({ ok: true, id, applied: result.applied, note: result.note });
 }

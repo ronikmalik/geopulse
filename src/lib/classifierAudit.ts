@@ -824,14 +824,34 @@ export async function getAuditFindings(
 
 export type ReviewStatus = "approved" | "rejected" | "applied";
 
+// Lets the reviewer (Claude) apply its OWN corrected value instead of
+// Gemini's suggestion — added 2026-09-08 after a real case (a presstv
+// drone-shootdown story approved at Gemini's suggested severity 5, which
+// on closer inspection didn't fit this app's own rubric: "5 = major
+// military action or an attack WITH SIGNIFICANT CASUALTIES," and an
+// unmanned drone shootdown has none). Before this, the only two options
+// were "accept Gemini's number as-is" or "reject and keep the old one"
+// — neither lets the boss actually set the number when it agrees
+// something's wrong but disagrees with the specific fix proposed. Only
+// severity/country are overridable (the two fields with a concrete
+// "right answer" a human can independently determine); which kind of
+// finding this is, and whether inclusion itself is valid, aren't.
+export interface ReviewOverrides {
+  severity?: number;
+  country?: string;
+}
+
 // The one place this feature actually touches the live feed — and even
 // here, scoped to exactly the one article a human just approved, never a
 // shared classify.ts rule. See the doc comment on the classifier_audit
 // table for why that boundary matters.
 async function applyFinding(
   finding: typeof classifierAudit.$inferSelect,
+  overrides?: ReviewOverrides,
 ): Promise<{ applied: boolean; note: string }> {
   const db = getDb();
+  const effectiveSeverity = overrides?.severity ?? finding.suggestedSeverity;
+  const effectiveCountry = overrides?.country ?? finding.suggestedCountry;
 
   if (finding.kind === "false_positive") {
     if (!finding.url) return { applied: false, note: "no url on this finding (predates url tracking) — cannot locate the live row" };
@@ -842,25 +862,25 @@ async function applyFinding(
   }
 
   if (finding.kind === "severity_mismatch") {
-    if (!finding.url || finding.suggestedSeverity == null) {
+    if (!finding.url || effectiveSeverity == null) {
       return { applied: false, note: "missing url or suggested severity" };
     }
     const result = await db
       .update(events)
-      .set({ severity: finding.suggestedSeverity })
+      .set({ severity: effectiveSeverity })
       .where(eq(events.url, finding.url))
       .returning({ id: events.id });
     return result.length > 0
-      ? { applied: true, note: `severity updated to ${finding.suggestedSeverity}` }
+      ? { applied: true, note: `severity updated to ${effectiveSeverity}${overrides?.severity != null ? " (Claude override)" : ""}` }
       : { applied: false, note: "not found in events — may have already aged out of the 30-day window" };
   }
 
   if (finding.kind === "country_mismatch") {
-    if (!finding.url || !finding.suggestedCountry) {
+    if (!finding.url || !effectiveCountry) {
       return { applied: false, note: "missing url or suggested country" };
     }
-    const centroid = COUNTRY_CENTROIDS[finding.suggestedCountry];
-    if (!centroid) return { applied: false, note: `suggested country ${finding.suggestedCountry} has no centroid on file` };
+    const centroid = COUNTRY_CENTROIDS[effectiveCountry];
+    if (!centroid) return { applied: false, note: `country ${effectiveCountry} has no centroid on file` };
 
     const current = await db
       .select({ category: events.category })
@@ -872,7 +892,7 @@ async function applyFinding(
     await db
       .update(events)
       .set({
-        country: finding.suggestedCountry,
+        country: effectiveCountry,
         location: centroid.name,
         lat: centroid.lat,
         lon: centroid.lon,
@@ -880,20 +900,23 @@ async function applyFinding(
         // by classify.ts's own Category union, this table just stores it
         // as plain text (see events.category in schema.ts).
         correlationGroupId: correlationGroupId(
-          finding.suggestedCountry,
+          effectiveCountry,
           current[0].category as Category,
           finding.publishedAt ?? new Date(),
         ),
       })
       .where(eq(events.url, finding.url));
-    return { applied: true, note: `country updated to ${finding.suggestedCountry}` };
+    return {
+      applied: true,
+      note: `country updated to ${effectiveCountry}${overrides?.country != null ? " (Claude override)" : ""}`,
+    };
   }
 
   if (finding.kind === "false_negative") {
     if (!finding.url || !finding.publishedAt) {
       return { applied: false, note: "missing url/publishedAt (predates tracking) — needs a manual classify.ts fix instead" };
     }
-    const forcedCountry = finding.suggestedCountry ? validateCountry(finding.suggestedCountry) : undefined;
+    const forcedCountry = effectiveCountry ? validateCountry(effectiveCountry) : undefined;
     const derived = deriveFieldsForRecovery(
       { title: finding.title, snippet: finding.snippet },
       forcedCountry ?? undefined,
@@ -904,7 +927,7 @@ async function applyFinding(
         note: "could not resolve a country for this item — this is a genuine classify.ts gap (see suggestedFix), needs a manual pattern change, not just approval",
       };
     }
-    const severity = finding.suggestedSeverity ?? finding.severity;
+    const severity = effectiveSeverity ?? finding.severity;
     try {
       const result = await db
         .insert(events)
@@ -971,10 +994,16 @@ export interface ReviewResult {
   note: string;
 }
 
+// overrides lets a re-review correct an already-applied finding — see
+// the doc comment on ReviewOverrides above. applyFinding doesn't check
+// the finding's current status before acting, so calling this again on
+// an "applied" finding (with a corrected override this time) genuinely
+// re-applies with the new value rather than being a no-op.
 export async function reviewAuditFinding(
   id: number,
   status: ReviewStatus,
   note: string | null,
+  overrides?: ReviewOverrides,
 ): Promise<ReviewResult> {
   const db = getDb();
   const rows = await db.select().from(classifierAudit).where(eq(classifierAudit.id, id)).limit(1);
@@ -991,7 +1020,7 @@ export async function reviewAuditFinding(
   let applied = false;
 
   if (status === "approved") {
-    const result = await applyFinding(finding);
+    const result = await applyFinding(finding, overrides);
     applied = result.applied;
     finalStatus = result.applied ? "applied" : "approved";
     finalNote = note ? `${note} — ${result.note}` : result.note;
