@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useWatchlist } from "@/lib/useWatchlist";
 import type { CountryRiskScore } from "@/lib/useCountryRisk";
+import type { AircraftAnomaly } from "@/lib/useAircraftAnomalies";
 import {
   THREAT_COLORS,
   momentumArrow,
@@ -97,8 +98,20 @@ const compactNumber = new Intl.NumberFormat("en-US", {
 
 interface CountryRiskPanelProps {
   scores: CountryRiskScore[];
+  aircraftAnomalies: Map<string, AircraftAnomaly>;
   selectedCountry: string | null;
   onSelectCountry: (country: string | null) => void;
+}
+
+function AnomalyBadge({ anomaly }: { anomaly: AircraftAnomaly }) {
+  return (
+    <span
+      className="rounded-sm border border-amber-600/60 px-1 py-0 font-mono text-[9px] text-amber-500"
+      title={`${anomaly.todayCount} tracked today vs. a ${anomaly.baselineMean} average over the last ${anomaly.sampleSize} days (z=${anomaly.zScore})`}
+    >
+      ✈ +{Math.round(anomaly.todayCount - anomaly.baselineMean)}
+    </span>
+  );
 }
 
 const regionNames =
@@ -153,6 +166,7 @@ function MomentumTag({
 
 export default function CountryRiskPanel({
   scores,
+  aircraftAnomalies,
   selectedCountry,
   onSelectCountry,
 }: CountryRiskPanelProps) {
@@ -250,6 +264,7 @@ export default function CountryRiskPanel({
             "momentumDirection" in r ? r.momentumDirection : 0;
           const eventCount = "eventCount" in r ? r.eventCount : 0;
           const lastEventAt = "lastEventAt" in r ? r.lastEventAt : "";
+          const anomaly = aircraftAnomalies.get(r.country);
           return (
             <div key={r.country} className="border-b border-red-950">
               <div className="flex items-center gap-2 px-4 py-2.5">
@@ -274,6 +289,7 @@ export default function CountryRiskPanel({
                     </span>
                     {!isPlaceholder && (
                       <div className="flex items-center gap-2">
+                        {anomaly && <AnomalyBadge anomaly={anomaly} />}
                         <MomentumTag magnitude={momentum} direction={momentumDirection} />
                         <ThreatBadge level={threatLevel} label={threatLabel} />
                       </div>
@@ -309,6 +325,17 @@ export default function CountryRiskPanel({
                           </div>
                           <p className="mt-1 font-mono text-[11px] leading-relaxed text-neutral-300">
                             {detail.brief.briefText}
+                          </p>
+                        </div>
+                      )}
+                      {anomaly && (
+                        <div className="mb-2 border-b border-red-950/70 pb-2">
+                          <span className="font-mono text-[9px] uppercase tracking-wider text-amber-500">
+                            ⚠ Unusual military aircraft activity
+                          </span>
+                          <p className="mt-1 font-mono text-[10px] leading-relaxed text-neutral-400">
+                            {anomaly.todayCount} tracked today vs. a {anomaly.baselineMean}{" "}
+                            average over the last {anomaly.sampleSize} days (z={anomaly.zScore}).
                           </p>
                         </div>
                       )}

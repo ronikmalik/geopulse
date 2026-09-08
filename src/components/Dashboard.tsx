@@ -10,6 +10,7 @@ import type { ConnectionState } from "@/lib/useEventStream";
 import type { GeoEvent } from "@/lib/types";
 import type { Category } from "@/lib/categories";
 import type { CountryRiskScore } from "@/lib/useCountryRisk";
+import type { AircraftAnomaly } from "@/lib/useAircraftAnomalies";
 import type { DataLayerId } from "@/lib/dataLayers";
 import type {
   FlightsResponse,
@@ -49,6 +50,7 @@ interface DashboardProps {
   onSelectEvent: (event: GeoEvent) => void;
 
   countryScores: CountryRiskScore[];
+  aircraftAnomalies: Map<string, AircraftAnomaly>;
   selectedCountry: string | null;
   onSelectCountry: (country: string | null) => void;
 
@@ -159,6 +161,7 @@ export default function Dashboard(props: DashboardProps) {
         {activeTab === "risk" && (
           <CountryRiskPanel
             scores={props.countryScores}
+            aircraftAnomalies={props.aircraftAnomalies}
             selectedCountry={props.selectedCountry}
             onSelectCountry={props.onSelectCountry}
           />

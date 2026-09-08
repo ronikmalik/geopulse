@@ -8,6 +8,7 @@ import Dashboard, { type DashboardTab } from "@/components/Dashboard";
 import { useEventStream } from "@/lib/useEventStream";
 import { usePulsingEvents } from "@/lib/usePulsingEvents";
 import { useCountryRisk } from "@/lib/useCountryRisk";
+import { useAircraftAnomalies } from "@/lib/useAircraftAnomalies";
 import { useLiveLayer } from "@/lib/useLiveLayer";
 import {
   flightsToPoints,
@@ -44,6 +45,7 @@ export default function Home() {
   const { events, status, incoming, dismissIncoming } = useEventStream();
   const pulsingIds = usePulsingEvents(events);
   const countryScores = useCountryRisk();
+  const aircraftAnomalies = useAircraftAnomalies();
   // All eight pillars' event categories are on by default — this is a
   // global risk platform, not a conflict-theater tracker. The five
   // flashpoint pills in the top bar (CategoryFilter) let a user narrow
@@ -207,6 +209,7 @@ export default function Home() {
       setMobileOpen(false);
     },
     countryScores,
+    aircraftAnomalies,
     selectedCountry,
     onSelectCountry: setSelectedCountry,
     activeCategories,
