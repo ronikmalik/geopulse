@@ -489,6 +489,44 @@ function resolveNameInPhrase(phrase: string): string | null {
 const ATTACK_ON_US_PATTERN =
   /\b(?:hits?|hit|strikes?|struck|targets?|targeted|attacks?|attacked|kills?|killed|wounds?|wounded|bombs?|bombed|shells?|shelled)\b[^.]{0,25}\b(?:U\.S\.?|US)\b[^.]{0,20}\b(?:military|naval|air(?:craft)?|troops?|forces?|base|bases|embassy|embassies|consulate|personnel|warship|soldiers?|servicemembers?|sailors?|marines?|targets?)\b/;
 
+// Generalizes ATTACK_ON_US_PATTERN's own idea — "who the attack verb's
+// object is" beats "who's grammatically named first" — from the US
+// specifically to any recognized country/city/demonym. Found via the
+// 2026-09-08 Gemini classifier-audit's country_mismatch findings: four
+// independent real headlines all resolved to the ACTOR (mentioned first,
+// per the earliest-mention design below) instead of who the attack
+// actually endangers — "Iran continues attacks on Kurdish opposition
+// group in northern Iraq" (should be IQ, resolved IR), "Russian drone
+// damages ... newsroom in Kyiv" (should be UA, resolved RU), "Israeli
+// escalation in south Lebanon leaves 27 dead" (should be LB, resolved
+// IL), "Houthi strikes set fire to Saudi oil sites" (should be SA,
+// resolved YE) — all four in the very same audit run.
+//
+// Deliberately narrow: only fires when an attack/escalation word is
+// actually found AND a real country/city name resolves somewhere after
+// it — falls through to the normal earliest-mention scan otherwise, so
+// this can only improve cases it's confident about, never regress the
+// general "actor named first" rule this file documents below (which is
+// still correct for non-attack sentences — "Dutch bank moves gold from
+// UK to Canada" stays a Netherlands story).
+const ATTACK_CONTEXT_PATTERN =
+  /\b(?:strikes?|struck|hits?|hit|attacks?|attacked|bombs?|bombed|bombing|shells?|shelled|shelling|raids?|raided|damages?|damaged|airstrikes?|escalat\w*)\b/i;
+
+// How far past the attack word to look for the target's name — generous
+// enough for "attacks on Kurdish opposition group in northern Iraq" (the
+// real country name can be several words after the verb) without being
+// so wide it picks up an unrelated country mentioned in a trailing,
+// disconnected clause.
+const ATTACK_TARGET_WINDOW_CHARS = 200;
+
+function resolveAttackTarget(text: string): string | null {
+  const lower = text.toLowerCase();
+  const m = ATTACK_CONTEXT_PATTERN.exec(lower);
+  if (!m) return null;
+  const after = lower.slice(m.index + m[0].length, m.index + m[0].length + ATTACK_TARGET_WINDOW_CHARS);
+  return resolveNameInPhrase(after);
+}
+
 // Picks whichever recognized name appears EARLIEST in the text, not the
 // longest one — a headline's subject/actor is almost always named first
 // ("Dutch bank moves gold from UK to Canada" is a Netherlands story, not a
@@ -520,6 +558,9 @@ export function resolveCountryFromText(text: string): string | null {
   }
 
   if (/[a-z]/.test(text) && ATTACK_ON_US_PATTERN.test(text)) return "US";
+
+  const attackTarget = resolveAttackTarget(text);
+  if (attackTarget) return attackTarget;
 
   const lower = text.toLowerCase();
   const candidates: { index: number; length: number; alpha2: string }[] = [];
