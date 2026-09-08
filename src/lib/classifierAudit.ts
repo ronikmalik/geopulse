@@ -58,7 +58,23 @@ const FETCH_LIMIT = 200;
 const BATCH_SIZE = 20;
 const CONCURRENCY = 4;
 const SNIPPET_CHARS = 300;
+// Dropped items (false_negative candidates) stay recency-scoped —
+// recovering week-old "missed" news isn't worth much, this was always
+// about catching breaking coverage a keyword gap dropped.
 const AUDIT_WINDOW_HOURS = 24;
+// Kept items (false_positive/severity_mismatch/country_mismatch
+// candidates) get the FULL 30-day window instead (2026-09-08 user
+// request: "audit our past feed/severity scores... clean it up," not
+// just the last 24h) — matches risk.ts's own LOOKBACK_DAYS exactly,
+// since a live event older than that has already decayed out of every
+// country's current Threat Level/Momentum anyway, so auditing further
+// back has no effect on anything the live product actually shows today.
+// This can be a genuinely large backlog on first run (thousands of
+// rows) — that's fine and expected: the engine is already time-budgeted,
+// not count-limited (see runAudit), so it just grinds through it
+// gradually across many ingest cycles rather than needing to finish in
+// one pass, exactly the "over time" pace the user asked for.
+const KEPT_AUDIT_WINDOW_DAYS = 30;
 // The ingest-embedded slice's own time budget — small enough to leave
 // ample room in runIngest's overall 30s hard external-trigger limit
 // (cron-job.org), same order of magnitude as embeddingBackfill's own
@@ -119,7 +135,7 @@ async function getUnauditedKeptCandidates(limit: number): Promise<KeptCandidate[
     .where(
       sql`${classificationArchive.kept} = true
         and ${classificationArchive.auditedAt} is null
-        and ${classificationArchive.archivedAt} > now() - interval '${sql.raw(String(AUDIT_WINDOW_HOURS))} hours'
+        and ${classificationArchive.archivedAt} > now() - interval '${sql.raw(String(KEPT_AUDIT_WINDOW_DAYS))} days'
         and ${events.country} is not null`,
     )
     .orderBy(desc(classificationArchive.archivedAt))
