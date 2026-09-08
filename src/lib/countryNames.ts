@@ -364,6 +364,33 @@ const NAMES_BY_LENGTH_DESC = Object.keys(COUNTRY_NAME_TO_ALPHA2).sort(
   (a, b) => b.length - a.length,
 );
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// User report (2026-09-08): "oman keeps getting news not related to
+// oman." Root cause — the plain `lower.indexOf(name)` substring scan this
+// file used to use has no concept of a word boundary, so "oman" (as a
+// bare 4-letter substring) matched inside "woman"/"women's", "Ottoman",
+// "Roman"/"Romania"/"Romanian" — all extremely common in ordinary news
+// text — silently misattributing any story containing them to Oman.
+//
+// Fix is a LEFT word-boundary only, not `\bname\b` on both sides: a
+// right-side boundary would also block the many countries here that rely
+// on their base name matching as a PREFIX of an unlisted demonym form —
+// "kenya" inside "Kenyan," "nepal" inside "Nepali," etc. — which several
+// dozen entries in this map depend on since they were never given an
+// explicit demonym pair the way iraq/iraqi, syria/syrian, turkey/turkish
+// above were. A left boundary alone still blocks every real case found
+// ("w"+oman, "Ott"+oman, "R"+oman+ia — the country name is never preceded
+// by a word character in the actual country name) while leaving that
+// suffix-matching behavior completely intact ("Kenya" + "n" still matches
+// "kenya" as a left-bounded prefix). Precompiled once, not per call —
+// this runs on every classified item.
+const NAME_REGEX_BY_NAME = new Map<string, RegExp>(
+  NAMES_BY_LENGTH_DESC.map((name) => [name, new RegExp(`\\b${escapeRegExp(name)}`)]),
+);
+
 // Case-sensitive institutional signals, matched against the ORIGINAL text
 // (not lowercased) and folded into the same earliest-position candidate
 // pool as country names in resolveCountryFromText below — never returned
@@ -446,7 +473,7 @@ const TARGETING_PATTERNS: RegExp[] = [
 function resolveNameInPhrase(phrase: string): string | null {
   const lower = phrase.toLowerCase();
   for (const name of NAMES_BY_LENGTH_DESC) {
-    if (lower.includes(name)) return COUNTRY_NAME_TO_ALPHA2[name];
+    if (NAME_REGEX_BY_NAME.get(name)!.test(lower)) return COUNTRY_NAME_TO_ALPHA2[name];
   }
   return null;
 }
@@ -507,9 +534,9 @@ export function resolveCountryFromText(text: string): string | null {
   }
 
   for (const name of NAMES_BY_LENGTH_DESC) {
-    const index = lower.indexOf(name);
-    if (index !== -1) {
-      candidates.push({ index, length: name.length, alpha2: COUNTRY_NAME_TO_ALPHA2[name] });
+    const m = NAME_REGEX_BY_NAME.get(name)!.exec(lower);
+    if (m) {
+      candidates.push({ index: m.index, length: name.length, alpha2: COUNTRY_NAME_TO_ALPHA2[name] });
     }
   }
 
