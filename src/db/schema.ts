@@ -441,3 +441,58 @@ export const classifierAudit = pgTable(
 );
 
 export type ClassifierAuditRow = typeof classifierAudit.$inferSelect;
+
+// The recursive-learning half of classifierAudit.ts: findings above are
+// per-article, one-shot corrections; a row here is a GENERALIZED lesson
+// distilled from one or more of those reviews — a pattern Gemini keeps
+// getting wrong (or a rubric refinement) that gets fed back into every
+// future audit prompt (see calibration-lesson injection in
+// buildKeptAuditPrompt/buildFalseNegativePrompt), not just applied to the
+// one live event that surfaced it. Recorded by the reviewer (Claude) via
+// reviewAuditFinding's optional `lesson` param at the moment a finding is
+// approved/rejected — same manipulation-surface boundary as classifier_audit
+// itself (a human/Claude writes it, never Gemini directly), it just closes
+// the loop one level up: today, DELIBERATE_EXCLUSIONS/SEVERITY_RUBRIC/
+// COUNTRY_GUIDANCE in classifierAudit.ts only grow when Claude notices a
+// pattern AND happens to hand-edit + redeploy code; this table lets a
+// lesson go live in the very next audit call instead, no deploy required.
+// `pattern` is a stable slug (not free text) specifically so a recurring
+// mistake reinforces the SAME row (upsert-by-pattern, incrementing
+// `occurrences`) rather than accumulating near-duplicate lessons that bloat
+// the prompt over time.
+export const classifierCalibration = pgTable(
+  "classifier_calibration",
+  {
+    id: serial("id").primaryKey(),
+    pattern: text("pattern").notNull().unique(),
+    lesson: text("lesson").notNull(),
+    // "kept" | "dropped" | "both" — which audit prompt(s) this lesson is
+    // relevant to; a false_negative-derived lesson about a missed keyword
+    // has nothing to say to the kept-item severity/country prompt, and
+    // vice versa.
+    appliesTo: text("applies_to").notNull().default("both"),
+    // How many separate review decisions have reinforced this exact
+    // pattern — a lesson recorded once might be a fluke; one recorded
+    // repeatedly is a genuine recurring miscalibration, worth eventually
+    // graduating into the hand-maintained prompt constants themselves.
+    occurrences: integer("occurrences").notNull().default(1),
+    // Soft-delete, not a hard delete — an active lesson that turns out to
+    // be wrong (or gets superseded/generalized by a later one) is
+    // deactivated so the provenance stays queryable, same posture as
+    // classifier_audit's own status field never deleting a finding.
+    active: boolean("active").notNull().default(true),
+    // Provenance — the classifier_audit.id whose review produced this
+    // lesson, if any (nullable: a lesson can also be recorded directly,
+    // not just distilled from one specific finding).
+    sourceFindingId: integer("source_finding_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastReinforcedAt: timestamp("last_reinforced_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("classifier_calibration_active_idx").on(table.active)],
+);
+
+export type ClassifierCalibrationRow = typeof classifierCalibration.$inferSelect;

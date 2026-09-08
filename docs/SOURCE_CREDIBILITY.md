@@ -118,17 +118,41 @@ backfilling with an unvetted source.
 | Daily Maverick | Independent, no media-group/political/religious affiliation; Alan Knott-Craig (founder/investor), Styli Charalambous (publisher/CEO) | Least Biased | High Credibility / Mostly Factual | Added 2026-09-05. Southern Africa investigative specialist — adds a vantage this list didn't have (existing Africa sources skew Pan-African/West African: AllAfrica, Premium Times, Africanews). |
 | Rappler | Rappler Holdings Corp — Dolphin Fire Group (31.21%), Maria Ressa (23.77%), Hatchd Group (17.86%), Benjamin So (17.86%) | Left-Center | High Credibility / High Factual | Added 2026-09-05, conflict/terrorism specialist pass. Philippines specialist — closes the Mindanao/Abu Sayyaf/Marawi-legacy insurgency gap. Maria Ressa won the 2021 Nobel Peace Prize; the Duterte-era government harassment/legal pressure MBFC notes was directed at Rappler for its reporting — evidence of editorial independence under pressure, not a compromise of it, same framing already applied to Meduza/Moscow Times' in-exile status. Philippines-specific feed used (not the general-interest feed, which mixes in entertainment coverage). |
 | Tempo | Tempo Media Group / PT Info Media Digital, revenue via advertising/subscriptions/circulation | Left-Center | High Credibility / High Factual | Added 2026-09-05, conflict/terrorism specialist pass. Indonesia specialist — closes the Indonesia domestic-terrorism (JI/ISIS-linked cells) gap. Zero failed fact-checks; known for anti-corruption watchdog journalism that MBFC notes has caused "conflict with political authorities" — same independence signal as Rappler's, not a red flag. English edition specifically (`rss.tempo.co/en`) — the default feed is Indonesian-language and this pipeline has no translation step (see the Chosun Ilbo rejection below). |
+| Malaysiakini | Mkini Dotcom Sdn Bhd (Mkini Group), ad/subscription-funded | Left-Center | Mostly Factual / High Credibility | Added 2026-09-08, gap-filling pass (SE Asia/Sub-Saharan Africa/Central Asia coverage request). Only Malaysia-specific outlet in this list — cna-world is Singapore-general, not Malaysia-focused. MBFC's only flag is self-referential sourcing on domestic politics coverage, not a trust finding. |
+| The New Humanitarian | Independent, grant/foundation-funded; spun off from UN OCHA in 2015 (formerly IRIN News) | Left-Center | High Credibility / High Factual | Added 2026-09-08, gap-filling pass. Global humanitarian/conflict specialist — cross-cutting coverage (famine, displacement, conflict) reaching theaters this list is still thin on (Sahel, Horn of Africa, Sudan, Myanmar, Central Asia) where no dedicated regional outlet clears the bar. Not a substitute for one, but a real net-new signal source. |
+| RNZ Pacific | Radio New Zealand — NZ Crown entity, statutory editorial independence | Least Biased | High Credibility / High Factual | Added 2026-09-08, gap-filling pass. Pacific Islands specialist — this list had zero Pacific coverage before. Same state-funded/editorially-independent public-broadcaster model as BBC/DW/France24/ABC Australia. |
 
-32 sources, spanning North America, Europe, Russia/Ukraine/Central Asia
+35 sources, spanning North America, Europe, Russia/Ukraine/Central Asia
 (now meaningfully deeper via RFE/RL, Meduza, and Moscow Times), the
 Middle East (Israeli, Arab-world, and Israeli-critical vantage points),
-South Asia (The Hindu), Southeast Asia (now Rappler/Philippines and
-Tempo/Indonesia alongside CNA), Taiwan, North Korea (now RFA and Yonhap
-alongside NK News), Australia, Canada, Africa (now African Arguments and
-Daily Maverick alongside AllAfrica/Premium Times/Africanews), and Latin
-America (Argentina only, after Rio Times's removal and MercoPress's
-earlier removal — a real gap; Brazil/wider South America coverage now
-depends on the global wire outlets happening to cover it).
+South Asia (The Hindu), Southeast Asia (now Rappler/Philippines,
+Tempo/Indonesia, and Malaysiakini/Malaysia alongside CNA), Taiwan, North
+Korea (now RFA and Yonhap alongside NK News), Australia, Canada, the
+Pacific Islands (RNZ Pacific — previously zero coverage), Africa (now
+African Arguments and Daily Maverick alongside AllAfrica/Premium Times/
+Africanews), a cross-cutting humanitarian/conflict lens spanning several
+thin regions at once (The New Humanitarian), and Latin America (Argentina
+only, after Rio Times's removal and MercoPress's earlier removal — a real
+gap; Brazil/wider South America coverage now depends on the global wire
+outlets happening to cover it).
+
+Real gaps remaining after the 2026-09-08 gap-filling pass (Southeast
+Asia/Sub-Saharan Africa/Central Asia, per user request), stated plainly:
+**Central Asia proper** (Kazakhstan, Uzbekistan, Kyrgyzstan, Tajikistan,
+Turkmenistan) stays essentially uncovered beyond RFE/RL's generic
+reach — the one high-credibility specialist, Eurasianet, is
+Cloudflare-blocked on every RSS path; every country-specific outlet
+checked is either state-controlled (Medium Credibility) or unrated, and
+Turkmenistan specifically has no free press with any RSS presence at
+all. **East Africa** (Kenya, Ethiopia, Somalia) — every candidate checked
+tops out at Medium Credibility over government-relationship concerns;
+Horn of Africa conflict coverage still depends on African Arguments' and
+The New Humanitarian's pan-regional lenses rather than a country-specific
+outlet. **Bangladesh, Nepal, Sri Lanka** — no dedicated outlet clears the
+bar; the best editorial fits (The Daily Star, Dhaka Tribune, Kathmandu
+Post) are simply unrated by any tracker. **Caribbean and Latin America
+beyond Argentina** — same unrated-source problem (Colombia Reports failed
+on sourcing; Jamaica Gleaner and Folha de S.Paulo are unrated).
 
 Real gaps remaining after the 2026-09-05 conflict/terrorism specialist
 pass, stated plainly rather than papered over: **Pakistan and
@@ -201,6 +225,34 @@ did not:
 | Iran International | Middle East (Iran/Gulf) | MBFC: Medium Credibility, Mixed factual — documented Saudi-government-linked funding (early investors reported tied to Mohammed bin Salman) that MBFC says itself "raise[s] concerns about editorial independence." Same shape of issue that excluded Al Jazeera and Middle East Eye, from the opposite political direction. |
 | Arab News | Middle East (Saudi Arabia) | MBFC: **Questionable Source** / Low Credibility — Saudi state-owned (via the Public Investment Fund), "excessive government censorship... pro-state propaganda." |
 | The National (UAE) | Middle East (Gulf) | MBFC: **Questionable** / Low Credibility — poor sourcing, state propaganda, censorship. |
+
+## Checked and rejected (2026-09-08 gap-filling pass)
+
+User request: find more vetted sources, specifically targeting Southeast
+Asia, Sub-Saharan Africa, and Central/Middle Asia — the regions this list
+was blankest on. Three made it in (Malaysiakini, The New Humanitarian,
+RNZ Pacific — see the Kept table above). These were checked and did not:
+
+| Source | Theater | Why not |
+|---|---|---|
+| Eurasianet | Central Asia | HIGH CREDIBILITY per MBFC — editorially the best possible fit for this region — but every RSS path returns a Cloudflare bot-challenge (confirmed via curl), same technical-gap category as The Irrawaddy. Worth revisiting if they ever whitelist automated RSS access. |
+| Astana Times | Central Asia (Kazakhstan) | MBFC: Medium Credibility — "functions primarily as a public diplomacy outlet," pro-government tone, staff drawn from state media. |
+| Kazinform | Central Asia (Kazakhstan) | MBFC: Medium Credibility, state-owned (Presidential media structure), explicit censorship-concern note. |
+| AKIpress | Central Asia (Kyrgyzstan) | Working English feed confirmed, but no MBFC/AllSides/Ad Fontes rating found anywhere — unverifiable, same bar that excluded HumAngle/Rio Times. |
+| The Standard (Kenya) | Sub-Saharan Africa (East Africa) | MBFC: Mixed factual — "omits criticism of the ruling party." |
+| Daily Nation (Kenya) | Sub-Saharan Africa (East Africa) | MBFC: Medium Credibility, Mixed factual — editorial softening toward the current government tied to the owner's (Aga Khan) government ties. |
+| Addis Standard | Sub-Saharan Africa (Ethiopia) | MBFC: Medium Credibility — thin sourcing, no donor/board disclosure. |
+| Bangkok Post | Southeast Asia (Thailand) | MBFC: Medium Credibility, Mixed factual — "promotion of pro-government propaganda," royal-family censorship constraint. |
+| Phnom Penh Post | Southeast Asia (Cambodia) | MBFC: Medium Credibility — government-influenced 2018 ownership change, pattern of favorable Hun Sen coverage. |
+| The Star (Malaysia) | Southeast Asia | MBFC: Mixed factual — MCA political-party ownership tie, loaded-headline pattern. Malaysiakini (added instead) clears this same theater without the ownership tie. |
+| Free Malaysia Today | Southeast Asia (Malaysia) | MBFC: Medium Credibility — a 25%-owner conflict-of-interest finding. |
+| VnExpress / Vietnam News Agency | Southeast Asia (Vietnam) | State-owned/state-controlled by explicit design (Ministry of Science & Technology / Communist Party organ) — no independent press exists in Vietnam to check instead. An honest structural gap, not a substitutable one. |
+| The Daily Star (Bangladesh) | South Asia | Widely regarded as Bangladesh's paper of record, but no MBFC/AllSides/Ad Fontes page found under any search — unrated, fails the verification bar. |
+| Dhaka Tribune | South Asia (Bangladesh) | Unrated by MBFC, AllSides, or Ad Fontes. |
+| Kathmandu Post | South Asia (Nepal) | Unrated by MBFC, AllSides, or Ad Fontes. |
+| Colombia Reports | Latin America | MBFC: Mixed factual — thin/self-referential sourcing. |
+| Jamaica Gleaner | Caribbean | Unrated by MBFC, AllSides, or Ad Fontes despite being Jamaica's paper of record. |
+| Folha de S.Paulo | Latin America (Brazil) | No MBFC bias/credibility rating locatable despite being a major outlet. |
 
 ## Non-editorial sources (not applicable)
 

@@ -187,6 +187,26 @@ export const RSS_FEEDS: { name: string; url: string }[] = [
   // a technical gap, not a trust one. Myanmar Now and Frontier Myanmar
   // are both unrated by any tracker. See SOURCE_CREDIBILITY.md.
   //
+  // Southeast Asia — Malaysia (only Malaysia-specific outlet in this
+  // list; cna-world is Singapore-general). Left-Center/Mostly Factual/
+  // High Credibility per MBFC. Added 2026-09-08 gap-filling pass.
+  { name: "malaysiakini", url: "https://www.malaysiakini.com/rss/en/news.rss" },
+  // Global humanitarian/conflict specialist (formerly IRIN News, spun off
+  // from UN OCHA in 2015) — Left-Center/High factual/High Credibility per
+  // MBFC, independent grant/foundation-funded. Cross-cutting coverage
+  // (famine, displacement, conflict) reaching exactly the theaters this
+  // list is still thin on — Sahel, Horn of Africa, Sudan, Myanmar,
+  // Central Asia — where no dedicated regional outlet clears the bar.
+  // Not a substitute for one, but a real net-new signal. Added 2026-09-08.
+  { name: "new-humanitarian", url: "https://www.thenewhumanitarian.org/rss.xml" },
+  //
+  // Pacific Islands — zero prior coverage in this list. RNZ Pacific is
+  // Radio New Zealand's dedicated Pacific desk; RNZ itself is a NZ Crown
+  // entity with statutory editorial independence, same model as BBC/DW/
+  // ABC Australia already kept above. Least Biased/High factual/High
+  // Credibility per MBFC. Added 2026-09-08.
+  { name: "rnz-pacific", url: "https://www.rnz.co.nz/rss/pacific.xml" },
+  //
   // Latin America
   { name: "buenos-aires-times", url: "https://www.batimes.com.ar/feed" },
 ];

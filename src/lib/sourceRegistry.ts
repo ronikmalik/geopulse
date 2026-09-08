@@ -42,7 +42,7 @@ export const SOURCE_REGISTRY: SourceLicenseInfo[] = [
   {
     id: "rss",
     provider:
-      "16 outlet RSS feeds across North America, Europe, Asia-Pacific, the Middle East, Africa, and Latin America — see src/lib/sources/rss.ts for the full list and docs/SOURCE_CREDIBILITY.md for the per-outlet bias/reliability vetting",
+      "35 outlet RSS feeds across North America, Europe, Russia/Central Asia, the Middle East, South/Southeast Asia, Taiwan, Korea, Australia, the Pacific Islands, Africa, and Latin America — see src/lib/sources/rss.ts for the full list and docs/SOURCE_CREDIBILITY.md for the per-outlet bias/reliability vetting",
     url: "https://www.bbci.co.uk/news/10318089",
     license: "Publisher-specific — RSS provided for personal/non-commercial syndication",
     commercialUse: "unclear",
@@ -52,7 +52,7 @@ export const SOURCE_REGISTRY: SourceLicenseInfo[] = [
     maxCacheAgeNotes: "Headline/summary + source link only — no full-article reproduction.",
     rateLimit: "Unpublished — poll politely (this app: every ~15 min).",
     apiKeyRequired: false,
-    termsLastChecked: "2026-09-03",
+    termsLastChecked: "2026-09-08",
   },
   {
     id: "usgs",

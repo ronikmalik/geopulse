@@ -23,6 +23,14 @@ import { isCronAuthorized } from "@/lib/cronAuth";
 // classifierAudit.ts. Calling this again with an override on a finding
 // that's already "applied" genuinely re-applies with the new value; it's
 // not a no-op.
+//
+// Optional ?lessonPattern=<slug>&lessonText=<sentence>[&lessonAppliesTo=
+// kept|dropped|both] (2026-09-08) is the recursive-learning hook — see
+// ReviewLesson's doc comment in classifierAudit.ts. Use it when a review
+// reveals something GENERALIZABLE (Gemini will make this same mistake
+// again on a different article), not for a one-off. It's additive to
+// whatever `status` does — a lesson can be recorded on a rejected,
+// approved, or already-applied finding alike.
 const VALID_STATUSES = new Set<ReviewStatus>(["approved", "rejected", "applied"]);
 
 export async function GET(req: NextRequest) {
@@ -52,7 +60,14 @@ export async function GET(req: NextRequest) {
       ? { severity: overrideSeverity, country: overrideCountryParam?.toUpperCase() }
       : undefined;
 
-  const result = await reviewAuditFinding(id, statusParam as ReviewStatus, note, overrides);
+  const lessonPattern = req.nextUrl.searchParams.get("lessonPattern");
+  const lessonText = req.nextUrl.searchParams.get("lessonText");
+  const lessonAppliesToParam = req.nextUrl.searchParams.get("lessonAppliesTo");
+  const lessonAppliesTo: "kept" | "dropped" | "both" =
+    lessonAppliesToParam === "kept" || lessonAppliesToParam === "dropped" ? lessonAppliesToParam : "both";
+  const lesson = lessonPattern && lessonText ? { pattern: lessonPattern, text: lessonText, appliesTo: lessonAppliesTo } : undefined;
+
+  const result = await reviewAuditFinding(id, statusParam as ReviewStatus, note, overrides, lesson);
   if (!result.found) return NextResponse.json({ error: "finding not found" }, { status: 404 });
-  return NextResponse.json({ ok: true, id, applied: result.applied, note: result.note });
+  return NextResponse.json({ ok: true, id, applied: result.applied, note: result.note, lessonRecorded: !!lesson });
 }

@@ -144,6 +144,18 @@ const STATEMENTS = [
   sql`CREATE UNIQUE INDEX IF NOT EXISTS classifier_audit_archive_kind_unique ON classifier_audit (archive_id, kind)`,
   sql`ALTER TABLE classification_archive ADD COLUMN IF NOT EXISTS audited_at TIMESTAMPTZ`,
   sql`CREATE INDEX IF NOT EXISTS classification_archive_audited_at_idx ON classification_archive (audited_at)`,
+  sql`CREATE TABLE IF NOT EXISTS classifier_calibration (
+    id SERIAL PRIMARY KEY,
+    pattern TEXT NOT NULL UNIQUE,
+    lesson TEXT NOT NULL,
+    applies_to TEXT NOT NULL DEFAULT 'both',
+    occurrences INTEGER NOT NULL DEFAULT 1,
+    active BOOLEAN NOT NULL DEFAULT true,
+    source_finding_id INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_reinforced_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS classifier_calibration_active_idx ON classifier_calibration (active)`,
 ];
 
 export async function GET(req: NextRequest) {
