@@ -1,8 +1,11 @@
 import { sql, and, eq, desc } from "drizzle-orm";
 import { getDb } from "@/db";
-import { classificationArchive, classifierAudit } from "@/db/schema";
+import { classificationArchive, classifierAudit, events } from "@/db/schema";
 import { recordAiUsage } from "./aiUsage";
 import { PILLAR_LIST } from "./pillars";
+import { deriveFieldsForRecovery } from "./classify";
+import { correlationGroupId } from "./correlation";
+import { archiveFeedItems } from "./feedArchive";
 
 // Daily Gemini pass over classification_archive, finding both directions
 // of misclassification: items the keyword classifier KEPT that shouldn't
@@ -41,6 +44,8 @@ const AUDIT_WINDOW_HOURS = 24;
 interface AuditCandidate {
   id: number;
   source: string;
+  url: string;
+  publishedAt: Date;
   title: string;
   snippet: string;
   severity: number;
@@ -57,6 +62,8 @@ async function getUnauditedCandidates(kept: boolean, limit: number): Promise<Aud
     .select({
       id: classificationArchive.id,
       source: classificationArchive.source,
+      url: classificationArchive.url,
+      publishedAt: classificationArchive.publishedAt,
       title: classificationArchive.title,
       snippet: classificationArchive.snippet,
       severity: classificationArchive.severity,
@@ -139,13 +146,19 @@ For each item, judge only whether it describes an actual, specific real-world de
 Items:
 ${formatItems(items)}
 
-Respond with ONLY a JSON array (no other text, no markdown fences) of flagged items: [{"id": <number>, "reasoning": "<one sentence: why this matters>", "suggestedFix": "<one sentence: what specific word/phrase/pattern likely caused a keyword-based classifier to miss this>"}]. Omit any item you are not flagging. If none should be flagged, respond with [].`;
+Respond with ONLY a JSON array (no other text, no markdown fences) of flagged items: [{"id": <number>, "reasoning": "<one sentence: why this matters>", "suggestedFix": "<one sentence: what specific word/phrase/pattern likely caused a keyword-based classifier to miss this>", "suggestedSeverity": <integer 1-5, where 1=minor/diplomatic and 5=major military action or strike with casualties>}]. Omit any item you are not flagging. If none should be flagged, respond with [].`;
 }
 
 interface RawFinding {
   id?: unknown;
   reasoning?: unknown;
   suggestedFix?: unknown;
+  suggestedSeverity?: unknown;
+}
+
+function clampSeverity(v: unknown): number | null {
+  if (typeof v !== "number" || !Number.isFinite(v)) return null;
+  return Math.min(5, Math.max(1, Math.round(v)));
 }
 
 async function callGeminiJson(prompt: string, apiKey: string): Promise<RawFinding[] | null> {
@@ -217,11 +230,14 @@ async function processDirection(
               archiveId: item.id,
               kind,
               source: item.source,
+              url: item.url,
+              publishedAt: item.publishedAt,
               title: item.title,
               snippet: item.snippet,
               severity: item.severity,
               reasoning: f.reasoning,
               suggestedFix: typeof f.suggestedFix === "string" ? f.suggestedFix : null,
+              suggestedSeverity: clampSeverity(f.suggestedSeverity),
             })
             .onConflictDoNothing({ target: classifierAudit.archiveId });
           flaggedCount++;
@@ -269,11 +285,13 @@ export interface AuditFinding {
   archiveId: number;
   kind: string;
   source: string;
+  url: string | null;
   title: string;
   snippet: string;
   severity: number;
   reasoning: string;
   suggestedFix: string | null;
+  suggestedSeverity: number | null;
   status: string;
   reviewNote: string | null;
   createdAt: string;
@@ -300,16 +318,126 @@ export async function getAuditFindings(
 
 export type ReviewStatus = "approved" | "rejected" | "applied";
 
+// The one place this feature actually touches the live feed — and even
+// here, scoped to exactly the one article a human just approved, never a
+// shared classify.ts rule. See the doc comment on the classifier_audit
+// table for why that boundary matters.
+//
+// false_negative: derives category/country/coordinates via
+// deriveFieldsForRecovery (classify.ts) and inserts the article as a
+// real event — using Gemini's own suggestedSeverity, not the archived
+// severity, since the archived value is often exactly why the item was
+// excluded in the first place (a benign-pattern hit falls back to 1).
+// false_positive: deletes the corresponding row from `events` (the live
+// feed) only — feed_archive is deliberately left untouched, since its
+// whole purpose is an unpruned historical record (2026-09-05 user
+// decision) independent of the live feed's own correctness.
+async function applyFinding(
+  finding: typeof classifierAudit.$inferSelect,
+): Promise<{ applied: boolean; note: string }> {
+  const db = getDb();
+
+  if (finding.kind === "false_positive") {
+    if (!finding.url) return { applied: false, note: "no url on this finding (predates url tracking) — cannot locate the live row" };
+    const result = await db.delete(events).where(eq(events.url, finding.url)).returning({ id: events.id });
+    return result.length > 0
+      ? { applied: true, note: "removed from the live feed" }
+      : { applied: false, note: "not found in events — may have already aged out of the 30-day window" };
+  }
+
+  if (finding.kind === "false_negative") {
+    if (!finding.url || !finding.publishedAt) {
+      return { applied: false, note: "missing url/publishedAt (predates tracking) — needs a manual classify.ts fix instead" };
+    }
+    const derived = deriveFieldsForRecovery({ title: finding.title, snippet: finding.snippet });
+    if (!derived) {
+      return {
+        applied: false,
+        note: "could not resolve a country for this item — this is a genuine classify.ts gap (see suggestedFix), needs a manual pattern change, not just approval",
+      };
+    }
+    const severity = finding.suggestedSeverity ?? finding.severity;
+    try {
+      const result = await db
+        .insert(events)
+        .values({
+          source: finding.source,
+          url: finding.url,
+          title: finding.title,
+          summary: finding.title,
+          category: derived.category,
+          location: derived.location,
+          country: derived.country,
+          lat: derived.lat,
+          lon: derived.lon,
+          severity,
+          publishedAt: finding.publishedAt,
+          correlationGroupId: correlationGroupId(derived.country, derived.category, finding.publishedAt),
+        })
+        .onConflictDoNothing({ target: events.url })
+        .returning({ id: events.id });
+      if (result.length === 0) {
+        return { applied: false, note: "already present in events (inserted by a later ingest cycle before this was reviewed)" };
+      }
+      await archiveFeedItems([
+        {
+          source: finding.source,
+          url: finding.url,
+          title: finding.title,
+          summary: finding.title,
+          category: derived.category,
+          country: derived.country,
+          lat: derived.lat,
+          lon: derived.lon,
+          severity,
+          publishedAt: finding.publishedAt,
+        },
+      ]);
+      return { applied: true, note: `recovered into the live feed as ${derived.category}/${derived.country}, severity ${severity}` };
+    } catch (err) {
+      return { applied: false, note: `insert failed: ${err}` };
+    }
+  }
+
+  return { applied: false, note: "unknown kind" };
+}
+
+export interface ReviewResult {
+  found: boolean;
+  applied: boolean;
+  note: string;
+}
+
 export async function reviewAuditFinding(
   id: number,
   status: ReviewStatus,
   note: string | null,
-): Promise<boolean> {
+): Promise<ReviewResult> {
   const db = getDb();
-  const result = await db
+  const rows = await db.select().from(classifierAudit).where(eq(classifierAudit.id, id)).limit(1);
+  const finding = rows[0];
+  if (!finding) return { found: false, applied: false, note: "not found" };
+
+  // Only "approved" triggers a live-feed action — "rejected" and
+  // "applied" (marking a manual classify.ts fix as done) are just status
+  // updates. If the live action succeeds, the stored status becomes
+  // "applied" automatically so pending/approved reviewers can tell "acted
+  // on" from "still needs a manual classify.ts change" at a glance.
+  let finalStatus: ReviewStatus = status;
+  let finalNote = note;
+  let applied = false;
+
+  if (status === "approved") {
+    const result = await applyFinding(finding);
+    applied = result.applied;
+    finalStatus = result.applied ? "applied" : "approved";
+    finalNote = note ? `${note} — ${result.note}` : result.note;
+  }
+
+  await db
     .update(classifierAudit)
-    .set({ status, reviewNote: note, reviewedAt: new Date() })
-    .where(eq(classifierAudit.id, id))
-    .returning({ id: classifierAudit.id });
-  return result.length > 0;
+    .set({ status: finalStatus, reviewNote: finalNote, reviewedAt: new Date() })
+    .where(eq(classifierAudit.id, id));
+
+  return { found: true, applied, note: finalNote ?? "" };
 }

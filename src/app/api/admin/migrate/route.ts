@@ -117,6 +117,9 @@ const STATEMENTS = [
   )`,
   sql`CREATE INDEX IF NOT EXISTS classifier_audit_status_idx ON classifier_audit (status)`,
   sql`CREATE INDEX IF NOT EXISTS classifier_audit_created_at_idx ON classifier_audit (created_at)`,
+  sql`ALTER TABLE classifier_audit ADD COLUMN IF NOT EXISTS url TEXT`,
+  sql`ALTER TABLE classifier_audit ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ`,
+  sql`ALTER TABLE classifier_audit ADD COLUMN IF NOT EXISTS suggested_severity INTEGER`,
 ];
 
 export async function GET(req: NextRequest) {

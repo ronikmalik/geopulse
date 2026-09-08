@@ -367,6 +367,11 @@ export const classifierAudit = pgTable(
     archiveId: integer("archive_id").notNull().unique(),
     kind: text("kind").notNull(), // "false_positive" | "false_negative"
     source: text("source").notNull(),
+    // Nullable — added after the first live run; those first rows predate
+    // url/publishedAt tracking and can't be auto-applied (see
+    // applyFinding in classifierAudit.ts), only re-reviewed manually.
+    url: text("url"),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
     title: text("title").notNull(),
     snippet: text("snippet").notNull(),
     severity: integer("severity").notNull(),
@@ -376,6 +381,12 @@ export const classifierAudit = pgTable(
     // missing, the actual "fine-tuning fuel" a human turns into a real
     // classify.ts change.
     suggestedFix: text("suggested_fix"),
+    // Only ever set for false_negative findings — the archived severity
+    // is often exactly why the item was excluded in the first place (a
+    // benign-pattern hit falls back to 1), so recovering it with that
+    // same severity would misrepresent it. Gemini's own read of the
+    // article, clamped 1-5, is used instead when applying the finding.
+    suggestedSeverity: integer("suggested_severity"),
     status: text("status").notNull().default("pending"), // pending | approved | rejected | applied
     reviewNote: text("review_note"),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),

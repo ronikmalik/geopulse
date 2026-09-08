@@ -2,14 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { reviewAuditFinding, type ReviewStatus } from "@/lib/classifierAudit";
 import { isCronAuthorized } from "@/lib/cronAuth";
 
-// The one write action in this feature — marks a finding approved (a
-// real classify.ts change should follow, made by hand, same as every
-// other vocabulary change), rejected (Gemini's call didn't hold up), or
-// applied (the classify.ts change has actually been made and shipped).
-// GET-with-query-params to match every other admin mutation in this repo
-// (admin/purge, admin/migrate) — simplest to trigger via the
-// admin-call.yml GitHub Actions workflow, which has no request-body
-// support.
+// The one write action in this feature. ?status=approved triggers a live
+// action scoped to exactly this one article — see applyFinding in
+// classifierAudit.ts: a false_negative gets inserted into the live feed,
+// a false_positive gets removed from it. If that live action succeeds,
+// the stored status becomes "applied" automatically (not just
+// "approved") so the review queue shows "acted on" vs. "still needs a
+// manual classify.ts fix" at a glance — some approvals can't be
+// auto-applied (e.g. no resolvable country) and stay "approved" with a
+// note explaining why. ?status=rejected and ?status=applied (marking a
+// manual classify.ts change as shipped) are plain status updates with no
+// live-feed side effect. GET-with-query-params to match every other
+// admin mutation in this repo (admin/purge, admin/migrate) — simplest to
+// trigger via the admin-call.yml GitHub Actions workflow, which has no
+// request-body support.
 const VALID_STATUSES = new Set<ReviewStatus>(["approved", "rejected", "applied"]);
 
 export async function GET(req: NextRequest) {
@@ -28,7 +34,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const ok = await reviewAuditFinding(id, statusParam as ReviewStatus, note);
-  if (!ok) return NextResponse.json({ error: "finding not found" }, { status: 404 });
-  return NextResponse.json({ ok: true, id, status: statusParam });
+  const result = await reviewAuditFinding(id, statusParam as ReviewStatus, note);
+  if (!result.found) return NextResponse.json({ error: "finding not found" }, { status: 404 });
+  return NextResponse.json({ ok: true, id, applied: result.applied, note: result.note });
 }

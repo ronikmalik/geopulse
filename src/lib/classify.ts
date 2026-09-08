@@ -624,6 +624,42 @@ export function classifyGdeltItem(item: RawItem): ClassifiedItem | null {
   };
 }
 
+export interface RecoveredFields {
+  category: NewsCategory | "other";
+  country: string;
+  location: string;
+  lat: number;
+  lon: number;
+}
+
+// Used only by src/lib/classifierAudit.ts's approve-and-recover action —
+// derives the same category/country/location fields classifyByKeywords
+// would, but deliberately WITHOUT any of its inclusion gates (topical
+// filter, severity floor, region-scope check, NON_EVENT_TITLE_PATTERNS).
+// A false-negative finding is by definition an item one of those gates
+// rejected; re-running the gated function on it would just reject it
+// again. Still requires a resolvable country — an item with no
+// recognizable location genuinely can't be placed on the globe no matter
+// how confident the approval was; the caller surfaces that as "needs a
+// manual classify.ts fix" rather than silently failing.
+export function deriveFieldsForRecovery(item: {
+  title: string;
+  snippet: string;
+}): RecoveredFields | null {
+  const text = `${item.title} ${item.snippet}`;
+  const category = categorizeByKeywords(item.title, text);
+  const resolvedCountry =
+    resolveCountryFromText(item.title) ?? resolveCountryFromText(item.snippet);
+  const country =
+    resolvedCountry ?? (category !== "other" ? CATEGORY_FALLBACK_COUNTRY[category] : undefined);
+  if (!country) return null;
+
+  const centroid = COUNTRY_CENTROIDS[country];
+  if (!centroid) return null;
+
+  return { category, country, location: centroid.name, lat: centroid.lat, lon: centroid.lon };
+}
+
 export function classifyByKeywords(item: RawItem): ClassifiedItem | null {
   if (NON_EVENT_TITLE_PATTERNS.test(item.title)) return null;
 
