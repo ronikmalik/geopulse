@@ -1,7 +1,7 @@
 import { isNull, eq, desc } from "drizzle-orm";
 import { getDb } from "@/db";
 import { feedArchive } from "@/db/schema";
-import { embedBatch, MAX_BATCH_SIZE } from "./embeddings";
+import { embedBatch } from "./embeddings";
 
 // Deliberately decoupled from the insert path (src/lib/feedArchive.ts's
 // archiveFeedItems) rather than embedding inline at insert time — ingest
@@ -17,7 +17,13 @@ import { embedBatch, MAX_BATCH_SIZE } from "./embeddings";
 // actually showing on the feed, so a backlog — which shouldn't happen at
 // this app's volume, but if it ever does — degrades by leaving old rows
 // unembedded rather than leaving today's news unembedded.
-const BACKFILL_BATCH_SIZE = MAX_BATCH_SIZE;
+//
+// Sized for embedBatch's individual-call-per-text reality (see
+// embeddings.ts — there is no synchronous batch endpoint for this model
+// generation), not an arbitrary API batch limit: 24 items at
+// embeddings.ts's CONCURRENCY=8 is 3 sequential rounds, comfortably
+// inside runIngest's 8s deadline for this step.
+const BACKFILL_BATCH_SIZE = 24;
 const MAX_INPUT_CHARS = 2000;
 
 export interface BackfillResult {
@@ -41,17 +47,24 @@ export async function backfillFeedArchiveEmbeddings(): Promise<BackfillResult> {
     const embeddings = await embedBatch(texts);
     if (!embeddings) return { processed: 0, skipped: true };
 
-    // No bulk vector UPDATE across a small in-memory list worth building
-    // raw SQL for — one UPDATE per row, same as any other per-row
-    // enrichment pass in this codebase (see recordSourceHealth).
+    // Per-item nulls are expected now (one bad text shouldn't waste the
+    // rest of the batch — see embedBatch's doc comment) — only rows that
+    // actually got a real embedding get updated; the rest stay NULL and
+    // are retried on a future cycle. No bulk vector UPDATE across a small
+    // in-memory list worth building raw SQL for — one UPDATE per row,
+    // same as any other per-row enrichment pass in this codebase (see
+    // recordSourceHealth).
+    let processed = 0;
     for (let i = 0; i < rows.length; i++) {
+      if (!embeddings[i]) continue;
       await db
         .update(feedArchive)
-        .set({ embedding: embeddings[i] })
+        .set({ embedding: embeddings[i]! })
         .where(eq(feedArchive.id, rows[i].id));
+      processed++;
     }
 
-    return { processed: rows.length, skipped: false };
+    return { processed, skipped: false };
   } catch (err) {
     console.error(`backfillFeedArchiveEmbeddings failed: ${err}`);
     return { processed: 0, skipped: true };

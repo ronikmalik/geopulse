@@ -6,64 +6,41 @@ import { recordAiUsage } from "./aiUsage";
 // GOOGLE_TRANSLATE_API_KEY/FIRMS_MAP_KEY: ships now, activates the moment
 // the key is added.
 //
-// Model id is configurable rather than hardcoded on purpose: Google's own
-// docs disagreed with themselves on the exact current model string
-// (gemini-embedding-001 vs gemini-embedding-2 vs gemini-embedding-2-
-// preview) as of 2026-09-08, and this app's own knowledge of Gemini's
-// current lineup is stale relative to today's date. gemini-embedding-001
-// is the one name every source agreed actually exists, so it's the
-// default — but if calls start failing with a 404-model-not-found, the
-// fix is GEMINI_EMBED_MODEL in Vercel env vars, not a redeploy. GET
-// /api/admin/ai-models calls Google's own ListModels endpoint (needs a
-// real key configured) to confirm the authoritative current name rather
-// than guessing again.
-//
-// output_dimensionality is requested explicitly at 768 regardless of
-// which model ends up used — must match the vector(768) column in
-// src/db/schema.ts; if the model or dimension ever changes, existing rows
-// need re-embedding, not just new ones (a stored 768-dim vector isn't
-// comparable to a differently-dimensioned one even if pgvector allowed
-// the cast).
+// Model id is configurable — see GET /api/admin/ai-models, which calls
+// Google's own ListModels endpoint rather than trusting a guess. Verified
+// live 2026-09-08 against a real key: gemini-embedding-001 exists and
+// supports embedContent, but its ONLY batch-shaped method is
+// asyncBatchEmbedContent (a submit-then-poll long-running job) — the
+// synchronous :batchEmbedContents endpoint this file originally called
+// does not exist for this model generation and was silently failing
+// every call. Individual embedContent calls, issued concurrently, are
+// the correct fix — see embedBatch below.
 const EMBED_MODEL = process.env.GEMINI_EMBED_MODEL || "gemini-embedding-001";
-const EMBED_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${EMBED_MODEL}:batchEmbedContents`;
+const EMBED_ENDPOINT_BASE = `https://generativelanguage.googleapis.com/v1beta/models/${EMBED_MODEL}`;
 const REQUEST_TIMEOUT_MS = 15_000;
 const OUTPUT_DIMENSIONALITY = 768;
 
-// Gemini's batchEmbedContents accepts up to 100 requests per call.
-export const MAX_BATCH_SIZE = 100;
+// Individual embedContent calls fired concurrently, not one big batch
+// request (no synchronous batch endpoint exists — see the comment
+// above). Caps concurrency so a large backfill run doesn't fire 100
+// simultaneous requests at once; embeddingBackfill.ts's own per-cycle
+// limit is separately sized to fit its time budget.
+const CONCURRENCY = 8;
 
-interface BatchEmbedResponse {
-  embeddings?: { values?: number[] }[];
+interface EmbedContentResponse {
+  embedding?: { values?: number[] };
 }
 
-// Returns one embedding per input text, in order, or null for the whole
-// batch on any failure (no API key, network error, non-200, malformed
-// response) — callers fall back to "leave embedding null, retry next
-// backfill cycle" rather than trying to salvage a partial result. Texts
-// longer than ~2000 chars should be truncated by the caller before this —
-// title+summary pairs from this app's sources never approach the model's
-// real token limit, so no truncation happens here.
-export async function embedBatch(texts: string[]): Promise<number[][] | null> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || texts.length === 0) return null;
-  if (texts.length > MAX_BATCH_SIZE) {
-    throw new Error(`embedBatch: ${texts.length} texts exceeds MAX_BATCH_SIZE (${MAX_BATCH_SIZE})`);
-  }
-
-  const body = {
-    requests: texts.map((text) => ({
-      model: `models/${EMBED_MODEL}`,
-      content: { parts: [{ text }] },
-      outputDimensionality: OUTPUT_DIMENSIONALITY,
-    })),
-  };
-
+async function embedOne(text: string, apiKey: string): Promise<number[] | null> {
   let res: Response;
   try {
-    res = await fetch(`${EMBED_ENDPOINT}?key=${apiKey}`, {
+    res = await fetch(`${EMBED_ENDPOINT_BASE}:embedContent?key=${apiKey}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        content: { parts: [{ text }] },
+        outputDimensionality: OUTPUT_DIMENSIONALITY,
+      }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
@@ -77,12 +54,33 @@ export async function embedBatch(texts: string[]): Promise<number[][] | null> {
     return null;
   }
 
-  const data = (await res.json()) as BatchEmbedResponse;
-  const embeddings = data.embeddings;
-  if (!embeddings || embeddings.length !== texts.length) return null;
-  if (embeddings.some((e) => !e.values)) return null;
+  const data = (await res.json()) as EmbedContentResponse;
+  return data.embedding?.values ?? null;
+}
 
-  await recordAiUsage("embedding", texts.length);
+// Returns one embedding per input text, in the SAME order, with `null` in
+// place of any individual text that failed — unlike the old all-or-
+// nothing batch call, a single bad item (rate limit, malformed text)
+// shouldn't waste every other embedding in the same cycle. Returns null
+// (not an array) only when nothing could even be attempted (no API key,
+// empty input). Texts longer than ~2000 chars should be truncated by the
+// caller before this — title+summary pairs never approach the model's
+// real token limit, so no truncation happens here.
+export async function embedBatch(texts: string[]): Promise<(number[] | null)[] | null> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || texts.length === 0) return null;
 
-  return embeddings.map((e) => e.values!);
+  const results: (number[] | null)[] = new Array(texts.length).fill(null);
+  for (let start = 0; start < texts.length; start += CONCURRENCY) {
+    const chunk = texts.slice(start, start + CONCURRENCY);
+    const chunkResults = await Promise.all(chunk.map((t) => embedOne(t, apiKey)));
+    chunkResults.forEach((r, i) => {
+      results[start + i] = r;
+    });
+  }
+
+  const succeeded = results.filter((r): r is number[] => r !== null).length;
+  if (succeeded > 0) await recordAiUsage("embedding", succeeded);
+
+  return results;
 }

@@ -11,9 +11,12 @@ import { recordAiUsage } from "./aiUsage";
 // src/lib/ingest.ts), which has zero room for N sequential LLM calls.
 // This route has the standard 55s admin-route budget instead.
 //
-// Same model-name uncertainty as embeddings.ts — see that file's comment
-// and GET /api/admin/ai-models for the fix if this 404s.
-const BRIEF_MODEL = process.env.GEMINI_BRIEF_MODEL || "gemini-2.0-flash";
+// Verified live 2026-09-08 via GET /api/admin/ai-models against a real
+// key — gemini-2.5-flash-lite exists and supports generateContent, and
+// is the cheapest/fastest tier appropriate for a short grounded summary
+// like this. (gemini-2.0-flash, the original guess here, does not exist
+// in the current lineup at all — would have 404'd every call.)
+const BRIEF_MODEL = process.env.GEMINI_BRIEF_MODEL || "gemini-2.5-flash-lite";
 const GENERATE_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${BRIEF_MODEL}:generateContent`;
 const REQUEST_TIMEOUT_MS = 20_000;
 
