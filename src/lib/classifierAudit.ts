@@ -1,4 +1,4 @@
-import { sql, and, eq, inArray, isNotNull, desc } from "drizzle-orm";
+import { sql, and, or, eq, inArray, isNotNull, desc } from "drizzle-orm";
 import { getDb } from "@/db";
 import { classificationArchive, classifierAudit, events } from "@/db/schema";
 import { recordAiUsage } from "./aiUsage";
@@ -855,9 +855,32 @@ async function applyFinding(
 
   if (finding.kind === "false_positive") {
     if (!finding.url) return { applied: false, note: "no url on this finding (predates url tracking) — cannot locate the live row" };
-    const result = await db.delete(events).where(eq(events.url, finding.url)).returning({ id: events.id });
+    const target = await db
+      .select({ id: events.id })
+      .from(events)
+      .where(eq(events.url, finding.url))
+      .limit(1);
+    if (!target[0]) {
+      return { applied: false, note: "not found in events — may have already aged out of the 30-day window" };
+    }
+    // A flagged article can be the primary of a correlation group — other
+    // events.primaryEventId rows point at it, so a plain delete-by-url
+    // trips events_primary_event_id_fkey (seen live 2026-09-08, finding
+    // #660: NeonDbError 23503). Same story, same exclusion verdict, so the
+    // whole cluster goes together rather than orphaning duplicates or
+    // leaving the primary undeletable.
+    const result = await db
+      .delete(events)
+      .where(or(eq(events.id, target[0].id), eq(events.primaryEventId, target[0].id)))
+      .returning({ id: events.id });
     return result.length > 0
-      ? { applied: true, note: "removed from the live feed" }
+      ? {
+          applied: true,
+          note:
+            result.length > 1
+              ? `removed from the live feed (primary + ${result.length - 1} correlated duplicate${result.length - 1 === 1 ? "" : "s"})`
+              : "removed from the live feed",
+        }
       : { applied: false, note: "not found in events — may have already aged out of the 30-day window" };
   }
 
@@ -1020,7 +1043,17 @@ export async function reviewAuditFinding(
   let applied = false;
 
   if (status === "approved") {
-    const result = await applyFinding(finding, overrides);
+    // applyFinding does one live write per finding kind — never let an
+    // unforeseen DB error (e.g. the FK-violation class fixed 2026-09-08)
+    // surface as a raw 500 through the review endpoint; degrade to
+    // "approved but not applied" with the error recorded instead, same as
+    // every other soft-fail path in this file.
+    let result: { applied: boolean; note: string };
+    try {
+      result = await applyFinding(finding, overrides);
+    } catch (err) {
+      result = { applied: false, note: `apply failed: ${err}` };
+    }
     applied = result.applied;
     finalStatus = result.applied ? "applied" : "approved";
     finalNote = note ? `${note} — ${result.note}` : result.note;
