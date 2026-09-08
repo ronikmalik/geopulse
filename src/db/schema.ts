@@ -199,10 +199,19 @@ export const classificationArchive = pgTable(
     archivedAt: timestamp("archived_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    // Set by src/lib/classifierAudit.ts once an item has gone through a
+    // Gemini audit pass, whether or not that pass produced any finding —
+    // classifier_audit only ever holds real findings (see its own doc
+    // comment), so "no row there" can't distinguish "never checked" from
+    // "checked and found correct." Without this column, an item Gemini
+    // correctly declined to flag would get resubmitted for audit every
+    // single day forever.
+    auditedAt: timestamp("audited_at", { withTimezone: true }),
   },
   (table) => [
     index("classification_archive_kept_idx").on(table.kept),
     index("classification_archive_archived_at_idx").on(table.archivedAt),
+    index("classification_archive_audited_at_idx").on(table.auditedAt),
   ],
 );
 
@@ -356,16 +365,19 @@ export type CountryBriefRow = typeof countryBriefs.$inferSelect;
 // a human reviews (see GET /api/admin/classifier-audit and its /review
 // sub-route) before anything in classify.ts changes, same discipline
 // every real vocabulary change already goes through.
-// One row per audited archive item (archiveId is UNIQUE) — a row is
-// only ever created when Gemini actually flags something, not one row
-// per item considered, so this table's size reflects genuine findings,
-// not audit volume.
+// One row per (archive item, finding kind) — a row is only ever created
+// when Gemini actually flags something, not one row per item considered,
+// so this table's size reflects genuine findings, not audit volume. A
+// single article can carry more than one finding at once (e.g. correctly
+// included but with the wrong severity AND the wrong country), hence the
+// unique constraint is on (archiveId, kind) rather than archiveId alone.
 export const classifierAudit = pgTable(
   "classifier_audit",
   {
     id: serial("id").primaryKey(),
-    archiveId: integer("archive_id").notNull().unique(),
-    kind: text("kind").notNull(), // "false_positive" | "false_negative"
+    archiveId: integer("archive_id").notNull(),
+    // "false_positive" | "false_negative" | "severity_mismatch" | "country_mismatch"
+    kind: text("kind").notNull(),
     source: text("source").notNull(),
     // Nullable — added after the first live run; those first rows predate
     // url/publishedAt tracking and can't be auto-applied (see
@@ -381,12 +393,18 @@ export const classifierAudit = pgTable(
     // missing, the actual "fine-tuning fuel" a human turns into a real
     // classify.ts change.
     suggestedFix: text("suggested_fix"),
-    // Only ever set for false_negative findings — the archived severity
-    // is often exactly why the item was excluded in the first place (a
-    // benign-pattern hit falls back to 1), so recovering it with that
-    // same severity would misrepresent it. Gemini's own read of the
-    // article, clamped 1-5, is used instead when applying the finding.
+    // Set for false_negative (recovery severity — the archived severity
+    // is often exactly why the item was excluded, e.g. a benign-pattern
+    // hit falls back to 1) and severity_mismatch findings (Gemini's
+    // independent 1-5 read vs. what's currently live).
     suggestedSeverity: integer("suggested_severity"),
+    // Set for false_negative (recovery country) and country_mismatch
+    // findings — Gemini's independent judgment of which ISO 3166-1
+    // alpha-2 country is actually at risk/affected, vs. the country
+    // resolveCountryFromText's earliest-mention heuristic picked (the
+    // same bug class as the 2026-09-08 Oman fix, just caught by reading
+    // comprehension instead of a regex fix).
+    suggestedCountry: text("suggested_country"),
     status: text("status").notNull().default("pending"), // pending | approved | rejected | applied
     reviewNote: text("review_note"),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
@@ -397,6 +415,7 @@ export const classifierAudit = pgTable(
   (table) => [
     index("classifier_audit_status_idx").on(table.status),
     index("classifier_audit_created_at_idx").on(table.createdAt),
+    unique("classifier_audit_archive_kind_unique").on(table.archiveId, table.kind),
   ],
 );
 

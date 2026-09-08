@@ -120,6 +120,18 @@ const STATEMENTS = [
   sql`ALTER TABLE classifier_audit ADD COLUMN IF NOT EXISTS url TEXT`,
   sql`ALTER TABLE classifier_audit ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ`,
   sql`ALTER TABLE classifier_audit ADD COLUMN IF NOT EXISTS suggested_severity INTEGER`,
+  sql`ALTER TABLE classifier_audit ADD COLUMN IF NOT EXISTS suggested_country TEXT`,
+  // A single article can now carry more than one finding kind (e.g.
+  // correctly included but with the wrong severity AND the wrong
+  // country), so the old one-row-per-article UNIQUE(archive_id) has to
+  // become UNIQUE(archive_id, kind) — drop the original column-level
+  // constraint (Postgres's default auto-generated name for it) and
+  // replace with a composite unique index, which Postgres's ON CONFLICT
+  // matches against just as well as a named constraint.
+  sql`ALTER TABLE classifier_audit DROP CONSTRAINT IF EXISTS classifier_audit_archive_id_key`,
+  sql`CREATE UNIQUE INDEX IF NOT EXISTS classifier_audit_archive_kind_unique ON classifier_audit (archive_id, kind)`,
+  sql`ALTER TABLE classification_archive ADD COLUMN IF NOT EXISTS audited_at TIMESTAMPTZ`,
+  sql`CREATE INDEX IF NOT EXISTS classification_archive_audited_at_idx ON classification_archive (audited_at)`,
 ];
 
 export async function GET(req: NextRequest) {

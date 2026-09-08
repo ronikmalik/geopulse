@@ -642,14 +642,25 @@ export interface RecoveredFields {
 // recognizable location genuinely can't be placed on the globe no matter
 // how confident the approval was; the caller surfaces that as "needs a
 // manual classify.ts fix" rather than silently failing.
-export function deriveFieldsForRecovery(item: {
-  title: string;
-  snippet: string;
-}): RecoveredFields | null {
+//
+// forcedCountry lets the caller substitute Gemini's own country judgment
+// (see classifierAudit.ts's country_mismatch / false_negative
+// suggestedCountry) in place of resolveCountryFromText's earliest-
+// mention regex heuristic — the same "which country is actually at risk,
+// not just mentioned" nuance the 2026-09-08 Oman fix addressed for one
+// specific bug class; Gemini reading the actual article can catch
+// subtler cases (an affected bystander's nationality named before the
+// country where the event happened, e.g.) that no regex rule covers.
+// Category derivation is untouched — the user's request was specifically
+// about severity and country, not category.
+export function deriveFieldsForRecovery(
+  item: { title: string; snippet: string },
+  forcedCountry?: string,
+): RecoveredFields | null {
   const text = `${item.title} ${item.snippet}`;
   const category = categorizeByKeywords(item.title, text);
   const resolvedCountry =
-    resolveCountryFromText(item.title) ?? resolveCountryFromText(item.snippet);
+    forcedCountry ?? resolveCountryFromText(item.title) ?? resolveCountryFromText(item.snippet);
   const country =
     resolvedCountry ?? (category !== "other" ? CATEGORY_FALLBACK_COUNTRY[category] : undefined);
   if (!country) return null;
