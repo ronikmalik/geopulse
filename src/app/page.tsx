@@ -57,6 +57,8 @@ export default function Home() {
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [countryFeed, setCountryFeed] = useState<GeoEvent[]>([]);
   const [countryFeedLoading, setCountryFeedLoading] = useState(false);
+  const [categoryFeed, setCategoryFeed] = useState<GeoEvent[]>([]);
+  const [categoryFeedLoading, setCategoryFeedLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<DashboardTab>("feed");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeDataLayers, setActiveDataLayers] = useState<Set<DataLayerId>>(
@@ -66,6 +68,26 @@ export default function Home() {
   const filtered = useMemo(
     () => events.filter((e) => activeCategories.has(e.category as Category)),
     [events, activeCategories],
+  );
+
+  // "Isolated" = the user narrowed activeCategories down from the full
+  // default set (see CategoryFilter/LayersDashboard) — e.g. unchecking
+  // everything except "humanitarian" to look at just that layer. When
+  // isolated, `filtered` above (a client-side filter over the live SSE
+  // buffer) badly undercounts thin categories: that buffer only ever
+  // holds the ~100 most recently inserted events GLOBALLY across every
+  // category combined, and the 5 flashpoint categories alone routinely
+  // exceed 100 events/week on their own — so a category like
+  // political-instability or humanitarian (genuinely ~12 events/week,
+  // confirmed live 2026-09-08) gets crowded out of that shared window
+  // almost entirely, reading as "nothing here" even though the DB has
+  // real approved events. Same root cause and same fix as the country-feed
+  // effect below: query the DB directly, scoped to the active category
+  // set, instead of trusting the shared buffer to still contain them.
+  const isIsolated = activeCategories.size < CATEGORIES.length;
+  const activeCategoriesKey = useMemo(
+    () => [...activeCategories].sort().join(","),
+    [activeCategories],
   );
 
   // Clicking a country on the globe shows its own breaking-news feed —
@@ -107,9 +129,42 @@ export default function Home() {
     };
   }, [selectedCountry]);
 
+  // Country selection (above) takes priority when both are active — same
+  // existing precedent (clicking a country already shows every category
+  // for it, ignoring activeCategories entirely). No reset-to-empty here
+  // for the same reason the country effect doesn't reset countryFeed:
+  // mapEvents/feedEvents below only ever read categoryFeed while
+  // isIsolated is true, so stale data from a previous isolation is simply
+  // never shown once the user broadens back out.
+  useEffect(() => {
+    if (selectedCountry || !isIsolated) return;
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCategoryFeedLoading(true);
+    fetch(`/api/events?categories=${activeCategoriesKey}`)
+      .then((res) => res.json())
+      .then((data: { events: GeoEvent[] }) => {
+        if (!cancelled) setCategoryFeed(data.events ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setCategoryFeed([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCategoryFeedLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCountry, isIsolated, activeCategoriesKey]);
+
+  // Same DB-backed set feeds both the globe's points and (layered with
+  // country selection) the feed panel — isolating a category should
+  // correct what's plotted on the globe too, not just the side list.
+  const mapEvents = isIsolated ? categoryFeed : filtered;
+
   const feedEvents = useMemo(
-    () => (selectedCountry ? countryFeed : filtered),
-    [countryFeed, filtered, selectedCountry],
+    () => (selectedCountry ? countryFeed : mapEvents),
+    [countryFeed, mapEvents, selectedCountry],
   );
 
   const toggleCategory = (cat: Category) => {
@@ -202,7 +257,9 @@ export default function Home() {
 
   const dashboardProps = {
     events: feedEvents,
-    feedLoading: Boolean(selectedCountry) && countryFeedLoading,
+    feedLoading: selectedCountry
+      ? countryFeedLoading
+      : isIsolated && categoryFeedLoading,
     selectedEventId: selected?.id ?? null,
     onSelectEvent: (event: GeoEvent) => {
       setSelected(event);
@@ -233,7 +290,7 @@ export default function Home() {
     <div className="relative h-dvh w-dvw overflow-hidden bg-black">
       <div className="absolute inset-0">
         <GlobeView
-          events={filtered}
+          events={mapEvents}
           onSelect={(event) => {
             setSelected(event);
             setSelectedCountry(null);

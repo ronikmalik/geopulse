@@ -1,4 +1,4 @@
-import { sql, getTableColumns } from "drizzle-orm";
+import { sql, getTableColumns, and, eq, isNull, inArray, desc } from "drizzle-orm";
 import { getDb } from "@/db";
 import { events, type EventRow } from "@/db/schema";
 import { pillarForCategory, PILLAR_LIST, PILLAR_WEIGHT, COVERED_PILLARS, type PillarId } from "@/lib/pillars";
@@ -324,6 +324,41 @@ export async function getEventsByCountry(
       sql`${events.country} = ${iso2} and ${events.reviewStatus} = 'approved' and ${events.publishedAt} > now() - interval '${sql.raw(String(LOOKBACK_DAYS))} days' and ${events.primaryEventId} is null`,
     )
     .orderBy(sql`${events.publishedAt} desc`)
+    .limit(100);
+}
+
+// Same DB-scoped-instead-of-buffer-filtered fix as getEventsByCountry
+// above, for the category "layers" (political-instability, humanitarian,
+// etc.) — 2026-09-08 user report: isolating one of the thinner layer
+// categories on the client showed almost nothing, even though the
+// classifier was genuinely producing and approving real events for them.
+// Root cause was the same shape as the pre-existing country bug: the live
+// SSE buffer only ever holds the ~100 most recent events GLOBALLY across
+// ALL categories, and the 5 flashpoint categories alone comfortably
+// exceed 100 events/week (israel-palestine hit this function's own
+// 100-row cap on a 7-day query), so a thin category's real ~12 events/week
+// gets crowded out of that shared window entirely. Same fix: query the DB
+// directly, scoped to the active category set, instead of client-
+// filtering the shared buffer.
+export async function getEventsByCategories(
+  categories: string[],
+): Promise<(EventRow & { sourceCount: number })[]> {
+  const db = getDb();
+  return db
+    .select({
+      ...getTableColumns(events),
+      sourceCount: sql<number>`(select count(*) from ${events} e2 where e2.primary_event_id = ${events.id})`,
+    })
+    .from(events)
+    .where(
+      and(
+        inArray(events.category, categories),
+        eq(events.reviewStatus, "approved"),
+        isNull(events.primaryEventId),
+        sql`${events.publishedAt} > now() - interval '${sql.raw(String(LOOKBACK_DAYS))} days'`,
+      ),
+    )
+    .orderBy(desc(events.publishedAt))
     .limit(100);
 }
 
