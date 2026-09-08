@@ -629,6 +629,18 @@ async function applyFinding(
           publishedAt: finding.publishedAt,
         },
       ]);
+      // Without this, a recovered item's classification_archive row stays
+      // kept=false forever — invisible to getUnauditedKeptCandidates
+      // (which only looks at kept=true rows), so a recovered item's own
+      // severity/country would never get audited again even though it's
+      // now genuinely live. Found live 2026-09-08: the very first
+      // approved recovery (Houthi/Saudi oil strikes) had exactly this
+      // gap, on top of being mis-attributed to Yemen instead of Saudi
+      // Arabia by the pre-suggestedCountry version of this code path.
+      await db
+        .update(classificationArchive)
+        .set({ kept: true, category: derived.category })
+        .where(eq(classificationArchive.id, finding.archiveId));
       return {
         applied: true,
         note: `recovered into the live feed as ${derived.category}/${derived.country}, severity ${severity}`,
