@@ -222,7 +222,7 @@ For EVERY item, independently assess three things, regardless of what's currentl
 Items:
 ${list}
 
-Respond with ONLY a JSON array (no other text, no markdown fences), exactly one entry per item above: [{"id": <number>, "validInclusion": <bool>, "severity": <1-5>, "country": "<alpha-2 or null>", "reasoning": "<one sentence, only meaningful if you disagree with something stored — empty string otherwise>"}].`;
+Respond with ONLY a JSON array (no other text, no markdown fences), exactly one entry per item above: [{"id": <number>, "validInclusion": <bool>, "severity": <1-5>, "country": "<alpha-2 or null>", "reasoning": "<REQUIRED and specific whenever validInclusion is false, or your severity/country differs from what's stored for this item — explain exactly why in one sentence. Empty string ONLY if you agree with everything stored for this item.>"}].`;
 }
 
 function buildFalseNegativePrompt(items: DroppedCandidate[]): string {
@@ -371,7 +371,10 @@ async function processKeptCandidates(candidates: KeptCandidate[], apiKey: string
         if (typeof a.id !== "number") continue;
         const item = byId.get(a.id);
         if (!item) continue;
-        const reasoning = typeof a.reasoning === "string" && a.reasoning ? a.reasoning : "Gemini audit disagreement.";
+        const reasoning =
+          typeof a.reasoning === "string" && a.reasoning
+            ? a.reasoning
+            : "Gemini flagged a disagreement but didn't give a reason — verify manually before approving.";
 
         if (a.validInclusion === false) {
           if (await insertFinding("false_positive", item, reasoning, null, null, null)) counts.falsePositives++;
