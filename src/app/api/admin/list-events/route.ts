@@ -45,9 +45,14 @@ export async function GET(req: NextRequest) {
   }
   const source = req.nextUrl.searchParams.get("source");
   const sourcePrefix = req.nextUrl.searchParams.get("sourcePrefix");
-  if (!source && !sourcePrefix) {
+  // Added 2026-09-08 alongside the Oman word-boundary fix — auditing "what's
+  // currently attributed to country X" (e.g. checking how many events a
+  // resolveCountryFromText false-positive misattributed before it was
+  // fixed) needs a country-only query, not just a per-source one.
+  const country = req.nextUrl.searchParams.get("country");
+  if (!source && !sourcePrefix && !country) {
     return NextResponse.json(
-      { error: "missing ?source= or ?sourcePrefix=" },
+      { error: "missing ?source=, ?sourcePrefix=, or ?country=" },
       { status: 400 },
     );
   }
@@ -68,9 +73,10 @@ export async function GET(req: NextRequest) {
   }
 
   const db = getDb();
-  const sourceFilter = source
-    ? eq(events.source, source)
-    : like(events.source, `${sourcePrefix}%`);
+  const filters = [];
+  if (source) filters.push(eq(events.source, source));
+  else if (sourcePrefix) filters.push(like(events.source, `${sourcePrefix}%`));
+  if (country) filters.push(eq(events.country, country.toUpperCase()));
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60_000);
 
   const rows = await db
@@ -84,9 +90,7 @@ export async function GET(req: NextRequest) {
       publishedAt: events.publishedAt,
     })
     .from(events)
-    .where(
-      and(sourceFilter, gt(events.publishedAt, cutoff), gt(events.id, afterId)),
-    )
+    .where(and(...filters, gt(events.publishedAt, cutoff), gt(events.id, afterId)))
     .orderBy(asc(events.id))
     .limit(limit);
 
