@@ -39,9 +39,9 @@ interface LayersDashboardProps {
 
 const LAYER_DESCRIPTIONS: Partial<Record<Category, string>> = {
   "political-instability":
-    "GDELT — coups, contested elections, martial law, government collapse.",
+    "GDELT, RSS & Telegram — coups, contested elections, martial law, government collapse.",
   humanitarian:
-    "GDELT — famine, displacement, refugee flows, disease outbreaks.",
+    "GDELT, RSS & Telegram — famine, displacement, refugee flows, disease outbreaks.",
   earthquake: "USGS — magnitude 4.5+ seismic events, last 30 days.",
   "natural-disaster":
     "NASA EONET + GDACS — cyclones, volcanoes, tsunamis, severe storms.",

@@ -76,10 +76,12 @@ See `docs/ARCHITECTURE.md` for how all of this fits together.
   semantic "similar events" on event detail; broader cross-event correlation still
   open (see Phase 5).
 - **Phase 7** (cross-risk relationships, alerts, historical charts, search,
-  filtering): not started, except `country_state_history`/`aircraft_count_history`
-  snapshot tables now exist with daily snapshot crons (`vercel.ts` →
-  `/api/admin/snapshot`, `/api/admin/snapshot-flights`) — historical charting is
-  unblocked on the data side, just not built into the frontend yet.
+  filtering): historical charting is **done** — `country_state_history` snapshots
+  (daily cron, `vercel.ts` → `/api/admin/snapshot`) are charted live in the frontend's
+  Trends tab (`TrendsPanel.tsx` → `GET /api/history`) with a deterministic trend
+  summary. `aircraft_count_history` (daily, `/api/admin/snapshot-flights`) backs
+  anomaly badges on the Risk tab. Cross-risk relationships, alerting, and search are
+  not started.
 - **AI/ML layer** (not in the brief's original phasing, built alongside Phase 6-7):
   Gemini pre-publish review, post-hoc audit, recursive calibration, embeddings/similar
   events, daily country briefs, Telegram translation — all **done** and live. See
@@ -94,22 +96,20 @@ See `docs/ARCHITECTURE.md` for how all of this fits together.
 2. **Supply Chain & Resource Security pillar coverage.** Currently the only pillar
    with zero signal of any kind. IMF PortWatch is the most promising unverified
    candidate.
-3. **Historical charts frontend**, now that `country_state_history` has data flowing
-   in daily — the backend piece is done, just not surfaced in the UI yet.
-4. **A dedicated always-on worker**, decoupled from any single external scheduler.
+3. **A dedicated always-on worker**, decoupled from any single external scheduler.
    cron-job.org is the real primary ingest trigger and is working reliably; GitHub
    Actions now also fires reliably as a real backup after a 2026-09-04 fix. All
    triggers still ultimately depend on this one Vercel deployment, so standing up a
    dedicated worker service (Railway/Fly.io/Render per the brief) so ingestion isn't
    dependent on Vercel at all remains the top infrastructure item — just a less
    urgent one now that there are multiple independent triggers instead of one.
-5. **Admin health/observability panel UI.** The data exists (`GET /api/admin/health`,
+4. **Admin health/observability panel UI.** The data exists (`GET /api/admin/health`,
    `GET /api/admin/ai-usage`, `GET /api/admin/translation-usage`); none of it is
    rendered anywhere yet.
-6. **Broader source coverage** per `docs/API_SOURCES.md`'s prioritized candidate list
+5. **Broader source coverage** per `docs/API_SOURCES.md`'s prioritized candidate list
    — ACLED/UCDP for conflict depth, Cloudflare Radar/RIPE for infrastructure and
    climate depth, sanctions feeds for Political & Governance.
-7. **X/Twitter ingestion** — a real structural gap, not a rounding error. A
+6. **X/Twitter ingestion** — a real structural gap, not a rounding error. A
    2026-09-04 pass sampling ISW/CTP's own source citations across Russia-Ukraine,
    Iran, China-Taiwan, and Korea found this product has zero X/Twitter coverage,
    and that the gap costs noticeably more on China-Taiwan and Korea specifically

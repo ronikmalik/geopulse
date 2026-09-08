@@ -43,7 +43,6 @@ const MOBILE_TABS: { id: DashboardTab; label: string }[] = [
 
 export default function Home() {
   const { events, status, incoming, dismissIncoming } = useEventStream();
-  const pulsingIds = usePulsingEvents(events);
   const countryScores = useCountryRisk();
   const aircraftAnomalies = useAircraftAnomalies();
   // All eight pillars' event categories are on by default — this is a
@@ -161,6 +160,12 @@ export default function Home() {
   // country selection) the feed panel — isolating a category should
   // correct what's plotted on the globe too, not just the side list.
   const mapEvents = isIsolated ? categoryFeed : filtered;
+  // Computed from mapEvents (what's actually plotted), not the raw stream
+  // buffer — otherwise a category-isolated or country-selected event
+  // fetched straight from the DB (categoryFeed/countryFeed, never part of
+  // the live SSE buffer) would plot on the globe with no ripple, since its
+  // id would never appear in a pulsingIds set derived from `events` alone.
+  const pulsingIds = usePulsingEvents(mapEvents);
 
   const feedEvents = useMemo(
     () => (selectedCountry ? countryFeed : mapEvents),

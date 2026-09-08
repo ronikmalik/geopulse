@@ -241,25 +241,26 @@ In the order they'd actually get built:
    `docs/ROADMAP.md`).
 6. **Admin health/observability panel UI** — the data exists
    (`GET /api/admin/health`, `GET /api/admin/ai-usage`,
-   `GET /api/admin/translation-usage`), but nothing renders it as a page yet.
+   `GET /api/admin/translation-usage`), but nothing renders it as a page yet. (Note:
+   `country_state_history`'s own data IS already charted — see the Trends tab,
+   §9 below — this gap is specifically the ops/source-health side.)
 7. **PostGIS** — not adopted. Current geometry is plain `lat`/`lon` doubles with no
    spatial queries anywhere in the codebase. Revisit once (1) needs real geographic
    proximity queries (`ST_DWithin` etc.) rather than naive lat/lon math.
-8. **Historical charts in the frontend** — `country_state_history` (§9 below) has real
-   daily data flowing in via a scheduled snapshot; nothing in the UI charts it yet.
-9. **Momentum baselined against a country's own history** — see §5.
+8. **Momentum baselined against a country's own history** — see §5.
 
 ## 9. Country/aircraft history snapshots
 
 Two daily snapshot jobs (see `vercel.ts`), unblocking future trend/baseline work:
 
 - `country_state_history` (`src/lib/history.ts`, `GET /api/admin/snapshot`) — every
-  country's Pulse Level/Momentum, once/day.
+  country's Pulse Level/Momentum, once/day. Charted live in the frontend's Trends tab
+  (`src/components/TrendsPanel.tsx` → `GET /api/history`) with a deterministic,
+  computed-from-the-numbers trend summary (`summarizeHistory` — not an LLM answer).
 - `aircraft_count_history` (`src/lib/flightBaseline.ts`,
   `GET /api/admin/snapshot-flights`) — per-country tracked military aircraft counts,
-  building a baseline for future surge detection.
-
-Neither is surfaced as a chart in the frontend yet (see Gap analysis §8).
+  building a baseline for future surge/anomaly detection (surfaced as anomaly badges
+  in the Risk tab, not its own chart).
 
 ## 10. Backend architecture — what's built, and why it deviates from the brief
 
