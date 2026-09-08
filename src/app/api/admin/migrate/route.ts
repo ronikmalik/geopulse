@@ -80,6 +80,18 @@ const STATEMENTS = [
   sql`CREATE INDEX IF NOT EXISTS feed_archive_published_at_idx ON feed_archive (published_at)`,
   sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS primary_event_id INTEGER REFERENCES events(id)`,
   sql`CREATE INDEX IF NOT EXISTS events_primary_event_id_idx ON events (primary_event_id)`,
+  // Added nullable first (no default yet) so existing rows come in NULL,
+  // not "pending" — a NOT NULL DEFAULT 'pending' in one step would have
+  // retroactively hidden the entire existing live feed the moment this
+  // column landed. The UPDATE is naturally idempotent (only ever touches
+  // NULL rows — after the first run there are none, since the app always
+  // sets this column explicitly on every insert going forward), so this
+  // whole sequence is safe to leave in the repeatable migration list.
+  sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS review_status TEXT`,
+  sql`UPDATE events SET review_status = 'approved' WHERE review_status IS NULL`,
+  sql`ALTER TABLE events ALTER COLUMN review_status SET NOT NULL`,
+  sql`ALTER TABLE events ALTER COLUMN review_status SET DEFAULT 'pending'`,
+  sql`CREATE INDEX IF NOT EXISTS events_review_status_idx ON events (review_status)`,
   sql`CREATE EXTENSION IF NOT EXISTS vector`,
   sql`ALTER TABLE feed_archive ADD COLUMN IF NOT EXISTS embedding vector(768)`,
   sql`CREATE INDEX IF NOT EXISTS feed_archive_embedding_idx ON feed_archive USING hnsw (embedding vector_cosine_ops)`,

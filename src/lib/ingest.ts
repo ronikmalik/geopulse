@@ -27,7 +27,7 @@ import { archiveClassifications } from "./classificationArchive";
 import { archiveFeedItems } from "./feedArchive";
 import { fetchRecentPrimaries, findDuplicateOf, type PrimaryCandidate } from "./eventDedup";
 import { backfillFeedArchiveEmbeddings } from "./embeddingBackfill";
-import { runClassifierAuditSlice } from "./classifierAudit";
+import { runClassifierAuditSlice, reviewPendingEvents } from "./classifierAudit";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -110,6 +110,11 @@ export async function insertDirectItems(
         correlationGroupId: country
           ? correlationGroupId(country, item.category, item.publishedAt)
           : null,
+        // No pre-publish review gate for this insert path — used by
+        // backfill.ts for structural sources (USGS/EONET), same "no
+        // real editorial judgment call" reasoning as the direct-source
+        // block in runIngest below.
+        reviewStatus: "approved" as const,
       };
     });
     const result = await db
@@ -424,6 +429,13 @@ export async function runIngest(): Promise<IngestResult> {
           severity: c.severity,
           publishedAt: item.publishedAt,
           correlationGroupId: correlationGroupId(country, c.category, item.publishedAt),
+          // Gates the live feed pre-publish (2026-09-08 user request) —
+          // invisible to every public read path until
+          // reviewPendingEvents (classifierAudit.ts) promotes it,
+          // usually within this or the next ingest cycle. Applies to
+          // every classified source (RSS/GDELT/Telegram) — the direct-
+          // source block below skips this entirely.
+          reviewStatus: "pending" as const,
         };
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
@@ -561,6 +573,11 @@ export async function runIngest(): Promise<IngestResult> {
           correlationGroupId: country
             ? correlationGroupId(country, item.category, item.publishedAt)
             : null,
+          // No pre-publish review gate for direct/structural sources
+          // (USGS/EONET/GDACS/IODA/FIRMS) — there's no editorial
+          // judgment call in "a magnitude-6 earthquake happened here"
+          // the way there is for classified RSS/GDELT/Telegram content.
+          reviewStatus: "approved" as const,
         };
       });
       const result = await db
@@ -594,30 +611,27 @@ export async function runIngest(): Promise<IngestResult> {
     }
   }
 
-  // Best-effort, non-blocking enrichment pass — see the doc comment on
-  // backfillFeedArchiveEmbeddings for why this runs decoupled from the
-  // insert paths above rather than inline per-item. A hung/slow Gemini
-  // call can't be allowed to blow this route's overall time budget (see
-  // the GDELT/cron-job.org 30s-timeout comment above), so it's raced
-  // against its own short deadline the same way withDeadline already
-  // guards the GDELT fetch.
-  try {
-    await withDeadline(backfillFeedArchiveEmbeddings(), 8_000, "embeddingBackfill");
-  } catch (err) {
-    errors.push(`embeddingBackfill: ${err}`);
-  }
-
-  // Same best-effort, deadline-raced, decoupled-from-the-insert-path
-  // posture as the embedding backfill above, for the same reason — see
-  // classifierAudit.ts's runClassifierAuditSlice doc comment for why this
-  // (not the daily cron) is what makes the classifier audit run "as
-  // frequently as possible" (2026-09-08 user request) without needing a
-  // more-than-daily Vercel cron.
-  try {
-    await withDeadline(runClassifierAuditSlice(), 8_000, "classifierAuditSlice");
-  } catch (err) {
-    errors.push(`classifierAuditSlice: ${err}`);
-  }
+  // Best-effort, non-blocking enrichment/review passes — see the doc
+  // comment on backfillFeedArchiveEmbeddings for why these run decoupled
+  // from the insert paths above rather than inline per-item. Each is
+  // raced against its own short deadline the same way withDeadline
+  // already guards the GDELT fetch, but the three now run CONCURRENTLY
+  // (not sequentially) — three sequential 8s deadlines could add up to
+  // 24s stacked onto this route's already-tight 30s hard external-
+  // trigger budget (cron-job.org), where running them together caps the
+  // worst-case added time at ~8s regardless of how many there are.
+  // reviewPendingEvents is the pre-publish gate itself (2026-09-08 user
+  // request: Gemini's judgment applies before an item is visible on the
+  // live feed, not just as a post-hoc audit) — see its own doc comment
+  // in classifierAudit.ts.
+  const [embedResult, pendingReviewResult, auditSliceResult] = await Promise.allSettled([
+    withDeadline(backfillFeedArchiveEmbeddings(), 8_000, "embeddingBackfill"),
+    withDeadline(reviewPendingEvents(), 8_000, "pendingEventReview"),
+    withDeadline(runClassifierAuditSlice(), 8_000, "classifierAuditSlice"),
+  ]);
+  if (embedResult.status === "rejected") errors.push(`embeddingBackfill: ${embedResult.reason}`);
+  if (pendingReviewResult.status === "rejected") errors.push(`pendingEventReview: ${pendingReviewResult.reason}`);
+  if (auditSliceResult.status === "rejected") errors.push(`classifierAuditSlice: ${auditSliceResult.reason}`);
 
   return {
     fetched: all.length + direct.length,

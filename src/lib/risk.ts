@@ -58,7 +58,7 @@ async function getCountryCategoryRows(country?: string): Promise<CountryCategory
     })
     .from(events)
     .where(
-      sql`${events.country} is not null and ${events.publishedAt} > now() - interval '${sql.raw(String(LOOKBACK_DAYS))} days' ${countryFilter}`,
+      sql`${events.country} is not null and ${events.reviewStatus} = 'approved' and ${events.publishedAt} > now() - interval '${sql.raw(String(LOOKBACK_DAYS))} days' ${countryFilter}`,
     )
     .groupBy(events.country, events.category);
 
@@ -321,7 +321,7 @@ export async function getEventsByCountry(
     })
     .from(events)
     .where(
-      sql`${events.country} = ${iso2} and ${events.publishedAt} > now() - interval '${sql.raw(String(LOOKBACK_DAYS))} days' and ${events.primaryEventId} is null`,
+      sql`${events.country} = ${iso2} and ${events.reviewStatus} = 'approved' and ${events.publishedAt} > now() - interval '${sql.raw(String(LOOKBACK_DAYS))} days' and ${events.primaryEventId} is null`,
     )
     .orderBy(sql`${events.publishedAt} desc`)
     .limit(100);
@@ -361,7 +361,7 @@ export async function getCountryRiskEvents(
     })
     .from(events)
     .where(
-      sql`${events.country} = ${country.toUpperCase()} and ${events.publishedAt} > now() - interval '${sql.raw(String(LOOKBACK_DAYS))} days' and ${events.primaryEventId} is null`,
+      sql`${events.country} = ${country.toUpperCase()} and ${events.reviewStatus} = 'approved' and ${events.publishedAt} > now() - interval '${sql.raw(String(LOOKBACK_DAYS))} days' and ${events.primaryEventId} is null`,
     )
     .orderBy(sql`${events.publishedAt} desc`)
     .limit(50);

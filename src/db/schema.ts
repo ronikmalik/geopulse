@@ -66,6 +66,26 @@ export const events = pgTable(
     // self-references need an AnyPgColumn callback that adds more
     // complexity than the raw statement here is worth).
     primaryEventId: integer("primary_event_id"),
+    // "pending" | "approved" | "rejected" — 2026-09-08 user request: the
+    // Gemini review that used to happen only as a post-hoc audit
+    // (classifier_audit) now gates the live feed itself. Rows from the
+    // classified sources (RSS/GDELT/Telegram — wherever classifyByKeywords/
+    // classifyGdeltItem run) are inserted "pending" and stay invisible to
+    // every public read path (see the reviewStatus filter in
+    // /api/stream, risk.ts, similarEvents.ts) until
+    // reviewPendingEvents (classifierAudit.ts) promotes or rejects them,
+    // almost always within the same or next ~15min ingest cycle. Direct
+    // structural sources (USGS/EONET/GDACS/IODA/FIRMS) skip the gate
+    // entirely — inserted "approved" — since there's no comparable
+    // editorial judgment call in "a magnitude-6 earthquake happened at
+    // these coordinates." A stale pending row past
+    // PENDING_REVIEW_MAX_AGE_MS auto-promotes on the classifier's own
+    // original verdict rather than staying invisible forever if Gemini
+    // is ever unavailable — see reviewPendingEvents's own doc comment.
+    // Existing rows were grandfathered to "approved" the moment this
+    // column was added (see the migrate route) — this was never meant
+    // to retroactively hide anything already live.
+    reviewStatus: text("review_status").notNull().default("pending"),
   },
   (table) => [
     index("events_created_at_idx").on(table.createdAt),
@@ -73,6 +93,7 @@ export const events = pgTable(
     index("events_country_idx").on(table.country),
     index("events_correlation_group_idx").on(table.correlationGroupId),
     index("events_primary_event_id_idx").on(table.primaryEventId),
+    index("events_review_status_idx").on(table.reviewStatus),
   ],
 );
 

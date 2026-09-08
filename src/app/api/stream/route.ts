@@ -1,7 +1,7 @@
 import { NextRequest, after } from "next/server";
 import { getDb } from "@/db";
 import { events } from "@/db/schema";
-import { desc, gt, isNull, and, sql, getTableColumns } from "drizzle-orm";
+import { desc, gt, isNull, and, eq, sql, getTableColumns } from "drizzle-orm";
 import { withCache } from "@/lib/layerCache";
 
 // Cross-outlet duplicates (see src/lib/eventDedup.ts) are hidden from the
@@ -10,7 +10,15 @@ import { withCache } from "@/lib/layerCache";
 // affordance without a round-trip per card; the actual duplicate rows are
 // fetched on demand via GET /api/events/duplicates when a card with
 // sourceCount > 0 is expanded.
+//
+// APPROVED_ONLY (2026-09-08 user request): the live feed only ever shows
+// events that have cleared Gemini's pre-publish review (or were direct/
+// structural, which skip the gate entirely — see reviewStatus's doc
+// comment in schema.ts) — a freshly-classified RSS/GDELT/Telegram item
+// sits invisible here as "pending" until reviewPendingEvents promotes it,
+// usually within this or the next ~15min ingest cycle.
 const PRIMARY_ONLY = isNull(events.primaryEventId);
+const APPROVED_ONLY = eq(events.reviewStatus, "approved");
 const withSourceCount = {
   ...getTableColumns(events),
   sourceCount: sql<number>`(select count(*) from ${events} e2 where e2.primary_event_id = ${events.id})`.as(
@@ -113,7 +121,7 @@ export async function GET(req: NextRequest) {
         const recent = await db
           .select(withSourceCount)
           .from(events)
-          .where(PRIMARY_ONLY)
+          .where(and(PRIMARY_ONLY, APPROVED_ONLY))
           .orderBy(desc(events.id))
           .limit(INITIAL_BACKFILL_LIMIT);
         const ordered = recent.reverse();
@@ -123,19 +131,48 @@ export async function GET(req: NextRequest) {
         }
       }
 
+      // Ids already sent this connection — see the loop below for why this
+      // is needed alongside lastId rather than lastId alone.
+      const sentIds = new Set<number>();
+
       while (!closed && Date.now() - startedAt < MAX_STREAM_MS) {
         try {
-          const fresh = await db
+          // Deliberately NOT filtered to approved-only in the query itself
+          // — a naive `gt(id, lastId) AND approved` filter has a real gap:
+          // if row 105 is still pending when row 106 (already approved)
+          // gets fetched and sent, lastId advances to 106, and a later
+          // gt(id, 106) query can never see row 105 again even once it's
+          // promoted — permanently skipping it for this connection. So
+          // lastId only advances through a CONTIGUOUS prefix of resolved
+          // (approved-and-sent, or rejected) rows; a still-pending row
+          // halts the advance and gets re-checked every poll until it
+          // resolves. That means rows past the halt point get re-fetched
+          // on later polls too — sentIds (bounded to this connection's
+          // lifetime, which self-rotates every MAX_STREAM_MS) is what
+          // stops those from being sent to the client twice.
+          const candidates = await db
             .select(withSourceCount)
             .from(events)
             .where(and(gt(events.id, lastId), PRIMARY_ONLY))
             .orderBy(events.id)
             .limit(50);
 
-          for (const row of fresh) {
-            send("event", row);
-            lastId = row.id;
+          let advanceTo = lastId;
+          let sawUnresolvedPending = false;
+          for (const row of candidates) {
+            if (row.reviewStatus === "pending") {
+              sawUnresolvedPending = true;
+              continue;
+            }
+            if (row.reviewStatus === "approved" && !sentIds.has(row.id)) {
+              send("event", row);
+              sentIds.add(row.id);
+            }
+            // "rejected" rows are silently skipped — never sent, but safe
+            // to advance the cursor past since that's a terminal state.
+            if (!sawUnresolvedPending) advanceTo = row.id;
           }
+          lastId = advanceTo;
 
           send("ping", { lastId, t: Date.now() });
         } catch (err) {

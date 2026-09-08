@@ -1,4 +1,4 @@
-import { sql, and, eq, inArray, desc } from "drizzle-orm";
+import { sql, and, eq, inArray, isNotNull, desc } from "drizzle-orm";
 import { getDb } from "@/db";
 import { classificationArchive, classifierAudit, events } from "@/db/schema";
 import { recordAiUsage } from "./aiUsage";
@@ -552,6 +552,185 @@ export async function runClassifierAudit(): Promise<ClassifierAuditResult> {
 // cadence rather than needing a more-than-daily Vercel cron.
 export async function runClassifierAuditSlice(): Promise<ClassifierAuditResult> {
   return runAudit(Date.now() + SLICE_DEADLINE_MS);
+}
+
+// The pre-publish gate itself (2026-09-08 user request) — reuses the
+// exact same prompt/assessment machinery as the kept-item post-hoc audit
+// above (buildKeptAuditPrompt asks for validInclusion/severity/country
+// regardless of whether the thing being judged is already live or still
+// pending; this is that same question asked one step earlier). Unlike
+// the post-hoc flow, there's no classifier_audit finding + separate
+// approve step here — Gemini's verdict takes effect immediately, because
+// "before it hits the feed" has no room for a synchronous human/Claude
+// checkpoint without reintroducing the exact publish latency this exists
+// to avoid. Claude's oversight moves from pre-approval to periodic
+// supervision instead: reviewing samples of what already got
+// auto-approved/rejected on the recurring cadence, same tools (GET
+// /api/admin/classifier-audit's kept-item queries already cover
+// approved rows; a wrongly-rejected row can be re-added the same way a
+// false_negative recovery already works) — see [[geopulse_gemini_audit_review_stance]].
+interface PendingEventCandidate {
+  id: number;
+  source: string;
+  url: string;
+  publishedAt: Date;
+  title: string;
+  snippet: string;
+  severity: number;
+  country: string;
+  category: string;
+}
+
+// Own slice budget, separate from and concurrent with (see ingest.ts)
+// the backlog-audit slice — publish latency is more time-sensitive than
+// backlog cleanup, but both share the same order-of-magnitude budget as
+// embeddingBackfill for the same reason (ingest's overall 30s hard
+// external-trigger limit).
+const PENDING_REVIEW_DEADLINE_MS = 8_000;
+
+// Safety net: if Gemini review hasn't reached a pending item within this
+// window — API down, rate-limited, no GEMINI_API_KEY configured at all —
+// auto-promote it on the classifier's own original verdict rather than
+// leaving real news invisible indefinitely. "Maximize the content we get
+// on the feed" (2026-09-05 user priority, re: translation budget, same
+// principle applies here) outweighs holding the whole feed hostage to
+// one enrichment layer's availability.
+const PENDING_REVIEW_MAX_AGE_MINUTES = 30;
+
+async function getPendingEventCandidates(limit: number): Promise<PendingEventCandidate[]> {
+  const db = getDb();
+  const rows = await db
+    .select({
+      id: events.id,
+      source: events.source,
+      url: events.url,
+      publishedAt: events.publishedAt,
+      title: events.title,
+      snippet: events.summary,
+      severity: events.severity,
+      country: events.country,
+      category: events.category,
+    })
+    .from(events)
+    .where(and(eq(events.reviewStatus, "pending"), isNotNull(events.country)))
+    .orderBy(events.id) // oldest first — fairness, same as drainPendingTelegramTranslations
+    .limit(limit);
+
+  return rows.filter((r): r is PendingEventCandidate => r.country !== null);
+}
+
+async function applyPendingAssessment(
+  item: PendingEventCandidate,
+  a: RawKeptAssessment,
+): Promise<"approved" | "rejected"> {
+  const db = getDb();
+
+  if (a.validInclusion === false) {
+    await db.update(events).set({ reviewStatus: "rejected" }).where(eq(events.id, item.id));
+    return "rejected";
+  }
+
+  const severity = clampSeverity(a.severity) ?? item.severity;
+  const assessedCountry = validateCountry(a.country);
+
+  if (assessedCountry && assessedCountry !== item.country) {
+    const centroid = COUNTRY_CENTROIDS[assessedCountry];
+    if (centroid) {
+      await db
+        .update(events)
+        .set({
+          reviewStatus: "approved",
+          severity,
+          country: assessedCountry,
+          location: centroid.name,
+          lat: centroid.lat,
+          lon: centroid.lon,
+          // Trusted cast — see the identical one in applyFinding's
+          // country_mismatch branch above.
+          correlationGroupId: correlationGroupId(assessedCountry, item.category as Category, item.publishedAt),
+        })
+        .where(eq(events.id, item.id));
+      return "approved";
+    }
+  }
+
+  await db.update(events).set({ reviewStatus: "approved", severity }).where(eq(events.id, item.id));
+  return "approved";
+}
+
+export interface PendingReviewResult {
+  approved: number;
+  rejected: number;
+  autoPromoted: number;
+  skipped: boolean;
+}
+
+// Called from every runIngest cycle (see ingest.ts) — this is what makes
+// "before it hits the feed" actually true in near-real-time rather than
+// waiting for the once-daily full sweep.
+export async function reviewPendingEvents(): Promise<PendingReviewResult> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const deadlineAt = Date.now() + PENDING_REVIEW_DEADLINE_MS;
+  let approved = 0;
+  let rejected = 0;
+
+  if (apiKey) {
+    try {
+      let exhausted = false;
+      while (Date.now() < deadlineAt && !exhausted) {
+        const candidates = await getPendingEventCandidates(FETCH_LIMIT);
+        if (candidates.length < FETCH_LIMIT) exhausted = true;
+        if (candidates.length === 0) break;
+
+        const batches = chunk(candidates, BATCH_SIZE);
+        for (let i = 0; i < batches.length; i += CONCURRENCY) {
+          if (Date.now() > deadlineAt) break;
+          const round = batches.slice(i, i + CONCURRENCY);
+          const results = await Promise.all(
+            round.map((batch) => callGeminiJson<RawKeptAssessment>(buildKeptAuditPrompt(batch), apiKey)),
+          );
+
+          for (let j = 0; j < round.length; j++) {
+            const assessments = results[j];
+            if (!assessments) continue; // left pending — retried next cycle, or auto-promoted if it goes stale
+            const byId = new Map(round[j].map((c) => [c.id, c]));
+
+            for (const a of assessments) {
+              if (typeof a.id !== "number") continue;
+              const item = byId.get(a.id);
+              if (!item) continue;
+              const outcome = await applyPendingAssessment(item, a);
+              if (outcome === "approved") approved++;
+              else rejected++;
+            }
+          }
+        }
+        await recordAiUsage("audit", batches.length);
+      }
+    } catch (err) {
+      console.error(`reviewPendingEvents failed: ${err}`);
+    }
+  }
+
+  // Runs regardless of whether GEMINI_API_KEY is even set — a fresh
+  // deploy with no key yet should still publish (just without the
+  // pre-publish check), not silently accumulate an invisible backlog.
+  let autoPromoted = 0;
+  try {
+    const db = getDb();
+    const result = await db
+      .update(events)
+      .set({ reviewStatus: "approved" })
+      .where(
+        sql`${events.reviewStatus} = 'pending' and ${events.createdAt} < now() - interval '${sql.raw(String(PENDING_REVIEW_MAX_AGE_MINUTES))} minutes'`,
+      )
+      .returning({ id: events.id });
+    autoPromoted = result.length;
+  } catch (err) {
+    console.error(`pending-review auto-promote failed: ${err}`);
+  }
+
+  return { approved, rejected, autoPromoted, skipped: !apiKey };
 }
 
 export interface AuditFinding {
