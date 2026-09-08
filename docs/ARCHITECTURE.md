@@ -8,38 +8,52 @@ was copied from any other product; everything described here was designed and
 implemented directly against the brief's own requirements.
 
 This is a living document. Where something in the brief isn't built yet, that's stated
-plainly rather than glossed over — see the **Gap analysis** at the end.
+plainly rather than glossed over — see the **Gap analysis** at the end. Last brought
+back in sync with the actual codebase 2026-09-08 — significant drift had accumulated
+(the AI/ML layer, Telegram sourcing, and the correlation/history systems below didn't
+exist yet the last time this was fully updated).
 
 ## 1. Product model
 
 Every country carries two independent measures, never collapsed into one number:
 
-- **Threat Level** (1–5, categorical) — how serious is the current threat environment.
-- **Momentum** (0–100 + direction) — how fast is it changing.
+- **Pulse Level** (1–4: Low/Medium/High/Extreme, categorical) — how much is actively
+  happening right now.
+- **Momentum** (0–100 + direction) — how fast that's changing.
+
+(Internally these are still named `ThreatLevel`/`threatLabel` throughout the codebase —
+a user-facing relabeling only, not a different model. See `src/lib/threat.ts`'s own
+header comment.)
 
 Both exist at two levels: **per pillar** (one of eight) and **overall** (rolled up from
 pillars via escalation, not averaging). Implemented in `src/lib/threat.ts` and
-`src/lib/risk.ts`; the full worked derivation, with live numbers, is published at
-the "Country Risk Methodology" artifact from this session — regenerate it any time
-by asking for a walkthrough with current data.
+`src/lib/risk.ts`.
 
 ### 1.1 Computation pipeline
 
 ```
-raw event (GDELT/RSS/USGS/EONET/GDACS/IODA)
+raw event (GDELT/RSS/Telegram/USGS/EONET/GDACS/IODA/FIRMS)
+  → translate if non-English (Telegram only)          src/lib/translate.ts
   → classify (category + severity + country)          src/lib/classify.ts
-  → store                                              events table
+  → cross-outlet duplicate detection                   src/lib/eventDedup.ts
+  → store as "pending"                                 events table
+  → Gemini pre-publish review (approve/reject)         src/lib/classifierAudit.ts
   → decay-weight by age (3-day half-life)              src/lib/risk.ts
   → sum into 8 pillars, per country                    src/lib/risk.ts
-  → weight → pillar Threat Level (threshold table)     src/lib/threat.ts
+  → weight → pillar Pulse Level (threshold table)       src/lib/threat.ts
   → recent-vs-prior window → pillar Momentum           src/lib/threat.ts
-  → escalate pillars → country Threat Level             src/lib/threat.ts
+  → escalate pillars → country Pulse Level              src/lib/threat.ts
   → driver pillar's momentum → country Momentum         src/lib/risk.ts
 ```
 
-Threat Level thresholds and the escalation rule (max of pillars, +1 when 2+ pillars are
-independently Elevated+, capped at 5) are implemented exactly as specified in the brief.
-Nothing here is a "Country Risk Score = 83/100" — a pillar with no wired source shows
+Direct/structural sources (USGS, EONET, GDACS, IODA, FIRMS) skip translation,
+classification, and the pre-publish review gate entirely — there's no editorial
+judgment call in "a magnitude-6 earthquake happened at these coordinates," so they're
+inserted straight to `reviewStatus: "approved"`.
+
+Pulse Level thresholds and the escalation rule (max of pillars, +1 when 2+ pillars are
+independently High(3)+, capped at 4) are implemented in `src/lib/threat.ts`. Nothing
+here is a "Country Risk Score = 83/100" — a pillar with no wired source shows
 **not tracked**, not a fabricated Low.
 
 ## 2. Eight pillars
@@ -53,11 +67,11 @@ category to exactly one pillar.
 
 | Pillar | Status | Live sources today |
 |---|---|---|
-| Geopolitical & Security | **Covered** | GDELT (5 flashpoint queries), RSS wire keyword classification |
-| Political & Governance | **Covered** | GDELT (coup/election/emergency-rule query), RSS |
+| Geopolitical & Security | **Covered** | GDELT (5 flashpoint queries), 35 RSS wires, ~18 Telegram channels |
+| Political & Governance | **Covered** | GDELT (coup/election/emergency-rule query), RSS/Telegram keyword classification |
 | Climate & Environment | **Covered** | GDACS + NASA EONET (flood/wildfire/drought split out from hazards) |
-| Natural & Biological Hazards | **Covered** | USGS (earthquakes), GDACS + EONET (cyclone/volcano/tsunami/severe storm) |
-| Human & Social | **Covered** | GDELT (famine/displacement/humanitarian-crisis query) |
+| Natural & Biological Hazards | **Covered** | USGS (earthquakes), GDACS + EONET (cyclone/volcano/tsunami/severe storm), NASA FIRMS (thermal anomalies, optional key) |
+| Human & Social | **Covered** | GDELT (famine/displacement/humanitarian-crisis query), RSS/Telegram |
 | Infrastructure & Connectivity | **Covered** | IODA (country-level internet outage detection) |
 | Supply Chain & Resource Security | **Not tracked** | none wired — see Gap analysis |
 | Cyber & Technology | **Partial** | CISA KEV as a global (non-country-attributed) ticker only |
@@ -71,103 +85,183 @@ Current schema (`src/db/schema.ts`, one `events` table):
 
 ```
 id, source, url (unique), title, summary, category, location, country (iso2, nullable),
-lat, lon, severity (1–5), published_at, created_at
+lat, lon, severity (1–5), published_at, created_at,
+correlation_group_id, primary_event_id, review_status
 ```
 
-This is deliberately smaller than the brief's full normalized event model
-(`event_subtype`, `admin1/admin2`, `confidence`, `fatalities`, `population_exposed`,
-`correlation_group_id`, `raw_payload_hash`, `source_count`, `independent_source_count`,
-`geometry`, `duplicate_group_id`, etc.). Every field that's missing is missing because
-nothing downstream consumes it yet — adding columns with no reader is exactly the kind
-of premature schema-first design the brief itself warns against in section 22. The
-**Gap analysis** below sequences when each group of fields earns its place (tied to the
-feature that would actually read it — correlation engine, exposure model, etc.).
+`correlation_group_id` (`src/lib/correlation.ts`) is a coarse deterministic
+`country:pillar:UTC-day` bucketing key, used to compute a source-diversity confidence
+tier ("single-source"/"corroborated"/"cross-confirmed") on the Risk tab.
 
-`raw_payload_hash`/`raw_payload_location` (reproducibility) is the one field from that
-list worth adding early regardless of what consumes it, since it's cheap now and
-expensive to backfill later — flagged as a fast-follow in the roadmap.
+`primary_event_id` (`src/lib/eventDedup.ts`) is finer-grained: real title/summary
+Jaccard-similarity comparison against recent same-country/same-category events. A
+non-null value means "this is a same-story report of the primary event with this id" —
+hidden from the main feed, surfaced only as an additional source when its primary is
+expanded.
+
+`review_status` (`"pending" | "approved" | "rejected"`) gates the pre-publish Gemini
+review (see §6). A stale pending row auto-promotes after 30 minutes rather than
+staying invisible forever if the review step is unavailable.
+
+This is still deliberately smaller than the brief's full normalized event model
+(`event_subtype`, `admin1/admin2`, `confidence`, `fatalities`, `population_exposed`,
+`raw_payload_hash`, `geometry`, etc.) — every field that's missing is missing because
+nothing downstream consumes it yet, per the brief's own warning (§22) against
+premature schema-first design. See the **Gap analysis** for what would earn each
+group of fields its place.
 
 ## 4. Source registry & licensing
 
 `src/lib/sourceRegistry.ts` is a typed, in-code provider table (not yet a DB table —
-see Gap analysis) covering every source currently wired: GDELT, RSS wires, USGS, NASA
-EONET, GDACS, IODA, CISA KEV, Frankfurter/ECB, the community currency CDN, World Bank,
-CFTC, OpenSky, adsb.lol, Open-Meteo, Finnhub. Each row records provider, license, `commercial_use`,
-`redistribution_allowed`, `attribution_required`, `caching_allowed`, rate limit,
-`api_key_required`, and `terms_last_checked` — the exact field set the brief specifies,
-implemented as TypeScript types rather than a DB schema for now (no UI currently reads
-it back; see Gap analysis for when it should move to Postgres).
+see Gap analysis) covering every source currently wired: GDELT, 35 RSS wires, Telegram
+(~18 channels, a knowing exception to this registry's normal licensing bar — see
+`docs/TELEGRAM_SOURCES.md` for the full reasoning), USGS, NASA EONET, GDACS, IODA,
+NASA FIRMS, CISA KEV, Frankfurter/ECB, the community currency CDN, World Bank, CFTC,
+OpenSky, adsb.lol, Open-Meteo, Finnhub. Each row records provider, license,
+`commercial_use`, `redistribution_allowed`, `attribution_required`, `caching_allowed`,
+rate limit, `api_key_required`, and `terms_last_checked` — implemented as TypeScript
+types rather than a DB schema for now (no UI currently reads it back; see Gap analysis
+for when it should move to Postgres). Every RSS/Telegram outlet is additionally checked
+against independent media-bias/reliability trackers before being wired in — see
+`docs/SOURCE_CREDIBILITY.md` for the full per-outlet writeup.
 
 **Sources evaluated and explicitly rejected**, with reasons on record (see
-`src/lib/sources/README.md`):
+`src/lib/sources/README.md` and `docs/SOURCE_CREDIBILITY.md`):
 
 - **ReliefWeb** — v1 decommissioned, v2 requires a registered `appname` (an API key in
-  practice). Not integrated; Human & Social coverage comes from GDELT instead.
+  practice). Not integrated; Human & Social coverage comes from GDELT/RSS/Telegram
+  keyword classification instead.
 - **World Bank Worldwide Governance Indicators** — the brief's suggested indicator
   codes (`CC.EST`, `PV.EST`, etc.) resolve to an *archived* World Bank data source and
-  return "not found" on live queries; the current WGI dataset (source id 3) isn't
-  reachable through the standard Indicators API endpoint used elsewhere in this app.
-  Not integrated pending a working query path — see Gap analysis.
+  return "not found" on live queries. Not integrated pending a working query path.
 - **gpsjam.org** — no documented public endpoint, fetched server-side by their own app
   only.
+- Reuters/AP/AFP — the wire services working journalists actually rank as the trust
+  benchmark were checked for a usable free RSS feed; none exists today (see
+  `docs/SOURCE_CREDIBILITY.md`'s "wire-service gap" section). An honest gap, not
+  papered over with a weaker substitute.
 
 ## 5. Momentum engine
 
 Implemented horizons: **24h vs. prior 24h**, **7d vs. prior 7d**, blended 60/40 toward
 the shorter window. The brief's suggested 1h and 30d horizons are not implemented —
-1h needs a source with genuinely sub-hourly cadence to be meaningful (most current
-sources update on the order of 15–60 minutes at best), and 30d is a straightforward
-SQL addition to the existing `getCountryCategoryRows` query whenever a consumer needs
-it (the trend-chart use case in the country-state-history gap below).
+1h needs a source with genuinely sub-hourly cadence to be meaningful, and 30d is a
+straightforward SQL addition to the existing `getCountryCategoryRows` query whenever a
+consumer needs it (the trend-chart use case in the Gap analysis).
 
 Momentum is **not** baselined against each country's own historical norm yet (the
 brief's "100 protests/month is normal for country X" point) — today's recent-vs-prior
-comparison is the same shape for every country. Country-relative baselining needs
-enough historical event volume accumulated per country to be meaningful, which the
-system doesn't have yet since it's young. Tracked in the roadmap once
-`country_state_history` exists to compute baselines from.
+comparison is the same shape for every country. `country_state_history` (§6 below) now
+exists and accumulates the daily data a future baseline would need, but nothing reads
+it that way yet.
 
-## 6. What's NOT built yet (honest gap list)
+## 6. The AI/ML layer
 
-Deliberately not attempted this pass, in the order they'd actually get built:
+Three live Gemini (`gemini-3.5-flash-lite`) integrations, plus one embeddings model and
+one non-generative translation API — all direct REST calls, no SDK:
 
-1. **Event correlation / clustering engine** (brief §5) — no geographic/temporal/
-   semantic clustering exists. Every event is independent today; GDELT dedup happens
-   only at the URL level. This is real, substantial, standalone work — don't bolt it
-   on incrementally without designing the clustering approach first.
+- **Pre-publish review gate** (`reviewPendingEvents`, `src/lib/classifierAudit.ts`) —
+  every classified RSS/GDELT/Telegram item is inserted `reviewStatus: "pending"` and
+  invisible to every public read path until Gemini independently re-checks
+  inclusion/severity/country, almost always within the same or next ~15min ingest
+  cycle. A stale pending row (30+ min, e.g. Gemini unavailable) auto-promotes on the
+  classifier's own original verdict rather than hiding real news indefinitely.
+- **Post-hoc classifier audit** (`runClassifierAudit`/`runClassifierAuditSlice`, same
+  file) — the same review, but re-run against items already live, on a rolling 30-day
+  window. Flags `false_positive`/`false_negative`/`severity_mismatch`/
+  `country_mismatch` into a `classifier_audit` table; a human (in practice, Claude on
+  a recurring monitoring cadence) reviews and approves/rejects/overrides each finding
+  before anything changes — this never auto-writes to the live feed or to
+  `classify.ts`'s rules directly, by design (see the table's own doc comment in
+  `schema.ts` for the manipulation-surface reasoning).
+- **Recursive calibration loop** (`classifier_calibration` table, added 2026-09-08) —
+  the actual self-improving piece. When a review reveals a *generalizable* pattern
+  (not a one-off), the reviewer records a short "lesson" keyed by a stable pattern
+  slug. Every subsequent audit prompt (both above) injects the accumulated active
+  lessons — live on the very next call, no redeploy required. A lesson that keeps
+  getting reinforced (tracked via an `occurrences` counter) is a candidate to graduate
+  into the permanent hand-maintained prompt constants
+  (`DELIBERATE_EXCLUSIONS`/`SEVERITY_RUBRIC`/`COUNTRY_GUIDANCE`), which never expire.
+- **Daily AI country situation briefs** (`src/lib/countryBriefs.ts`) — one Gemini call
+  per currently-active country (ranked by score, capped per run), strictly grounded on
+  that country's own real recent events.
+- **Embeddings** (`gemini-embedding-001`, `src/lib/embeddings.ts`) — every archived
+  article gets a 768-dim vector (backfilled a small batch per ingest cycle); the
+  "Similar events" feature (`GET /api/events/[id]/similar`) does pgvector cosine
+  similarity search over the full historical corpus (`feed_archive`, not just the live
+  30-day window).
+- **Translation** (`src/lib/translate.ts`) — Google Cloud Translation API v2, NOT an
+  LLM. Translates non-English Telegram posts before classification, daily-budget-
+  capped to stay inside the monthly free tier.
+
+All of the above are soft no-ops when their respective API key isn't configured — the
+app ships and runs without them, they just activate the moment a key is added. See
+`.env.example` for the exact list.
+
+The one LLM path that exists in code but is **not live**: `classifyBatch` in
+`src/lib/classify.ts` (structured classification via Vercel's AI SDK,
+`generateObject`) — requires a Vercel AI Gateway account with billing enabled. The
+deterministic `classifyByKeywords` is what's actually classifying every item today.
+
+## 7. Telegram sourcing
+
+~18 public Telegram channels (state media, OSINT trackers, military bloggers),
+rotated a few per ingest cycle. This reads public channel web previews in a way
+Telegram's own Content Licensing terms don't clearly sanction for an automated
+cron — a deliberate, disclosed exception to this project's normal licensing bar, not
+an oversight. See `docs/TELEGRAM_SOURCES.md` for the full reasoning, the explicit
+decision to proceed anyway, and the per-channel list with each channel's own
+disclosed editorial lean (state-linked channels included and framed as such, not
+excluded for having one).
+
+## 8. Gap analysis — what's genuinely NOT built yet
+
+In the order they'd actually get built:
+
+1. **Broader event correlation, beyond near-duplicate merging.** `eventDedup.ts`
+   collapses same-story reports from different outlets (real title/summary
+   similarity), and `correlationGroupId` buckets by country/pillar/day for a
+   confidence tier — but true geographic/temporal/semantic clustering of genuinely
+   *distinct-but-related* events (e.g. linking a strike to a retaliation days later)
+   doesn't exist. Real, substantial, standalone work — design the clustering approach
+   before bolting it on incrementally.
 2. **Cross-risk cascade model** (brief §9) — no `causes`/`affects`/`depends_on`-style
-   relationship schema exists. Needs (1) above as a prerequisite (you cluster events
-   before you can trace how clusters transmit).
-3. **Country state history / time-series** — Threat Level and Momentum are computed
-   fresh on every request from the live `events` table; nothing is snapshotted, so
-   there's no "chart this country's Threat Level over the last 30 days" yet. Needs a
-   `country_state_history` table + a scheduled snapshot job.
-4. **Severity × Exposure × Vulnerability model** (brief §6) — Threat Level today is
+   relationship schema exists. Needs (1) above as a prerequisite.
+3. **Severity × Exposure × Vulnerability model** (brief §6) — Pulse Level today is
    driven purely by decayed event severity. A severity-5 earthquake in an empty region
-   scores the same as one hitting a capital. Closing this needs population/
-   infrastructure exposure data (WorldPop, port/energy infrastructure) joined against
-   event geometry — real, sequenced work, not a quick add.
-5. **Structural country context** (GDP, trade dependence, governance indicators) —
-   World Bank GDP/population are wired as standalone ticker layers (`gdp`, `population`
-   in `src/lib/dataLayers.ts`), not joined into the risk/exposure model. WGI itself is
+   scores the same as one hitting a capital. Needs population/infrastructure exposure
+   data (WorldPop, port/energy infrastructure) joined against event geometry.
+4. **Structural country context** (GDP, trade dependence, governance indicators) —
+   World Bank GDP/population are wired as standalone ticker layers
+   (`src/lib/dataLayers.ts`), not joined into the risk/exposure model. WGI itself is
    currently unreachable (see §4). IMF, UN Comtrade, WTO, EIA, FAOSTAT: not started.
-6. **Broader source coverage**: ACLED, UCDP (need registered API keys — a decision for
-   the account owner, not something to sign up for silently), Cloudflare Radar, RIPE
-   Atlas/RIPEstat, NASA FIRMS (needs a free MAP_KEY), AISstream, sanctions feeds
-   (OFAC/EU/UK/UN), OpenSanctions.
-7. **Admin health panel UI** — the data now exists (`GET /api/admin/health`, this
-   session), but there's no page rendering it yet.
-8. **PostGIS** — not adopted. Current geometry is plain `lat`/`lon` doubles with no
-   spatial queries anywhere in the codebase; adopting PostGIS now would be a schema
-   migration in search of a consumer. Revisit once the correlation engine needs real
-   geographic proximity queries (`ST_DWithin` etc.) rather than naive lat/lon math.
-9. **AI summarization** (brief §17) — not implemented. The one LLM integration that
-   existed (`classifyBatch` in `src/lib/classify.ts`) is dormant because it requires a
-   Vercel AI Gateway account with billing enabled; the live classifier
-   (`classifyByKeywords`) is a free, deterministic, keyword/heuristic replacement, kept
-   deliberately in the same file as a drop-in upgrade path if billing is ever enabled.
+5. **Broader source coverage**: ACLED, UCDP (need registered API keys — a decision for
+   the account owner), Cloudflare Radar, RIPE Atlas/RIPEstat, AISstream, sanctions
+   feeds (OFAC/EU/UK/UN), OpenSanctions, X/Twitter (a real structural gap — see
+   `docs/ROADMAP.md`).
+6. **Admin health/observability panel UI** — the data exists
+   (`GET /api/admin/health`, `GET /api/admin/ai-usage`,
+   `GET /api/admin/translation-usage`), but nothing renders it as a page yet.
+7. **PostGIS** — not adopted. Current geometry is plain `lat`/`lon` doubles with no
+   spatial queries anywhere in the codebase. Revisit once (1) needs real geographic
+   proximity queries (`ST_DWithin` etc.) rather than naive lat/lon math.
+8. **Historical charts in the frontend** — `country_state_history` (§9 below) has real
+   daily data flowing in via a scheduled snapshot; nothing in the UI charts it yet.
+9. **Momentum baselined against a country's own history** — see §5.
 
-## 7. Backend architecture — what's built, and why it deviates from the brief
+## 9. Country/aircraft history snapshots
+
+Two daily snapshot jobs (see `vercel.ts`), unblocking future trend/baseline work:
+
+- `country_state_history` (`src/lib/history.ts`, `GET /api/admin/snapshot`) — every
+  country's Pulse Level/Momentum, once/day.
+- `aircraft_count_history` (`src/lib/flightBaseline.ts`,
+  `GET /api/admin/snapshot-flights`) — per-country tracked military aircraft counts,
+  building a baseline for future surge detection.
+
+Neither is surfaced as a chart in the frontend yet (see Gap analysis §8).
+
+## 10. Backend architecture — what's built, and why it deviates from the brief
 
 **Current**: Next.js App Router, deployed entirely on Vercel (frontend + serverless API
 routes), Postgres via Neon, no separate worker service.
@@ -176,67 +270,64 @@ The brief recommends *not* relying on Vercel alone for persistent ingestion work
 That recommendation is correct, and this project hit exactly the failure mode it
 warns about: the originally-intended scheduling mechanism (a GitHub Actions cron
 calling `/api/ingest`) went **entirely silent for over a week** (added 2026-08-27,
-first fired 2026-09-04) — verified against GitHub's own Actions run history, no
-schedule-triggered runs at all in that window, root cause never diagnosed. It was
-only usable via manual `workflow_dispatch` during that stretch. On 2026-09-04 the
-cron expression in `.github/workflows/ingest.yml` was changed specifically to force
-GitHub to re-register the schedule, and that fixed it — confirmed firing reliably on
-schedule the same day. It's still treated as a backup, not the primary mechanism,
-since cron-job.org (below) has been reliable throughout and there's no reason yet to
-trust GitHub's scheduler not to go silent again the same unexplained way.
+first fired 2026-09-04) before a forced re-registration of its schedule fixed it. It's
+now firing reliably and kept as a real backup, alongside:
 
-The actual primary trigger, as of 2026-09 (confirmed live via `/api/admin/health`
-showing multi-minute-fresh `lastAttemptAt` timestamps), is an external scheduler,
-[cron-job.org](https://cron-job.org), hitting `/api/ingest` directly and
-authenticating via `?secret=` (see `cronAuth.ts` for why query-param auth was chosen
-over a header). Its schedule lives in cron-job.org's own dashboard, not in this repo.
-It has one hard, non-configurable constraint that shaped `src/lib/ingest.ts` and
-`src/lib/sources/gdelt.ts`: a 30s request timeout, confirmed directly in its UI.
+- **cron-job.org** (the actual primary trigger) — an external scheduler hitting
+  `/api/ingest` directly, authenticating via `?secret=` (see `cronAuth.ts`). Its
+  schedule lives in cron-job.org's own dashboard, not in this repo. One hard,
+  non-configurable constraint shaped `src/lib/ingest.ts` and `src/lib/sources/gdelt.ts`:
+  a 30s request timeout.
+- **Self-triggering from the live stream** — every new SSE connection
+  (`src/app/api/stream/route.ts`) opportunistically kicks off a background ingest run,
+  gated to at most once per ~10 minutes per warm instance, via Next's `after()` API.
+  "Someone has the site open" is sufficient to keep the feed live.
+- **A daily Vercel cron floor** (`vercel.ts`) — Vercel Hobby plan caps custom cron
+  frequency at once/day, so this is a floor, not a primary mechanism. `vercel.ts` also
+  schedules the four other daily admin jobs: `snapshot`, `snapshot-flights`,
+  `generate-briefs`, and `audit-classifier` (all real cron entries, not just ingest).
 
-As a second-tier mitigation independent of cron-job.org, the live SSE stream route
-(`src/app/api/stream/route.ts`) also opportunistically triggers a background ingest
-run on every new connection, gated to at most once per ~10 minutes per warm instance
-— so **the app additionally self-refreshes whenever someone has it open**, using
-Next's `after()` API to guarantee the trigger request actually gets sent rather than
-being silently dropped when the stream's own response completes.
-
-The daily Vercel cron (`vercel.ts`) is a third-tier floor in case all of the above
-stop working (Vercel Hobby plan caps custom cron frequency at once/day — this is a
-real platform limit, not a design choice). With GitHub Actions' schedule now also
-firing reliably, real-time ingest no longer depends on a single third-party
-scheduler — cron-job.org and GitHub Actions cover for each other. Moving ingestion
-to a dedicated always-on worker (Railway/Fly.io/Render, as the brief suggests) is
-still the cleaner long-term architecture and stays on the roadmap, but it's no
-longer covering for a single point of failure the way it was before 2026-09-04.
+Moving ingestion to a dedicated always-on worker (Railway/Fly.io/Render, per the
+brief) is still the cleaner long-term architecture and stays on the roadmap, but three
+independent real-time-ish triggers covering for each other means it's no longer a
+single point of failure the way it was before 2026-09-04.
 
 **Serverless duration**: Vercel Hobby-tier functions are commonly documented at a 60s
 ceiling; this project's Fluid Compute setting has empirically allowed a full ~60–90s
-ingest cycle to complete in direct testing this session. `/api/ingest` and
-`/api/stream` are both written defensively regardless (short internal timeouts, fast
-per-source failure, self-closing streams) rather than assuming a generous budget.
+ingest cycle to complete. `/api/ingest` and `/api/stream` are both written defensively
+regardless (short internal timeouts, fast per-source failure, self-closing streams)
+rather than assuming a generous budget.
 
-## 8. Deployment
+## 11. Deployment
 
 - **Frontend + API routes**: Vercel (Next.js App Router, Node.js runtime).
-- **Database**: Neon Postgres (serverless HTTP driver, `@neondatabase/serverless`).
-- **Ingestion trigger**: self-triggered from the live stream (see §7) + a daily Vercel
-  cron floor. No dedicated worker service exists yet.
-- **Secrets**: Vercel project environment variables (`DATABASE_URL`, `CRON_SECRET`
-  optional, `FINNHUB_API_KEY` optional) — see `.env.example` for the full, current
-  list, generated by grepping the codebase for every `process.env.*` read rather than
-  guessed.
-- **Observability**: `source_health` table + `GET /api/admin/health` (this session) —
-  per-source last-attempt/last-success/last-error, so an upstream outage is visible
-  without triggering ingest manually and reading through error arrays.
+- **Database**: Neon Postgres (serverless HTTP driver, `@neondatabase/serverless`),
+  `pgvector` extension enabled for embeddings.
+- **Ingestion trigger**: cron-job.org (primary) + GitHub Actions (backup) +
+  self-triggered from the live stream + a daily Vercel cron floor. No dedicated
+  worker service exists yet.
+- **Migrations**: no framework — `GET /api/admin/migrate` applies the current desired
+  schema via idempotent `CREATE`/`ALTER ... IF NOT EXISTS` statements, run by hand
+  after a schema change ships (see the route's own doc comment for why).
+- **Secrets**: Vercel project environment variables — see `.env.example` for the
+  complete, current list (kept in sync by grepping the codebase for every
+  `process.env.*` read, not guessed). `DATABASE_URL` is the only hard requirement;
+  everything else (Finnhub, FIRMS, Gemini, Google Translate) is a soft-no-op optional
+  key.
+- **Observability**: `source_health` table + `GET /api/admin/health` (per-source
+  last-attempt/last-success/last-error), plus `GET /api/admin/ai-usage` and
+  `GET /api/admin/translation-usage` for AI/translation quota visibility. No frontend
+  panel renders any of these yet (Gap analysis §6).
 
 Deploying a second, independent worker service (Railway/Fly.io/Render) for real
 scheduled ingestion — decoupled from anyone visiting the site — is the top backend
 infrastructure item on the roadmap.
 
-## 9. What this document intentionally does not repeat
+## 12. What this document intentionally does not repeat
 
-`docs/ROADMAP.md` carries the phased build order and day-to-day status; the
-"Country Risk Methodology" artifact carries the fully worked Threat Level/Momentum
-derivation with live numbers; `src/lib/sources/README.md` carries per-source
-integration notes and rejected-source reasoning; `src/lib/sourceRegistry.ts` carries
-the licensing table itself. This document is the map of how those pieces fit together.
+`docs/ROADMAP.md` carries the phased build order and day-to-day status;
+`docs/SOURCE_CREDIBILITY.md` carries the per-outlet bias/reliability vetting for every
+RSS/Telegram source; `docs/TELEGRAM_SOURCES.md` and `src/lib/sources/README.md` carry
+per-source integration notes and rejected-source reasoning; `src/lib/sourceRegistry.ts`
+carries the licensing table itself. This document is the map of how those pieces fit
+together.

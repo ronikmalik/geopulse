@@ -17,7 +17,8 @@ limitations.
 | Source | Endpoint | Auth | License / commercial use | Refresh | Adapter | Limitations |
 |---|---|---|---|---|---|---|
 | GDELT DOC 2.0 | `api.gdeltproject.org/api/v2/doc/doc` | none | Public domain, commercial use OK | ~10 min (self-triggered) | `src/lib/sources/gdelt.ts` | 3h timespan window. Root-caused 2026-09-04: this app fired all 7 category queries concurrently via `Promise.all` every ~15 min — GDELT's own docs say their APIs are "rate limited to protect the underlying ElasticSearch clusters," and a direct `curl` test (independent of this app) showed ~11-13s just to get a response under load, well past the app's old 7s timeout. A first fix (sequential queries, longer timeout) turned out to still be too slow for cron-job.org's **hard, non-configurable 30s request timeout** — confirmed directly in its UI, not assumed. Actual fix in `src/lib/ingest.ts`: only a rotating batch of 2 categories runs per ingest cycle (deterministic by wall-clock time, so consecutive cycles advance through the list), each with a 10s timeout and 1.5s spacing — every category still gets a fresh GDELT check at least once per ~1h rotation, backstopped by RSS's continuous coverage of the same topics in between |
-| RSS (16 outlets across North America, Europe, Asia-Pacific, Middle East, Africa, Latin America — see `src/lib/sources/rss.ts` for the list) | per-outlet RSS URL | none | Publisher-specific; headline+link only, no full-text reproduction | ~10 min | `src/lib/sources/rss.ts` | No official API; treated as syndication, not scraping — each outlet publishes the feed itself. Bias/reliability vetted per-outlet, see `docs/SOURCE_CREDIBILITY.md` |
+| RSS (35 outlets spanning North America, Europe, Russia/Central Asia, the Middle East, South/Southeast Asia, Taiwan, Korea, Australia, the Pacific Islands, Africa, Latin America — see `src/lib/sources/rss.ts` for the list) | per-outlet RSS URL | none | Publisher-specific; headline+link only, no full-text reproduction | ~10 min | `src/lib/sources/rss.ts` | No official API; treated as syndication, not scraping — each outlet publishes the feed itself. Bias/reliability vetted per-outlet, see `docs/SOURCE_CREDIBILITY.md` |
+| Telegram (~18 public channels — state media, OSINT trackers, military bloggers — see `src/lib/sources/telegram.ts` for the list) | `t.me/s/<channel>` web preview | none | Telegram's Content Licensing terms don't clearly sanction automated access — a knowing, disclosed exception, not an oversight | ~15-90 min (rotated a few per cycle) | `src/lib/sources/telegram.ts` | Non-English posts translated via Google Cloud Translation API before classification (optional key; skipped as-is without one). See `docs/TELEGRAM_SOURCES.md` for the full reasoning and per-channel disclosed lean. |
 | NASA FIRMS (VIIRS thermal-anomaly detection) | `firms.modaps.eosdis.nasa.gov/api/area/csv` | free `MAP_KEY` (instant signup) | US government work, public domain per general NASA policy — no FIRMS-specific terms page confirming this found, flagged unclear | ~10 min | `src/lib/sources/firms.ts` | Detects a thermal anomaly, not a confirmed cause (fire vs. explosion vs. industrial incident all look the same to it); grid-clustered and thresholded (8+ detections, 500+ MW) to suppress routine small-fire noise — see `docs/OSINT_SOURCES.md` |
 | USGS Earthquake GeoJSON | `earthquake.usgs.gov/.../summary/4.5_day.geojson` | none | US government work, public domain | ~10 min | `src/lib/sources/usgs.ts` | M4.5+ only, rolling 24h/day window feeds |
 | NASA EONET v3 | `eonet.gsfc.nasa.gov/api/v3/events` | none | US government work, public domain | ~10 min | `src/lib/sources/eonet.ts` | Open events only, `days=3` window |
@@ -71,9 +72,11 @@ Grouped by what they'd unlock, highest-value first:
 ## Deduplication policy
 
 The brief is explicit: repeated news articles about the same event are not independent
-confirmations. Today's dedup is URL-uniqueness only (`events.url` is a hard unique
-constraint; `onConflictDoNothing` at insert time) plus a 24h recency filter so a general
-RSS feed's rolling backlog doesn't surface as breaking. Cross-source confirmation
-(GDELT + a wire headline + a satellite signal counting as *stronger* evidence than five
-copies of the same GDELT hit) requires the correlation engine — not implemented, see
-`docs/ARCHITECTURE.md` §6.1.
+confirmations. Dedup today is URL-uniqueness (`events.url` is a hard unique
+constraint) plus a 24h recency filter, plus real cross-outlet near-duplicate merging
+(`src/lib/eventDedup.ts`, title/summary Jaccard similarity) — same-story reports
+collapse into one feed card with a source-diversity confidence tier
+(`src/lib/correlation.ts`: single-source/corroborated/cross-confirmed). Broader
+clustering of genuinely *distinct-but-related* events (GDELT + a wire headline + a
+satellite signal about a wider unfolding situation, not the same single incident) is
+not implemented — see `docs/ARCHITECTURE.md`'s Gap analysis, §1.
