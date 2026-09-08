@@ -17,5 +17,12 @@ export const config: VercelConfig = {
     // Daily per-country military aircraft count snapshot, building a real
     // baseline for future surge detection — see src/lib/flightBaseline.ts.
     { path: "/api/admin/snapshot-flights", schedule: "30 18 * * *" },
+    // Daily AI country situation briefs — deliberately after the pulse
+    // snapshot above so it reflects the same day's already-computed
+    // scores, and on its own schedule (not piggybacked on /api/ingest)
+    // since it needs the full 55s admin-route budget for N sequential
+    // Gemini calls, which /api/ingest's cron-job.org 30s external trigger
+    // has no room for. See src/lib/countryBriefs.ts.
+    { path: "/api/admin/generate-briefs", schedule: "0 19 * * *" },
   ],
 };

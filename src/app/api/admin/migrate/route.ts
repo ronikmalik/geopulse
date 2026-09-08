@@ -90,6 +90,16 @@ const STATEMENTS = [
     count INTEGER NOT NULL DEFAULT 0,
     CONSTRAINT ai_usage_date_kind_unique UNIQUE (date, kind)
   )`,
+  sql`CREATE TABLE IF NOT EXISTS country_briefs (
+    id SERIAL PRIMARY KEY,
+    country TEXT NOT NULL,
+    brief_text TEXT NOT NULL,
+    event_count INTEGER NOT NULL,
+    model TEXT NOT NULL,
+    generated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS country_briefs_country_idx ON country_briefs (country)`,
+  sql`CREATE INDEX IF NOT EXISTS country_briefs_generated_at_idx ON country_briefs (generated_at)`,
 ];
 
 export async function GET(req: NextRequest) {

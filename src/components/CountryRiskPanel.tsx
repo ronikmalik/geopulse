@@ -44,6 +44,12 @@ interface PillarBreakdownEntry {
   covered: boolean;
 }
 
+interface CountryBrief {
+  briefText: string;
+  eventCount: number;
+  generatedAt: string;
+}
+
 interface CountryThreatDetail {
   country: string;
   threatLevel: ThreatLevel;
@@ -52,6 +58,7 @@ interface CountryThreatDetail {
   momentumDirection: MomentumDirection;
   pillars: PillarBreakdownEntry[];
   events: CountryRiskEvent[];
+  brief: CountryBrief | null;
 }
 
 interface CountryDossier {
@@ -290,6 +297,21 @@ export default function CountryRiskPanel({
                   )}
                   {!loadingDetail && detail && detail.country === r.country && (
                     <>
+                      {detail.brief && (
+                        <div className="mb-2 border-b border-red-950/70 pb-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-mono text-[9px] uppercase tracking-wider text-neutral-600">
+                              AI summary · {detail.brief.eventCount} events
+                            </span>
+                            <span className="font-mono text-[9px] text-neutral-700">
+                              {timeAgo(detail.brief.generatedAt)}
+                            </span>
+                          </div>
+                          <p className="mt-1 font-mono text-[11px] leading-relaxed text-neutral-300">
+                            {detail.brief.briefText}
+                          </p>
+                        </div>
+                      )}
                       {snapshot?.country === r.country && snapshot.dossier && (
                         <div className="mb-2 border-b border-red-950/70 pb-2">
                           <p className="font-mono text-[10px] leading-relaxed text-neutral-400">

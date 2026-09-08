@@ -312,3 +312,33 @@ export const aiUsage = pgTable(
 );
 
 export type AiUsageRow = typeof aiUsage.$inferSelect;
+
+// One row per country per generation — see src/lib/countryBriefs.ts. Kept
+// as full history rather than upserted-latest-only, same "keep everything,
+// storage is cheap" call the user made for feed_archive (2026-09-05) —
+// small text rows, and it's the substrate for a future "how has our
+// assessment of this country changed" view, not just today's snapshot.
+// The UI (CountryRiskPanel) only ever reads the most recent row per
+// country though — see getLatestCountryBrief.
+export const countryBriefs = pgTable(
+  "country_briefs",
+  {
+    id: serial("id").primaryKey(),
+    country: text("country").notNull(),
+    briefText: text("brief_text").notNull(),
+    // How many events the prompt was actually grounded in — shown in the
+    // UI next to the brief so it never reads as more authoritative than
+    // "an LLM read N recent headlines," which is all it is.
+    eventCount: integer("event_count").notNull(),
+    model: text("model").notNull(),
+    generatedAt: timestamp("generated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("country_briefs_country_idx").on(table.country),
+    index("country_briefs_generated_at_idx").on(table.generatedAt),
+  ],
+);
+
+export type CountryBriefRow = typeof countryBriefs.$inferSelect;

@@ -1,17 +1,33 @@
 import { recordAiUsage } from "./aiUsage";
 
-// Gemini's text-embedding-004, REST + simple API key — same shape as
-// translate.ts's Google Cloud Translation integration (no OAuth/service
-// account, no SDK). Soft no-op if GEMINI_API_KEY isn't set, same pattern
-// as GOOGLE_TRANSLATE_API_KEY/FIRMS_MAP_KEY: ships now, activates the
-// moment the key is added. 768 output dimensions — matches the
-// vector(768) column in src/db/schema.ts; if the model ever changes, the
-// column width has to change with it (existing rows would need
-// re-embedding, not just new ones).
-const EMBED_ENDPOINT =
-  "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:batchEmbedContents";
+// Gemini embeddings, REST + simple API key — same shape as translate.ts's
+// Google Cloud Translation integration (no OAuth/service account, no
+// SDK). Soft no-op if GEMINI_API_KEY isn't set, same pattern as
+// GOOGLE_TRANSLATE_API_KEY/FIRMS_MAP_KEY: ships now, activates the moment
+// the key is added.
+//
+// Model id is configurable rather than hardcoded on purpose: Google's own
+// docs disagreed with themselves on the exact current model string
+// (gemini-embedding-001 vs gemini-embedding-2 vs gemini-embedding-2-
+// preview) as of 2026-09-08, and this app's own knowledge of Gemini's
+// current lineup is stale relative to today's date. gemini-embedding-001
+// is the one name every source agreed actually exists, so it's the
+// default — but if calls start failing with a 404-model-not-found, the
+// fix is GEMINI_EMBED_MODEL in Vercel env vars, not a redeploy. GET
+// /api/admin/ai-models calls Google's own ListModels endpoint (needs a
+// real key configured) to confirm the authoritative current name rather
+// than guessing again.
+//
+// output_dimensionality is requested explicitly at 768 regardless of
+// which model ends up used — must match the vector(768) column in
+// src/db/schema.ts; if the model or dimension ever changes, existing rows
+// need re-embedding, not just new ones (a stored 768-dim vector isn't
+// comparable to a differently-dimensioned one even if pgvector allowed
+// the cast).
+const EMBED_MODEL = process.env.GEMINI_EMBED_MODEL || "gemini-embedding-001";
+const EMBED_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${EMBED_MODEL}:batchEmbedContents`;
 const REQUEST_TIMEOUT_MS = 15_000;
-const MODEL = "models/text-embedding-004";
+const OUTPUT_DIMENSIONALITY = 768;
 
 // Gemini's batchEmbedContents accepts up to 100 requests per call.
 export const MAX_BATCH_SIZE = 100;
@@ -36,8 +52,9 @@ export async function embedBatch(texts: string[]): Promise<number[][] | null> {
 
   const body = {
     requests: texts.map((text) => ({
-      model: MODEL,
+      model: `models/${EMBED_MODEL}`,
       content: { parts: [{ text }] },
+      outputDimensionality: OUTPUT_DIMENSIONALITY,
     })),
   };
 
