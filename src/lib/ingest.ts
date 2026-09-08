@@ -613,25 +613,43 @@ export async function runIngest(): Promise<IngestResult> {
 
   // Best-effort, non-blocking enrichment/review passes — see the doc
   // comment on backfillFeedArchiveEmbeddings for why these run decoupled
-  // from the insert paths above rather than inline per-item. Each is
-  // raced against its own short deadline the same way withDeadline
-  // already guards the GDELT fetch, but the three now run CONCURRENTLY
-  // (not sequentially) — three sequential 8s deadlines could add up to
-  // 24s stacked onto this route's already-tight 30s hard external-
-  // trigger budget (cron-job.org), where running them together caps the
-  // worst-case added time at ~8s regardless of how many there are.
-  // reviewPendingEvents is the pre-publish gate itself (2026-09-08 user
-  // request: Gemini's judgment applies before an item is visible on the
-  // live feed, not just as a post-hoc audit) — see its own doc comment
-  // in classifierAudit.ts.
-  const [embedResult, pendingReviewResult, auditSliceResult] = await Promise.allSettled([
+  // from the insert paths above rather than inline per-item. Each step
+  // is raced against its own short deadline the same way withDeadline
+  // already guards the GDELT fetch.
+  //
+  // embeddingBackfill runs fully in parallel with the other two — it's a
+  // different Gemini model (gemini-embedding, its own separate RPM
+  // quota) so it can't contend with them for rate limit headroom.
+  // reviewPendingEvents and runClassifierAuditSlice both call the SAME
+  // model (gemini-3.5-flash-lite) though, and real production 429s
+  // (2026-09-08, found while answering the user's "are we within
+  // Gemini's capacity" question) showed exactly this: two independent
+  // callers, each individually paced internally, still stacking enough
+  // concurrent requests between them to burst past the 15 RPM ceiling.
+  // Running them sequentially instead — never both in flight at once —
+  // closes that gap by construction rather than hoping their internal
+  // pacing happens not to overlap. reviewPendingEvents goes first since
+  // it's the one gating publish latency; runClassifierAuditSlice (pure
+  // backlog cleanup) gets a shorter budget since it's already getting a
+  // second, smaller bite at the same cron-job.org 30s ingest budget.
+  async function runGeminiAuditChain(): Promise<void> {
+    try {
+      await withDeadline(reviewPendingEvents(), 8_000, "pendingEventReview");
+    } catch (err) {
+      errors.push(`pendingEventReview: ${err}`);
+    }
+    try {
+      await withDeadline(runClassifierAuditSlice(), 5_000, "classifierAuditSlice");
+    } catch (err) {
+      errors.push(`classifierAuditSlice: ${err}`);
+    }
+  }
+
+  const [embedResult] = await Promise.allSettled([
     withDeadline(backfillFeedArchiveEmbeddings(), 8_000, "embeddingBackfill"),
-    withDeadline(reviewPendingEvents(), 8_000, "pendingEventReview"),
-    withDeadline(runClassifierAuditSlice(), 8_000, "classifierAuditSlice"),
+    runGeminiAuditChain(),
   ]);
   if (embedResult.status === "rejected") errors.push(`embeddingBackfill: ${embedResult.reason}`);
-  if (pendingReviewResult.status === "rejected") errors.push(`pendingEventReview: ${pendingReviewResult.reason}`);
-  if (auditSliceResult.status === "rejected") errors.push(`classifierAuditSlice: ${auditSliceResult.reason}`);
 
   return {
     fetched: all.length + direct.length,

@@ -70,8 +70,22 @@ const CONCURRENCY = 2;
 // Space consecutive rounds out instead of firing them back-to-back —
 // same idea as GDELT_QUERY_SPACING_MS/TELEGRAM_QUERY_SPACING_MS
 // elsewhere in this app for the identical reason (a rate-limited
-// upstream API, bursty-by-default client code).
-const ROUND_SPACING_MS = 4_000;
+// upstream API, bursty-by-default client code). Sized to the actual 15
+// RPM ceiling, not guessed: CONCURRENCY (2) requests per round, so
+// staying at or under ~12 RPM (a real margin under 15, not just barely
+// under it) needs at most 6 rounds/minute — 60s / 6 = 10s between
+// rounds. The original 4s spacing this replaced only bounded the
+// BURST (2 requests at once); it did nothing to bound the SUSTAINED
+// rate over a long-running call like the 45s standalone full sweep,
+// which could still fire ~15 rounds/minute (30 RPM) back to back —
+// exactly the gap that produced real 429s (18/15 RPM, seen live
+// 2026-09-08). Ingest-embedded slices get proportionally less
+// throughput per cycle now (roughly one round instead of two before
+// hitting their own short deadline), which is fine given RPD headroom
+// is enormous (96/500 used) and coverage is time-budgeted to
+// accumulate "over time" across many cycles, not to maximize any one
+// call's throughput.
+const ROUND_SPACING_MS = 10_000;
 const SNIPPET_CHARS = 300;
 // Dropped items (false_negative candidates) stay recency-scoped —
 // recovering week-old "missed" news isn't worth much, this was always

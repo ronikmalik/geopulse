@@ -20,10 +20,14 @@ import { embedBatch } from "./embeddings";
 //
 // Sized for embedBatch's individual-call-per-text reality (see
 // embeddings.ts — there is no synchronous batch endpoint for this model
-// generation), not an arbitrary API batch limit: 24 items at
-// embeddings.ts's CONCURRENCY=8 is 3 sequential rounds, comfortably
-// inside runIngest's 8s deadline for this step.
-const BACKFILL_BATCH_SIZE = 24;
+// generation), not an arbitrary API batch limit. embeddings.ts's
+// CONCURRENCY (4) and CHUNK_SPACING_MS (3s, added 2026-09-08 to fix real
+// RPM 429s) mean 12 items is 3 chunks — 2 gaps of 3s plus request time —
+// comfortably inside runIngest's 8s deadline for this step. A run that
+// still doesn't finish in time is fine either way (withDeadline races
+// rather than blocks — see the doc comment on the call site in
+// ingest.ts), this sizing just keeps that the exception, not routine.
+const BACKFILL_BATCH_SIZE = 12;
 const MAX_INPUT_CHARS = 2000;
 
 export interface BackfillResult {

@@ -67,10 +67,36 @@ export async function getUsageBudget(): Promise<UsageBudget> {
   };
 }
 
+// A single translateBatch call is one Telegram channel's entire backlog
+// of new posts since its last check — nothing previously bounded how
+// much of a single day's budget one such call could claim, only whether
+// the total fit under what's left today. User report (2026-09-08): the
+// budget was capping out early in the day — consistent with exactly
+// this, a burst of non-English posts (several channels, each posting a
+// lot since the last check) legally spending most or all of
+// remainingToday in the first few ingest cycles, leaving nothing for the
+// other ~90 cycles still to come that day.
+//
+// Bounding any single call to a fraction of dailyBudget — not
+// remainingToday, which shrinks as the day goes on — keeps the cap
+// stable across the whole day rather than getting tighter for later
+// calls just because earlier ones already spent some of today's pool.
+// A call that exceeds it fails canAfford the same way running out of
+// budget entirely does, and telegram.ts's existing fallback already
+// queues the excerpts in pending_translation rather than dropping them
+// — this doesn't lose content, it just forces a large batch to drain
+// gradually across later cycles instead of consuming the whole day's
+// allowance in one shot. 1/12th means even the very first call of the
+// day leaves at least 11 more "shares" of today's budget for everything
+// else still to come.
+const MAX_CHARS_PER_CALL_FRACTION = 12;
+
 export async function canAfford(estimatedChars: number): Promise<boolean> {
   const budget = await getUsageBudget();
+  const maxPerCall = Math.floor(budget.dailyBudget / MAX_CHARS_PER_CALL_FRACTION);
   return (
     estimatedChars <= budget.remainingToday &&
+    estimatedChars <= maxPerCall &&
     budget.monthUsed + estimatedChars <= MONTHLY_CHAR_CAP
   );
 }

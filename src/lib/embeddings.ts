@@ -72,12 +72,27 @@ async function embedOne(text: string, apiKey: string): Promise<number[] | null> 
 // empty input). Texts longer than ~2000 chars should be truncated by the
 // caller before this — title+summary pairs never approach the model's
 // real token limit, so no truncation happens here.
+// Bounds the SUSTAINED rate, not just the burst — concurrency alone caps
+// how many requests fire at once, but with no gap between chunks a large
+// backlog run could still fire far more than 100 RPM in aggregate (24
+// texts at CONCURRENCY=4 with embedContent's typical sub-second latency
+// is 6 chunks in ~1-2s, nowhere near 60s). CONCURRENCY (4) per chunk,
+// spaced to stay near ~80 RPM (real margin under the 100 RPM ceiling
+// confirmed live via AI Studio's Rate Limit dashboard, 2026-09-08) needs
+// at most 20 chunks/minute — 60s / 20 = 3s between chunks.
+const CHUNK_SPACING_MS = 3_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function embedBatch(texts: string[]): Promise<(number[] | null)[] | null> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || texts.length === 0) return null;
 
   const results: (number[] | null)[] = new Array(texts.length).fill(null);
   for (let start = 0; start < texts.length; start += CONCURRENCY) {
+    if (start > 0) await sleep(CHUNK_SPACING_MS);
     const chunk = texts.slice(start, start + CONCURRENCY);
     const chunkResults = await Promise.all(chunk.map((t) => embedOne(t, apiKey)));
     chunkResults.forEach((r, i) => {
