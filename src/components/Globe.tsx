@@ -221,11 +221,21 @@ export default function GlobeView({
           ),
         )
         .polygonSideColor(() => "rgba(255,20,20,0.04)")
-        .polygonStrokeColor((d) =>
-          polygonCountryCode(d) === selectedCountryRef.current
+        .polygonStrokeColor((d) => {
+          // polygonCountryCode returns null for territories with no ISO
+          // alpha-2 mapping in world-atlas's data (Somaliland, Kosovo,
+          // Northern Cyprus, etc. — Natural Earth encodes these with a
+          // sentinel id, not a real ISO 3166-1 numeric code). With no
+          // guard here, "nothing selected" (selectedCountryRef.current
+          // === null) made every one of those null === null, so all of
+          // them lit up white as if selected. Requiring a real code before
+          // comparing means "unselected" only ever matches a null
+          // selection, not a null code.
+          const code = polygonCountryCode(d);
+          return code !== null && code === selectedCountryRef.current
             ? "#ffffff"
-            : RED,
-        )
+            : RED;
+        })
         .polygonAltitude(0.004)
         .polygonLabel((d) => {
           const code = polygonCountryCode(d);
