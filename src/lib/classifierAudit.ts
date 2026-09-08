@@ -9,7 +9,7 @@ import type { Category } from "./categories";
 import { archiveFeedItems } from "./feedArchive";
 import { COUNTRY_CENTROIDS } from "./countryCentroids";
 
-// Daily Gemini pass over classification_archive, auditing the keyword
+// Gemini pass over classification_archive, auditing the keyword
 // classifier along three independent dimensions:
 //   - Inclusion: items KEPT that shouldn't have been (false_positive),
 //     items DROPPED that should have been (false_negative).
@@ -23,31 +23,51 @@ import { COUNTRY_CENTROIDS } from "./countryCentroids";
 // pure word-frequency approach — actual reading comprehension instead of
 // counting words.
 //
-// NEVER writes to classify.ts. See the doc comment on the
-// classifier_audit table in src/db/schema.ts for why — same "editorial
-// judgment doesn't survive full automation" reasoning as vocabulary-
-// report, plus a new risk an LLM auditor specifically introduces: a
-// malicious article's body text could contain actual prompt-injection
-// content aimed at the auditor, not just gameable word frequency. Every
-// finding here is a proposal a human reviews (GET
-// /api/admin/classifier-audit + its /review sub-route) — approving one
-// acts on exactly that one article (see applyFinding below), never on
-// classify.ts's shared rules.
+// Coverage is time-budgeted, not count-limited (2026-09-08 user request:
+// "not just a sample, but everything") — runClassifierAuditSlice below
+// pulls and processes batches until either its deadline or the unaudited
+// backlog is exhausted, called from two places: a small slice embedded
+// in every ~15min runIngest cycle (see ingest.ts) for high frequency
+// without needing a more-than-daily Vercel cron (Hobby plan caps custom
+// cron at once/day — the same reason /api/ingest itself rides an
+// external trigger instead of Vercel's own cron), and the standalone
+// GET /api/admin/audit-classifier route (larger budget, for catch-up/
+// on-demand full sweeps) still on its own daily cron as a floor.
+//
+// This still NEVER writes to classify.ts directly, or auto-applies any
+// individual finding — see applyFinding below for per-article actions
+// (still real, but always scoped to one article and only on explicit
+// approval) and the classifier_audit table's own doc comment in
+// schema.ts for the manipulation-surface reasoning behind keeping that
+// boundary. What changed (2026-09-08 user request) is WHO reviews:
+// findings — especially recurring patterns across several of them, the
+// real "fine-tuning fuel" — get evaluated by Claude on its own recurring
+// monitor cadence, not by the user for each one. A classify.ts change
+// still only ships after Claude has actually read real examples and
+// verified it against a regression check, the same discipline every
+// prior change in this file went through live (see the 2026-09-08 actor-
+// vs-target fix) — it's the identity of the reviewer that changed, not
+// the rigor. The user is informed afterward, not asked first.
 const AUDIT_MODEL = process.env.GEMINI_AUDIT_MODEL || "gemini-3.5-flash-lite";
 const GENERATE_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${AUDIT_MODEL}:generateContent`;
 const REQUEST_TIMEOUT_MS = 20_000;
 
-// Bounds cost and this route's wall-clock time (55s admin-route budget) —
-// dropped items vastly outnumber kept ones in any real moderation system,
-// hence the different caps. BATCH_SIZE keeps each prompt/response small
-// enough to stay reliable; CONCURRENCY bounds how many batches run at
-// once, same shape as embeddings.ts's own concurrency cap.
-const DROPPED_SAMPLE_LIMIT = 80;
-const KEPT_SAMPLE_LIMIT = 40;
+// How many unaudited rows to pull per DB round-trip — generous since the
+// deadline (not this number) is what actually bounds a run's total work.
+const FETCH_LIMIT = 200;
 const BATCH_SIZE = 20;
 const CONCURRENCY = 4;
 const SNIPPET_CHARS = 300;
 const AUDIT_WINDOW_HOURS = 24;
+// The ingest-embedded slice's own time budget — small enough to leave
+// ample room in runIngest's overall 30s hard external-trigger limit
+// (cron-job.org), same order of magnitude as embeddingBackfill's own
+// 8s allowance for the identical reason.
+const SLICE_DEADLINE_MS = 8_000;
+// The standalone route's budget — generous, but leaves real margin
+// inside its 55s maxDuration for the DB round-trips and response
+// serialization around it.
+const FULL_AUDIT_DEADLINE_MS = 45_000;
 // A 1-point severity disagreement is normal judgment noise; only a
 // 2+ point gap (e.g. stored 1, Gemini says 3) is worth a human's time.
 const SEVERITY_MISMATCH_THRESHOLD = 2;
@@ -351,12 +371,17 @@ interface KeptAuditCounts {
   countryMismatches: number;
 }
 
-async function processKeptCandidates(candidates: KeptCandidate[], apiKey: string): Promise<KeptAuditCounts> {
+async function processKeptCandidates(
+  candidates: KeptCandidate[],
+  apiKey: string,
+  deadlineAt: number,
+): Promise<KeptAuditCounts> {
   const counts: KeptAuditCounts = { falsePositives: 0, severityMismatches: 0, countryMismatches: 0 };
   if (candidates.length === 0) return counts;
 
   const batches = chunk(candidates, BATCH_SIZE);
   for (let i = 0; i < batches.length; i += CONCURRENCY) {
+    if (Date.now() > deadlineAt) break; // remainder stays unaudited, picked up next call
     const round = batches.slice(i, i + CONCURRENCY);
     const results = await Promise.all(
       round.map((batch) => callGeminiJson<RawKeptAssessment>(buildKeptAuditPrompt(batch), apiKey)),
@@ -404,12 +429,17 @@ async function processKeptCandidates(candidates: KeptCandidate[], apiKey: string
   return counts;
 }
 
-async function processDroppedCandidates(candidates: DroppedCandidate[], apiKey: string): Promise<number> {
+async function processDroppedCandidates(
+  candidates: DroppedCandidate[],
+  apiKey: string,
+  deadlineAt: number,
+): Promise<number> {
   if (candidates.length === 0) return 0;
   let falseNegatives = 0;
   const batches = chunk(candidates, BATCH_SIZE);
 
   for (let i = 0; i < batches.length; i += CONCURRENCY) {
+    if (Date.now() > deadlineAt) break; // remainder stays unaudited, picked up next call
     const round = batches.slice(i, i + CONCURRENCY);
     const results = await Promise.all(
       round.map((batch) => callGeminiJson<RawDroppedFinding>(buildFalseNegativePrompt(batch), apiKey)),
@@ -452,28 +482,73 @@ export interface ClassifierAuditResult {
   skipped: boolean;
 }
 
-export async function runClassifierAudit(): Promise<ClassifierAuditResult> {
+const EMPTY_RESULT: ClassifierAuditResult = {
+  falsePositives: 0,
+  falseNegatives: 0,
+  severityMismatches: 0,
+  countryMismatches: 0,
+  skipped: true,
+};
+
+// Shared engine behind both entry points below — keeps pulling and
+// processing batches, independently for the kept and dropped sides,
+// until each is exhausted (fewer rows came back than FETCH_LIMIT) or the
+// deadline passes, whichever comes first. This is what makes "audit
+// everything, not a fixed sample" (2026-09-08 user request) actually
+// true over time: a single call only gets as far as its own deadline,
+// but repeated calls — every ~15min via the ingest-embedded slice, or a
+// full run via the standalone route — keep making forward progress
+// against the same unaudited backlog (classification_archive.auditedAt
+// IS NULL) since nothing already audited gets re-fetched.
+async function runAudit(deadlineAt: number): Promise<ClassifierAuditResult> {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return { falsePositives: 0, falseNegatives: 0, severityMismatches: 0, countryMismatches: 0, skipped: true };
-  }
+  if (!apiKey) return EMPTY_RESULT;
+
+  const totals: ClassifierAuditResult = { ...EMPTY_RESULT, skipped: false };
 
   try {
-    const [keptCandidates, droppedCandidates] = await Promise.all([
-      getUnauditedKeptCandidates(KEPT_SAMPLE_LIMIT),
-      getUnauditedDroppedCandidates(DROPPED_SAMPLE_LIMIT),
-    ]);
+    let keptExhausted = false;
+    let droppedExhausted = false;
 
-    const [keptCounts, falseNegatives] = await Promise.all([
-      processKeptCandidates(keptCandidates, apiKey),
-      processDroppedCandidates(droppedCandidates, apiKey),
-    ]);
+    while (Date.now() < deadlineAt && !(keptExhausted && droppedExhausted)) {
+      const [keptCandidates, droppedCandidates] = await Promise.all([
+        keptExhausted ? Promise.resolve([]) : getUnauditedKeptCandidates(FETCH_LIMIT),
+        droppedExhausted ? Promise.resolve([]) : getUnauditedDroppedCandidates(FETCH_LIMIT),
+      ]);
 
-    return { ...keptCounts, falseNegatives, skipped: false };
+      if (keptCandidates.length < FETCH_LIMIT) keptExhausted = true;
+      if (droppedCandidates.length < FETCH_LIMIT) droppedExhausted = true;
+      if (keptCandidates.length === 0 && droppedCandidates.length === 0) break;
+
+      const [keptCounts, falseNegatives] = await Promise.all([
+        processKeptCandidates(keptCandidates, apiKey, deadlineAt),
+        processDroppedCandidates(droppedCandidates, apiKey, deadlineAt),
+      ]);
+
+      totals.falsePositives += keptCounts.falsePositives;
+      totals.severityMismatches += keptCounts.severityMismatches;
+      totals.countryMismatches += keptCounts.countryMismatches;
+      totals.falseNegatives += falseNegatives;
+    }
+
+    return totals;
   } catch (err) {
-    console.error(`runClassifierAudit failed: ${err}`);
-    return { falsePositives: 0, falseNegatives: 0, severityMismatches: 0, countryMismatches: 0, skipped: true };
+    console.error(`classifier audit failed: ${err}`);
+    return totals;
   }
+}
+
+// On-demand / daily-cron full sweep — see GET /api/admin/audit-classifier.
+export async function runClassifierAudit(): Promise<ClassifierAuditResult> {
+  return runAudit(Date.now() + FULL_AUDIT_DEADLINE_MS);
+}
+
+// Embedded in every runIngest cycle (see ingest.ts) — this, not the daily
+// cron, is what makes the audit run "as frequently as possible" (2026-
+// 09-08 user request): riding ingest's own ~15min external-trigger
+// cadence rather than needing a more-than-daily Vercel cron.
+export async function runClassifierAuditSlice(): Promise<ClassifierAuditResult> {
+  return runAudit(Date.now() + SLICE_DEADLINE_MS);
 }
 
 export interface AuditFinding {

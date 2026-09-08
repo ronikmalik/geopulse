@@ -27,6 +27,7 @@ import { archiveClassifications } from "./classificationArchive";
 import { archiveFeedItems } from "./feedArchive";
 import { fetchRecentPrimaries, findDuplicateOf, type PrimaryCandidate } from "./eventDedup";
 import { backfillFeedArchiveEmbeddings } from "./embeddingBackfill";
+import { runClassifierAuditSlice } from "./classifierAudit";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -604,6 +605,18 @@ export async function runIngest(): Promise<IngestResult> {
     await withDeadline(backfillFeedArchiveEmbeddings(), 8_000, "embeddingBackfill");
   } catch (err) {
     errors.push(`embeddingBackfill: ${err}`);
+  }
+
+  // Same best-effort, deadline-raced, decoupled-from-the-insert-path
+  // posture as the embedding backfill above, for the same reason — see
+  // classifierAudit.ts's runClassifierAuditSlice doc comment for why this
+  // (not the daily cron) is what makes the classifier audit run "as
+  // frequently as possible" (2026-09-08 user request) without needing a
+  // more-than-daily Vercel cron.
+  try {
+    await withDeadline(runClassifierAuditSlice(), 8_000, "classifierAuditSlice");
+  } catch (err) {
+    errors.push(`classifierAuditSlice: ${err}`);
   }
 
   return {

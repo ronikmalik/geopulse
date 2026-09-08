@@ -24,8 +24,15 @@ export const config: VercelConfig = {
     // Gemini calls, which /api/ingest's cron-job.org 30s external trigger
     // has no room for. See src/lib/countryBriefs.ts.
     { path: "/api/admin/generate-briefs", schedule: "0 19 * * *" },
-    // Daily Gemini-assisted classifier audit — after briefs, on the same
-    // 55s-admin-route-budget reasoning. See src/lib/classifierAudit.ts.
+    // Daily full-sweep floor for the Gemini-assisted classifier audit —
+    // NOT the primary mechanism as of 2026-09-08. The real cadence is a
+    // small slice embedded in every runIngest cycle (~15min, riding
+    // cron-job.org's external trigger the same way embeddings/briefs
+    // piggyback on ingest where their budget allows), so coverage
+    // approaches "everything" within the same day rather than waiting
+    // for this once-daily catch-up. Kept as a floor for the same reason
+    // /api/ingest itself keeps a daily Vercel cron on top of its external
+    // trigger. See src/lib/classifierAudit.ts.
     { path: "/api/admin/audit-classifier", schedule: "0 20 * * *" },
   ],
 };
