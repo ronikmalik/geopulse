@@ -26,6 +26,7 @@ import { correlationGroupId } from "./correlation";
 import { archiveClassifications } from "./classificationArchive";
 import { archiveFeedItems } from "./feedArchive";
 import { fetchRecentPrimaries, findDuplicateOf, type PrimaryCandidate } from "./eventDedup";
+import { backfillFeedArchiveEmbeddings } from "./embeddingBackfill";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -567,9 +568,42 @@ export async function runIngest(): Promise<IngestResult> {
         .onConflictDoNothing({ target: events.url })
         .returning({ id: events.id });
       inserted += result.length;
+      // Was missing entirely until 2026-09-08 — feed_archive's own doc
+      // comment in src/db/schema.ts always claimed direct sources
+      // (USGS/EONET/GDACS/IODA/FIRMS) were included, but this path never
+      // actually called archiveFeedItems the way the RSS/GDELT/Telegram
+      // classify path and insertDirectItems (used by backfill.ts) both do.
+      // Found while wiring up embeddings, which read from feed_archive.
+      await archiveFeedItems(
+        rows.map((r) => ({
+          source: r.source,
+          url: r.url,
+          title: r.title,
+          summary: r.summary,
+          category: r.category,
+          country: r.country,
+          lat: r.lat,
+          lon: r.lon,
+          severity: r.severity,
+          publishedAt: r.publishedAt,
+        })),
+      );
     } catch (err) {
       errors.push(`direct insert: ${err}`);
     }
+  }
+
+  // Best-effort, non-blocking enrichment pass — see the doc comment on
+  // backfillFeedArchiveEmbeddings for why this runs decoupled from the
+  // insert paths above rather than inline per-item. A hung/slow Gemini
+  // call can't be allowed to blow this route's overall time budget (see
+  // the GDELT/cron-job.org 30s-timeout comment above), so it's raced
+  // against its own short deadline the same way withDeadline already
+  // guards the GDELT fetch.
+  try {
+    await withDeadline(backfillFeedArchiveEmbeddings(), 8_000, "embeddingBackfill");
+  } catch (err) {
+    errors.push(`embeddingBackfill: ${err}`);
   }
 
   return {

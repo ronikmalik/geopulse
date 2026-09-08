@@ -8,7 +8,27 @@ import {
   timestamp,
   index,
   boolean,
+  customType,
+  unique,
 } from "drizzle-orm/pg-core";
+
+// pgvector's `vector(N)` column type has no first-class Drizzle helper, so
+// this is a thin customType: the wire format pgvector expects for a vector
+// literal ("[0.1,0.2,...]") is identical to a JSON array of numbers, so
+// to/fromDriver are just JSON (de)serialization, not a real parser. See
+// src/lib/embeddings.ts for what actually populates this column and
+// docs/ARCHITECTURE.md for why (Gemini text-embedding-004, 768 dims).
+const vector = customType<{ data: number[]; driverData: string; config: { dimensions: number } }>({
+  dataType(config) {
+    return `vector(${config?.dimensions ?? 768})`;
+  },
+  toDriver(value: number[]): string {
+    return JSON.stringify(value);
+  },
+  fromDriver(value: string): number[] {
+    return JSON.parse(value);
+  },
+});
 
 export const events = pgTable(
   "events",
@@ -248,6 +268,17 @@ export const feedArchive = pgTable(
     archivedAt: timestamp("archived_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    // Nullable, populated asynchronously by src/lib/embeddingBackfill.ts —
+    // never blocks the ingest path that writes this row (see
+    // src/lib/feedArchive.ts's "must never fail or slow down live ingest"
+    // rule, which this follows the same way). Semantic vector over
+    // title+summary; the vector-similarity search this enables (see GET
+    // /api/events/[id]/similar) is scoped to this table rather than
+    // `events` because feed_archive is the durable full corpus (including
+    // rows that have since aged out of events' 30-day window or were
+    // folded in as a cross-outlet duplicate), and computing/storing the
+    // embedding once here avoids doing it twice for the same content.
+    embedding: vector("embedding", { dimensions: 768 }),
   },
   (table) => [
     index("feed_archive_country_idx").on(table.country),
@@ -258,3 +289,26 @@ export const feedArchive = pgTable(
 
 export type FeedArchiveRow = typeof feedArchive.$inferSelect;
 export type NewFeedArchiveRow = typeof feedArchive.$inferInsert;
+
+// Lightweight daily counter for Gemini API calls (embeddings now, country
+// briefs next) — NOT a hard billing cap the way translation_usage is.
+// Google Translate has no meaningful free tier, so translationUsage exists
+// to stop a real bill. Gemini's free tier has zero cost as long as no
+// billing account is linked to the project — exceeding it just gets a
+// 429, which embedBatch/backfillFeedArchiveEmbeddings already treat as a
+// soft failure to retry next cycle (same shape as translateBatch's null
+// return). This table exists purely for visibility (see
+// GET /api/admin/ai-usage) — "is this actually running, and how much" —
+// not to enforce a limit.
+export const aiUsage = pgTable(
+  "ai_usage",
+  {
+    id: serial("id").primaryKey(),
+    date: text("date").notNull(), // "YYYY-MM-DD", UTC
+    kind: text("kind").notNull(), // "embedding" | "brief"
+    count: integer("count").notNull().default(0),
+  },
+  (table) => [unique("ai_usage_date_kind_unique").on(table.date, table.kind)],
+);
+
+export type AiUsageRow = typeof aiUsage.$inferSelect;

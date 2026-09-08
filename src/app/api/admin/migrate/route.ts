@@ -80,6 +80,16 @@ const STATEMENTS = [
   sql`CREATE INDEX IF NOT EXISTS feed_archive_published_at_idx ON feed_archive (published_at)`,
   sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS primary_event_id INTEGER REFERENCES events(id)`,
   sql`CREATE INDEX IF NOT EXISTS events_primary_event_id_idx ON events (primary_event_id)`,
+  sql`CREATE EXTENSION IF NOT EXISTS vector`,
+  sql`ALTER TABLE feed_archive ADD COLUMN IF NOT EXISTS embedding vector(768)`,
+  sql`CREATE INDEX IF NOT EXISTS feed_archive_embedding_idx ON feed_archive USING hnsw (embedding vector_cosine_ops)`,
+  sql`CREATE TABLE IF NOT EXISTS ai_usage (
+    id SERIAL PRIMARY KEY,
+    date TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    count INTEGER NOT NULL DEFAULT 0,
+    CONSTRAINT ai_usage_date_kind_unique UNIQUE (date, kind)
+  )`,
 ];
 
 export async function GET(req: NextRequest) {

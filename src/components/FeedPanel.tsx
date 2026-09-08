@@ -84,6 +84,67 @@ function AdditionalSources({ eventId }: { eventId: number }) {
   );
 }
 
+interface SimilarEvent {
+  id: number;
+  source: string;
+  url: string;
+  title: string;
+  publishedAt: string;
+  similarity: number;
+}
+
+// Fetched on demand when a card is expanded, same lazy pattern as
+// AdditionalSources above — but shown for every card, not just clustered
+// ones (sourceCount > 0 is about same-story duplicates; this is
+// semantically-related-but-distinct past events, a different signal). See
+// src/lib/similarEvents.ts. Silently renders nothing if the embedding
+// pipeline hasn't reached this event yet (freshly-inserted, or
+// GEMINI_API_KEY not configured) — enrichment, not something to surface
+// as broken or loading-forever.
+function RelatedEvents({ eventId }: { eventId: number }) {
+  const [items, setItems] = useState<SimilarEvent[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/events/similar?id=${eventId}`)
+      .then((res) => res.json())
+      .then((data: { items: SimilarEvent[] }) => {
+        if (!cancelled) setItems(data.items ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId]);
+
+  if (!items || items.length === 0) return null;
+
+  return (
+    <div className="mt-1.5">
+      <p className="font-mono text-[10px] uppercase tracking-wider text-neutral-500">
+        Related:
+      </p>
+      <div className="mt-1 space-y-1">
+        {items.map((item) => (
+          <a
+            key={item.id}
+            href={item.url}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="block truncate font-mono text-[10px] text-neutral-400 hover:text-red-400"
+            title={item.title}
+          >
+            {sourceLabel(item.source)} — {item.title}
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function FeedPanel({
   events,
   loading,
@@ -170,6 +231,7 @@ export default function FeedPanel({
                   </a>
                 </div>
                 {sourceCount > 0 && <AdditionalSources eventId={event.id} />}
+                <RelatedEvents eventId={event.id} />
               </div>
             )}
           </button>
