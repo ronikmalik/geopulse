@@ -7,15 +7,16 @@ import { isCronAuthorized } from "@/lib/cronAuth";
 export const maxDuration = 55;
 export const dynamic = "force-dynamic";
 
-// One-off recovery tool: classification_archive keeps the original
+// Read-only debugging tool: classification_archive keeps the original
 // title/snippet/severity/category for every scored item (kept or
-// dropped), keyed by url — so a row that was correctly re-classified as
-// "no longer meets the standard" and purged from `events` can still have
-// its real content looked up here, instead of being unrecoverable once
-// deleted. Built for exactly this (2026-09-05): two Telegram posts were
-// purged under an over-broad rule change before a follow-up correction
-// showed they should have stayed; this recovers their original text so
-// they can be re-inserted correctly rather than lost outright.
+// dropped), keyed by url — so a row purged from `events` (or never kept
+// in the first place) can still have its real content inspected here.
+// Recovering a wrongly-dropped/purged item into the live feed should go
+// through the classifier-audit review flow instead (a false_negative
+// finding → reviewAuditFinding → applyFinding in classifierAudit.ts),
+// which — unlike this route's now-removed archive-restore companion —
+// correctly updates classification_archive.kept and works for RSS/GDELT
+// sources too, not just Telegram's fixed-per-channel-country shortcut.
 export async function GET(req: NextRequest) {
   if (!isCronAuthorized(req)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
