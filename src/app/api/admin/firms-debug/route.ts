@@ -13,7 +13,9 @@ export async function GET(req: NextRequest) {
   if (!mapKey) return NextResponse.json({ error: "no key configured" });
 
   const area = req.nextUrl.searchParams.get("area") ?? "world";
-  const url = `${FIRMS_ENDPOINT}/${mapKey}/VIIRS_SNPP_NRT/${area}/1`;
+  const product = req.nextUrl.searchParams.get("product") ?? "VIIRS_SNPP_NRT";
+  const dayRange = req.nextUrl.searchParams.get("dayRange") ?? "1";
+  const url = `${FIRMS_ENDPOINT}/${mapKey}/${product}/${area}/${dayRange}`;
   const res = await fetch(url, {
     headers: { "User-Agent": "geopulse-globe/1.0" },
     signal: AbortSignal.timeout(20_000),
@@ -40,6 +42,8 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     area,
+    product,
+    dayRange,
     ok: res.ok,
     status: res.status,
     firstLine: lines[0]?.slice(0, 300) ?? null,
