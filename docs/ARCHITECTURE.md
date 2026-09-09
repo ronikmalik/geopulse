@@ -232,13 +232,17 @@ In the order they'd actually get built:
    scores the same as one hitting a capital. Needs population/infrastructure exposure
    data (WorldPop, port/energy infrastructure) joined against event geometry.
 4. **Structural country context** (GDP, trade dependence, governance indicators) —
-   World Bank GDP/population are wired as standalone ticker layers
-   (`src/lib/dataLayers.ts`), not joined into the risk/exposure model. WGI itself is
-   currently unreachable (see §4). IMF, UN Comtrade, WTO, EIA, FAOSTAT: not started.
-5. **Broader source coverage**: ACLED, UCDP (need registered API keys — a decision for
-   the account owner), Cloudflare Radar, RIPE Atlas/RIPEstat, AISstream, sanctions
-   feeds (OFAC/EU/UK/UN), OpenSanctions, X/Twitter (a real structural gap — see
-   `docs/ROADMAP.md`).
+   World Bank GDP/population/grid-loss, OWID energy mix, IMF PortWatch (chokepoint
+   transits), UN Comtrade (top trade partners), FAO Food Price Index, US travel
+   advisories, GPS/GNSS jamming, submarine cable exposure, and OpenAQ air quality are
+   all wired as standalone context/ticker layers (`src/lib/dataLayers.ts`, added
+   2026-09-08 — see `docs/API_SOURCES.md`), not joined into the risk/exposure model.
+   WGI itself is currently unreachable (see §4). WTO, EIA, full FAOSTAT: not started.
+5. **Broader source coverage**: Cloudflare Radar, RIPE Atlas/RIPEstat, AISstream,
+   sanctions feeds (OFAC/EU/UK/UN), OpenSanctions, X/Twitter (a real structural gap —
+   see `docs/ROADMAP.md`). ACLED, UCDP, and FATF's grey/black list were all
+   investigated and confirmed blocked (lag, access-approval terms, or bot-detection —
+   see `docs/API_SOURCES.md`), not open items needing a decision.
 6. **Admin health/observability panel UI** — the data exists
    (`GET /api/admin/health`, `GET /api/admin/ai-usage`,
    `GET /api/admin/translation-usage`), but nothing renders it as a page yet. (Note:

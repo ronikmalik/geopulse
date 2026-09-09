@@ -3,6 +3,7 @@ import {
   fetchWorldBankIndicatorForCountry,
   fetchWorldBankCountryMeta,
 } from "@/lib/sources/worldbank";
+import { fetchTravelAdvisoryFor, type TravelAdvisory } from "@/lib/sources/travelAdvisories";
 
 export interface CountryDossierFigure {
   value: number;
@@ -17,6 +18,7 @@ export interface CountryDossier {
   capitalCity: string | null;
   gdpUsd: CountryDossierFigure | null;
   population: CountryDossierFigure | null;
+  travelAdvisory: TravelAdvisory | null;
   summary: string;
 }
 
@@ -34,15 +36,17 @@ export async function fetchCountryDossier(iso2: string): Promise<CountryDossier 
   const iso3 = ALPHA2_TO_ALPHA3[iso2.toUpperCase()];
   if (!iso3) return null;
 
-  const [gdp, population, meta] = await Promise.all([
+  const [gdp, population, meta, travelAdvisory] = await Promise.all([
     fetchWorldBankIndicatorForCountry(iso3, "NY.GDP.MKTP.CD").catch(() => null),
     fetchWorldBankIndicatorForCountry(iso3, "SP.POP.TOTL").catch(() => null),
     fetchWorldBankCountryMeta(iso3).catch(() => null),
+    fetchTravelAdvisoryFor(iso2).catch(() => null),
   ]);
 
-  if (!gdp && !population && !meta) return null;
+  if (!gdp && !population && !meta && !travelAdvisory) return null;
 
-  const countryName = meta?.name ?? gdp?.countryName ?? population?.countryName ?? iso2;
+  const countryName =
+    meta?.name ?? gdp?.countryName ?? population?.countryName ?? travelAdvisory?.countryName ?? iso2;
 
   const region = meta?.region?.trim() || null;
 
@@ -63,6 +67,9 @@ export async function fetchCountryDossier(iso2: string): Promise<CountryDossier 
   if (meta?.capitalCity) {
     parts.push(`capital ${meta.capitalCity}`);
   }
+  if (travelAdvisory) {
+    parts.push(`US travel advisory Level ${travelAdvisory.level} (${travelAdvisory.levelLabel})`);
+  }
 
   // Some World Bank capital names already end in a period (e.g. "Washington
   // D.C."), so don't double it up with the sentence-closing one.
@@ -80,6 +87,7 @@ export async function fetchCountryDossier(iso2: string): Promise<CountryDossier 
     capitalCity: meta?.capitalCity ?? null,
     gdpUsd: gdp?.value != null ? { value: gdp.value, year: gdp.year } : null,
     population: population?.value != null ? { value: population.value, year: population.year } : null,
+    travelAdvisory,
     summary,
   };
 }

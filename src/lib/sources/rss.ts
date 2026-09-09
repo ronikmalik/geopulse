@@ -1,5 +1,6 @@
 import Parser from "rss-parser";
 import type { RawItem } from "./gdelt";
+import { stripEmoji } from "../textSanitize";
 
 const parser = new Parser({
   timeout: 10_000,
@@ -222,8 +223,8 @@ export async function fetchRssFeed(feed: {
       .map((item) => ({
         source: `rss:${feed.name}`,
         url: item.link!,
-        title: item.title!,
-        snippet: (item.contentSnippet ?? "").slice(0, 400),
+        title: stripEmoji(item.title!),
+        snippet: stripEmoji(item.contentSnippet ?? "").slice(0, 400),
         publishedAt: item.isoDate ? new Date(item.isoDate) : new Date(),
       }));
   } catch (err) {

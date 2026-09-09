@@ -14,6 +14,14 @@ import {
   flightsToPoints,
   commercialFlightsToPoints,
   weatherToPoints,
+  gpsJammingToPoints,
+  submarineCablesToPoints,
+  travelAdvisoriesToPoints,
+  gridLossToPoints,
+  energyMixToPoints,
+  tradeBalanceToPoints,
+  portCongestionToPoints,
+  airQualityToPoints,
 } from "@/lib/mapPoints";
 import { CATEGORIES, type Category } from "@/lib/categories";
 import { DATA_LAYER_POLL_MS, type DataLayerId } from "@/lib/dataLayers";
@@ -27,6 +35,15 @@ import type {
   CftcResponse,
   CyberResponse,
   TelegramLayerResponse,
+  GpsJammingResponse,
+  SubmarineCablesResponse,
+  TravelAdvisoriesResponse,
+  GridLossResponse,
+  EnergyMixResponse,
+  FoodPriceIndexResponse,
+  AirQualityResponse,
+  PortCongestionResponse,
+  TradeBalanceResponse,
 } from "@/lib/dataLayerTypes";
 import type { GeoEvent } from "@/lib/types";
 
@@ -225,6 +242,51 @@ export default function Home() {
     DATA_LAYER_POLL_MS.telegram,
     activeDataLayers.has("telegram"),
   );
+  const gpsJammingLayer = useLiveLayer<GpsJammingResponse>(
+    "/api/layers/gps-jamming",
+    DATA_LAYER_POLL_MS["gps-jamming"],
+    activeDataLayers.has("gps-jamming"),
+  );
+  const submarineCablesLayer = useLiveLayer<SubmarineCablesResponse>(
+    "/api/layers/submarine-cables",
+    DATA_LAYER_POLL_MS["submarine-cables"],
+    activeDataLayers.has("submarine-cables"),
+  );
+  const travelAdvisoriesLayer = useLiveLayer<TravelAdvisoriesResponse>(
+    "/api/layers/travel-advisories",
+    DATA_LAYER_POLL_MS["travel-advisories"],
+    activeDataLayers.has("travel-advisories"),
+  );
+  const gridLossLayer = useLiveLayer<GridLossResponse>(
+    "/api/layers/grid-loss",
+    DATA_LAYER_POLL_MS["grid-loss"],
+    activeDataLayers.has("grid-loss"),
+  );
+  const energyMixLayer = useLiveLayer<EnergyMixResponse>(
+    "/api/layers/energy-mix",
+    DATA_LAYER_POLL_MS["energy-mix"],
+    activeDataLayers.has("energy-mix"),
+  );
+  const foodPriceIndexLayer = useLiveLayer<FoodPriceIndexResponse>(
+    "/api/layers/food-price-index",
+    DATA_LAYER_POLL_MS["food-price-index"],
+    activeDataLayers.has("food-price-index"),
+  );
+  const airQualityLayer = useLiveLayer<AirQualityResponse>(
+    "/api/layers/air-quality",
+    DATA_LAYER_POLL_MS["air-quality"],
+    activeDataLayers.has("air-quality"),
+  );
+  const portCongestionLayer = useLiveLayer<PortCongestionResponse>(
+    "/api/layers/port-congestion",
+    DATA_LAYER_POLL_MS["port-congestion"],
+    activeDataLayers.has("port-congestion"),
+  );
+  const tradeBalanceLayer = useLiveLayer<TradeBalanceResponse>(
+    "/api/layers/trade-balance",
+    DATA_LAYER_POLL_MS["trade-balance"],
+    activeDataLayers.has("trade-balance"),
+  );
 
   // Forex is the app's headline feature, not an opt-in layer — it polls
   // continuously rather than gating behind a checkbox.
@@ -252,12 +314,44 @@ export default function Home() {
     if (activeDataLayers.has("weather") && weatherLayer.data) {
       points.push(...weatherToPoints(weatherLayer.data.conditions));
     }
+    if (activeDataLayers.has("gps-jamming") && gpsJammingLayer.data?.summary) {
+      points.push(...gpsJammingToPoints(gpsJammingLayer.data.summary.regions));
+    }
+    if (activeDataLayers.has("submarine-cables") && submarineCablesLayer.data?.summary) {
+      points.push(...submarineCablesToPoints(submarineCablesLayer.data.summary.topCountries));
+    }
+    if (activeDataLayers.has("travel-advisories") && travelAdvisoriesLayer.data) {
+      points.push(...travelAdvisoriesToPoints(travelAdvisoriesLayer.data.advisories));
+    }
+    if (activeDataLayers.has("grid-loss") && gridLossLayer.data) {
+      points.push(...gridLossToPoints(gridLossLayer.data.countries));
+    }
+    if (activeDataLayers.has("energy-mix") && energyMixLayer.data) {
+      points.push(...energyMixToPoints(energyMixLayer.data.countries));
+    }
+    if (activeDataLayers.has("trade-balance") && tradeBalanceLayer.data) {
+      points.push(...tradeBalanceToPoints(tradeBalanceLayer.data.countries));
+    }
+    if (activeDataLayers.has("port-congestion") && portCongestionLayer.data) {
+      points.push(...portCongestionToPoints(portCongestionLayer.data.chokepoints));
+    }
+    if (activeDataLayers.has("air-quality") && airQualityLayer.data) {
+      points.push(...airQualityToPoints(airQualityLayer.data.readings));
+    }
     return points;
   }, [
     activeDataLayers,
     flightsLayer.data,
     commercialFlightsLayer.data,
     weatherLayer.data,
+    gpsJammingLayer.data,
+    submarineCablesLayer.data,
+    travelAdvisoriesLayer.data,
+    gridLossLayer.data,
+    energyMixLayer.data,
+    tradeBalanceLayer.data,
+    portCongestionLayer.data,
+    airQualityLayer.data,
   ]);
 
   const dashboardProps = {
@@ -286,6 +380,15 @@ export default function Home() {
     population: populationLayer.data,
     cyber: cyberLayer.data,
     telegram: telegramLayer.data,
+    gpsJamming: gpsJammingLayer.data,
+    submarineCables: submarineCablesLayer.data,
+    travelAdvisories: travelAdvisoriesLayer.data,
+    gridLoss: gridLossLayer.data,
+    energyMix: energyMixLayer.data,
+    foodPriceIndex: foodPriceIndexLayer.data,
+    airQuality: airQualityLayer.data,
+    portCongestion: portCongestionLayer.data,
+    tradeBalance: tradeBalanceLayer.data,
     forex: forexLayer.data,
     cftc: cftcLayer.data,
     connectionStatus: status,

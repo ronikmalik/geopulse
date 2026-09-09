@@ -48,6 +48,12 @@ Not covered by the brief's own acceptance criteria, but now core to the live pro
   population, forex, CFTC positioning, cyber (CISA KEV).
 - **Daily country Pulse Level/Momentum snapshots** (`country_state_history`) —
   unblocks future trend charts and baseline-relative momentum, neither built yet.
+- **Nine new context layers** (2026-09-08, sourced from a deep-dive into
+  worldmonitor.app's own public data-fetching code): GPS/GNSS jamming, submarine
+  cable exposure, US travel advisories (also in the country dossier), World Bank
+  grid-loss, OWID energy mix, FAO Food Price Index, OpenAQ air quality, IMF
+  PortWatch chokepoint traffic, and UN Comtrade trade partners. All unscored,
+  display-only — see `docs/API_SOURCES.md`'s Integrated table.
 
 See `docs/ARCHITECTURE.md` for how all of this fits together.
 
@@ -56,14 +62,19 @@ See `docs/ARCHITECTURE.md` for how all of this fits together.
 - **Phase 1–2** (schema, country metadata, USGS/EONET/GDACS/GDELT/RSS/Telegram/FIRMS):
   done.
 - **Phase 3** (ACLED, UCDP, ReliefWeb, UNHCR/OCHA, Cloudflare/RIPE): not started.
-  ReliefWeb specifically blocked (see API_SOURCES.md); the rest need API key
-  registration decisions from the account owner or further endpoint verification.
-  Humanitarian coverage today comes from GDELT/RSS/Telegram keyword classification,
-  not a dedicated humanitarian-data API.
+  ReliefWeb and UCDP specifically blocked (see API_SOURCES.md — UCDP's GED needs a
+  manually-approved access token and has an ~18-month data lag, worse than ACLED's
+  already-rejected weekly lag); the rest need API key registration decisions from the
+  account owner or further endpoint verification. Humanitarian coverage today comes
+  from GDELT/RSS/Telegram keyword classification, not a dedicated humanitarian-data
+  API.
 - **Phase 4** (structural country context — World Bank, WGI, IMF, Comtrade, WTO, EIA,
-  FAOSTAT): World Bank GDP/population wired as standalone tickers only, not joined to
-  the risk model. WGI specifically blocked (dead indicator codes on the live API —
-  see API_SOURCES.md). Rest not started.
+  FAOSTAT): World Bank GDP/population/grid-loss wired as standalone tickers, not
+  joined to the risk model. IMF PortWatch (port congestion) and UN Comtrade (top
+  trade partners) integrated 2026-09-08 as unscored context layers, same treatment —
+  see API_SOURCES.md. WGI specifically blocked (dead indicator codes on the live API
+  — see API_SOURCES.md). WTO, EIA, full FAOSTAT not started (FAO Food Price Index, a
+  simpler global-index cut of the same territory, is integrated as a context layer).
 - **Phase 5** (event clustering, pillar mapping, Pulse Level engine, Momentum
   engine): pillar mapping + Pulse Level + Momentum engines are **done**.
   Near-duplicate event clustering (same story, multiple outlets) is **done**
@@ -93,9 +104,13 @@ See `docs/ARCHITECTURE.md` for how all of this fits together.
    done (`eventDedup.ts`). Design the clustering approach (geographic + temporal +
    semantic proximity, confidence ladder per brief §5) before writing code — this is
    standalone work, not an incremental bolt-on.
-2. **Supply Chain & Resource Security pillar coverage.** Currently the only pillar
-   with zero signal of any kind. IMF PortWatch is the most promising unverified
-   candidate.
+2. **Supply Chain & Resource Security pillar coverage.** Still the only pillar with
+   zero SCORED signal — IMF PortWatch (chokepoint vessel transits) is now integrated
+   as an unscored context layer (2026-09-08), which gives an analyst something to look
+   at but doesn't feed the risk model itself. Turning chokepoint congestion into an
+   actual scored pillar signal (a real historical baseline per chokepoint, since raw
+   counts alone aren't comparable across wildly different-traffic straits) is the
+   next real step here, not a new source search.
 3. **A dedicated always-on worker**, decoupled from any single external scheduler.
    cron-job.org is the real primary ingest trigger and is working reliably; GitHub
    Actions now also fires reliably as a real backup after a 2026-09-04 fix. All
@@ -107,8 +122,9 @@ See `docs/ARCHITECTURE.md` for how all of this fits together.
    `GET /api/admin/ai-usage`, `GET /api/admin/translation-usage`); none of it is
    rendered anywhere yet.
 5. **Broader source coverage** per `docs/API_SOURCES.md`'s prioritized candidate list
-   — ACLED/UCDP for conflict depth, Cloudflare Radar/RIPE for infrastructure and
-   climate depth, sanctions feeds for Political & Governance.
+   — Cloudflare Radar/RIPE for infrastructure and climate depth, sanctions feeds for
+   Political & Governance. ACLED and UCDP are both confirmed blocked (lag/access
+   terms, see API_SOURCES.md), not open items.
 6. **X/Twitter ingestion** — a real structural gap, not a rounding error. A
    2026-09-04 pass sampling ISW/CTP's own source citations across Russia-Ukraine,
    Iran, China-Taiwan, and Korea found this product has zero X/Twitter coverage,

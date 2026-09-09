@@ -22,6 +22,15 @@ import type {
   CftcResponse,
   CyberResponse,
   TelegramLayerResponse,
+  GpsJammingResponse,
+  SubmarineCablesResponse,
+  TravelAdvisoriesResponse,
+  GridLossResponse,
+  EnergyMixResponse,
+  FoodPriceIndexResponse,
+  AirQualityResponse,
+  PortCongestionResponse,
+  TradeBalanceResponse,
 } from "@/lib/dataLayerTypes";
 
 export type DashboardTab = "feed" | "risk" | "layers" | "forex" | "trends";
@@ -66,6 +75,15 @@ interface DashboardProps {
   population: PopulationResponse | null;
   cyber: CyberResponse | null;
   telegram: TelegramLayerResponse | null;
+  gpsJamming: GpsJammingResponse | null;
+  submarineCables: SubmarineCablesResponse | null;
+  travelAdvisories: TravelAdvisoriesResponse | null;
+  gridLoss: GridLossResponse | null;
+  energyMix: EnergyMixResponse | null;
+  foodPriceIndex: FoodPriceIndexResponse | null;
+  airQuality: AirQualityResponse | null;
+  portCongestion: PortCongestionResponse | null;
+  tradeBalance: TradeBalanceResponse | null;
 
   forex: ForexResponse | null;
   cftc: CftcResponse | null;
@@ -180,6 +198,15 @@ export default function Dashboard(props: DashboardProps) {
             population={props.population}
             cyber={props.cyber}
             telegram={props.telegram}
+            gpsJamming={props.gpsJamming}
+            submarineCables={props.submarineCables}
+            travelAdvisories={props.travelAdvisories}
+            gridLoss={props.gridLoss}
+            energyMix={props.energyMix}
+            foodPriceIndex={props.foodPriceIndex}
+            airQuality={props.airQuality}
+            portCongestion={props.portCongestion}
+            tradeBalance={props.tradeBalance}
           />
         )}
         {activeTab === "forex" && (

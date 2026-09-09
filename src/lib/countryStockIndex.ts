@@ -1,11 +1,16 @@
 // ISO 3166-1 alpha-2 country code -> representative major stock index.
 // Symbols use the common "^"-prefixed convention (Yahoo/Google Finance
 // style) that most financial data APIs, including Finnhub, recognize for
-// index quotes. NOT yet live-verified against Finnhub's actual free-tier
-// coverage — international indices may be limited/unavailable on the free
-// plan. Verify once FINNHUB_API_KEY is set and adjust symbols/coverage as
-// needed; countries with no confirmed-working symbol should be removed
-// rather than left showing a silently-wrong or empty quote.
+// index quotes. CONFIRMED 2026-09-08 (see docs/API_SOURCES.md, Finnhub
+// row): Finnhub's free tier is real-time US-only — the 60+ global
+// exchanges these non-US symbols resolve to require a paid Finnhub plan.
+// Only the US row (^GSPC) is reliably live without one; every other
+// country here will silently return no quote (fetchIndexQuote returns
+// null on an unrecognized symbol rather than erroring) until either a
+// paid Finnhub plan or a different provider is wired in — a market pass
+// this session (Alpaca, Alpha Vantage, Marketstack, Financial Modeling
+// Prep, Polygon.io) found no free/commercial-legal/real-time alternative,
+// see docs/API_SOURCES.md's "Candidates evaluated" table.
 export interface CountryIndex {
   symbol: string;
   name: string;

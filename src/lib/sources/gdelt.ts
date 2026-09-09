@@ -1,4 +1,5 @@
 import { Agent } from "undici";
+import { stripEmoji } from "../textSanitize";
 
 export interface RawItem {
   source: string;
@@ -149,7 +150,7 @@ export async function fetchGdelt(
   return (data.articles ?? []).map((a) => ({
     source: "gdelt",
     url: a.url,
-    title: a.title,
+    title: stripEmoji(a.title),
     snippet: `${a.domain} (${a.sourcecountry})`,
     publishedAt: parseGdeltDate(a.seendate),
   }));

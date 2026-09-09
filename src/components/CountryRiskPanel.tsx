@@ -62,6 +62,12 @@ interface CountryThreatDetail {
   brief: CountryBrief | null;
 }
 
+interface TravelAdvisory {
+  level: 1 | 2 | 3 | 4;
+  levelLabel: string;
+  url: string;
+}
+
 interface CountryDossier {
   countryName: string;
   region: string | null;
@@ -69,6 +75,7 @@ interface CountryDossier {
   capitalCity: string | null;
   gdpUsd: { value: number; year: string } | null;
   population: { value: number; year: string } | null;
+  travelAdvisory: TravelAdvisory | null;
   summary: string;
 }
 
@@ -344,6 +351,23 @@ export default function CountryRiskPanel({
                           <p className="font-mono text-[10px] leading-relaxed text-neutral-400">
                             {snapshot.dossier.summary}
                           </p>
+                          {snapshot.dossier.travelAdvisory && (
+                            <a
+                              href={snapshot.dossier.travelAdvisory.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className={`mt-1.5 inline-block rounded-sm border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider ${
+                                snapshot.dossier.travelAdvisory.level >= 3
+                                  ? "border-amber-800 text-amber-500"
+                                  : "border-neutral-700 text-neutral-500"
+                              }`}
+                              title="US State Dept Travel Advisory — opens the official advisory page"
+                            >
+                              Travel Advisory Level {snapshot.dossier.travelAdvisory.level}:{" "}
+                              {snapshot.dossier.travelAdvisory.levelLabel}
+                            </a>
+                          )}
                           {(snapshot.dossier.gdpUsd || snapshot.dossier.population) && (
                             <div className="mt-1.5 flex items-center gap-4">
                               {snapshot.dossier.gdpUsd && (

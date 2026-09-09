@@ -25,13 +25,20 @@ integrated despite fitting the same brief.
 
 The following modules are **standalone and intentionally not integrated**
 into the events table: `openmeteo.ts`, `adsblol.ts`, `opensky.ts`,
-`worldbank.ts`, `cisakev.ts`, `forex.ts`, `cftc.ts`. Each exports a working,
-live-verified fetch function returning normalized data, but none are called
-from `ingest.ts`. Live-tracked flights/weather, structural indicators
-(GDP/population), and `cisakev.ts` (CISA's vulnerability catalog has no
-country attribution at all) don't fit the "point event on the globe" model
-the `events` table and feed use; they're instead surfaced as opt-in Context
-Layers (`/api/layers/*`) — see `src/lib/dataLayers.ts`.
+`worldbank.ts`, `cisakev.ts`, `forex.ts`, `cftc.ts`, `gpsjam.ts`,
+`submarineCables.ts`, `travelAdvisories.ts`, `owidEnergy.ts`,
+`faoFoodPrice.ts`, `openaq.ts`, `portwatch.ts`, `comtrade.ts`. Each exports a
+working, live-verified fetch function returning normalized data, but none
+are called from `ingest.ts`. Live-tracked flights/weather, structural
+indicators (GDP/population/grid-loss/energy-mix/trade), point-in-time
+snapshots (GPS jamming, submarine cable exposure, travel advisories, port
+congestion, food prices, air quality), and `cisakev.ts` (CISA's
+vulnerability catalog has no country attribution at all) don't fit the
+"point event on the globe" model the `events` table and feed use; they're
+instead surfaced as opt-in Context Layers (`/api/layers/*`) — see
+`src/lib/dataLayers.ts`. `travelAdvisories.ts` is a partial exception: it's
+also folded into the country-click dossier (`src/lib/countryDossier.ts`)
+as a per-country fact, not just a ticker.
 
 Every integrated source's licensing/commercial-use terms are tracked in
 `src/lib/sourceRegistry.ts` — check there (and the provider's actual terms)
@@ -46,9 +53,11 @@ disease outbreaks) — see `src/lib/categories.ts`. Revisit ReliefWeb if an
 appname is ever registered; its structured disaster/report data would be a
 real upgrade over GDELT's free-text search for the Human & Social pillar.
 
-`gpsjam.org` (GPS interference) was investigated but skipped — its data feed
-is fetched server-side by their own app and isn't exposed at a documented
-public URL, so there's nothing safe to build against yet.
+`gpsjam.org` (GPS interference) — **integrated 2026-09-08**, correcting an
+earlier wrong verdict here that said its data feed wasn't exposed at a
+documented public URL. It is: `gpsjam.org/data/manifest.csv` +
+`{date}-h3_4.csv`, found via worldmonitor.app's public source
+(github.com/koala73/worldmonitor). See `gpsjam.ts`.
 
 **Crypto markets, trending GitHub repos, generic satellite tracking
 (CelesTrak), and Eurozone/BIS macro indicators (ECB, Eurostat, BIS) were

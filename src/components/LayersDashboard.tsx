@@ -20,6 +20,15 @@ import type {
   PopulationResponse,
   CyberResponse,
   TelegramLayerResponse,
+  GpsJammingResponse,
+  SubmarineCablesResponse,
+  TravelAdvisoriesResponse,
+  GridLossResponse,
+  EnergyMixResponse,
+  FoodPriceIndexResponse,
+  AirQualityResponse,
+  PortCongestionResponse,
+  TradeBalanceResponse,
 } from "@/lib/dataLayerTypes";
 
 interface LayersDashboardProps {
@@ -35,6 +44,15 @@ interface LayersDashboardProps {
   population: PopulationResponse | null;
   cyber: CyberResponse | null;
   telegram: TelegramLayerResponse | null;
+  gpsJamming: GpsJammingResponse | null;
+  submarineCables: SubmarineCablesResponse | null;
+  travelAdvisories: TravelAdvisoriesResponse | null;
+  gridLoss: GridLossResponse | null;
+  energyMix: EnergyMixResponse | null;
+  foodPriceIndex: FoodPriceIndexResponse | null;
+  airQuality: AirQualityResponse | null;
+  portCongestion: PortCongestionResponse | null;
+  tradeBalance: TradeBalanceResponse | null;
 }
 
 const LAYER_DESCRIPTIONS: Partial<Record<Category, string>> = {
@@ -77,6 +95,15 @@ export default function LayersDashboard({
   population,
   cyber,
   telegram,
+  gpsJamming,
+  submarineCables,
+  travelAdvisories,
+  gridLoss,
+  energyMix,
+  foodPriceIndex,
+  airQuality,
+  portCongestion,
+  tradeBalance,
 }: LayersDashboardProps) {
   function renderPreview(id: DataLayerId) {
     if (id === "flights" && flights) {
@@ -167,6 +194,139 @@ export default function LayersDashboard({
         </div>
       );
     }
+    if (id === "gps-jamming" && gpsJamming?.summary) {
+      const s = gpsJamming.summary;
+      return (
+        <div className="mt-1.5 space-y-0.5 text-[11px] text-neutral-500">
+          <div>
+            {s.date} — {s.totalBadHexes} suspect cells
+            {s.globalSuspect ? " (flagged)" : ""}
+          </div>
+          {s.regions.slice(0, 5).map((r) => (
+            <div key={r.countryIso2} className="flex justify-between gap-2">
+              <span className="truncate">{r.countryName}</span>
+              <span className="shrink-0">{r.badAircraftCount} reports</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    if (id === "submarine-cables" && submarineCables?.summary) {
+      const s = submarineCables.summary;
+      return (
+        <div className="mt-1.5 space-y-0.5 text-[11px] text-neutral-500">
+          <div>
+            {s.totalCables} cables, {s.totalLandingPoints} landing points
+          </div>
+          {s.topCountries.slice(0, 5).map((c) => (
+            <div key={c.countryIso2} className="flex justify-between gap-2">
+              <span className="truncate">{c.countryName}</span>
+              <span className="shrink-0">{c.landingPointCount}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    if (id === "travel-advisories" && travelAdvisories) {
+      return (
+        <div className="mt-1.5 space-y-0.5 text-[11px] text-neutral-500">
+          {travelAdvisories.advisories.slice(0, 6).map((a) => (
+            <div key={a.country} className="flex justify-between gap-2">
+              <span className="truncate">{a.countryName}</span>
+              <span className="shrink-0">Level {a.level}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    if (id === "grid-loss" && gridLoss) {
+      return (
+        <div className="mt-1.5 space-y-0.5 text-[11px] text-neutral-500">
+          {gridLoss.countries.slice(0, 5).map((c) => (
+            <div key={c.countryIso3} className="flex justify-between gap-2">
+              <span className="truncate">{c.countryName}</span>
+              <span className="shrink-0">{c.value != null ? `${c.value.toFixed(1)}%` : "—"}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    if (id === "energy-mix" && energyMix) {
+      return (
+        <div className="mt-1.5 space-y-0.5 text-[11px] text-neutral-500">
+          {energyMix.countries.slice(0, 5).map((c) => (
+            <div key={c.countryIso3} className="flex justify-between gap-2">
+              <span className="truncate">{c.countryName}</span>
+              <span className="shrink-0">{c.value.toFixed(0)}% fossil</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    if (id === "food-price-index" && foodPriceIndex?.index) {
+      const idx = foodPriceIndex.index;
+      return (
+        <div className="mt-1.5 text-[11px] text-neutral-500">
+          {idx.value.toFixed(1)} ({idx.date})
+          {idx.changePct != null && (
+            <span className={idx.changePct >= 0 ? "text-red-400" : "text-emerald-400"}>
+              {" "}
+              {idx.changePct >= 0 ? "+" : ""}
+              {idx.changePct.toFixed(1)}% vs prior month
+            </span>
+          )}
+        </div>
+      );
+    }
+    if (id === "air-quality" && airQuality) {
+      return (
+        <div className="mt-1.5 space-y-0.5 text-[11px] text-neutral-500">
+          {airQuality.readings
+            .filter((r) => r.pm25 != null)
+            .slice(0, 6)
+            .map((r) => (
+              <div key={r.location.name} className="flex justify-between gap-2">
+                <span className="truncate">{r.location.name}</span>
+                <span className="shrink-0">
+                  {r.pm25} {r.unit}
+                </span>
+              </div>
+            ))}
+        </div>
+      );
+    }
+    if (id === "port-congestion" && portCongestion) {
+      return (
+        <div className="mt-1.5 space-y-0.5 text-[11px] text-neutral-500">
+          <div className="text-neutral-600">Quietest chokepoints (vessels/day):</div>
+          {portCongestion.chokepoints.slice(0, 6).map((c) => (
+            <div key={c.name} className="flex justify-between gap-2">
+              <span className="truncate">{c.name}</span>
+              <span className="shrink-0">{c.totalVessels}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    if (id === "trade-balance" && tradeBalance) {
+      return (
+        <div className="mt-1.5 space-y-1.5 text-[11px] text-neutral-500">
+          {tradeBalance.countries.map((c) => (
+            <div key={c.reporterIso2}>
+              <div className="text-neutral-400">
+                {c.reporterName} ({c.period})
+              </div>
+              {c.topPartners.slice(0, 3).map((p) => (
+                <div key={p.partnerName} className="flex justify-between gap-2 pl-2">
+                  <span className="truncate">{p.partnerName}</span>
+                  <span className="shrink-0">{formatUsd(p.exportValueUsd)}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      );
+    }
     return null;
   }
 
@@ -231,7 +391,7 @@ export default function LayersDashboard({
           Context Layers
         </h2>
         <p className="mb-2 font-mono text-[10px] text-red-800">
-          Structural and situational context, not scored events. Flights/weather render on the globe; the rest preview here.
+          Structural and situational context, not scored events. Flights, Weather, GPS Jamming, Submarine Cables, Travel Advisories, Grid Losses, Energy Mix, Trade Balance, Chokepoint Traffic, and Air Quality all render as points on the globe (toggle one, then look at the map) and preview here; GDP/Population/Cyber/Telegram/Food Price Index are ticker-only for now.
         </p>
         {DATA_LAYERS.map((id) => {
           const isActive = activeDataLayers.has(id);

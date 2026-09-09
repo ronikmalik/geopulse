@@ -1,7 +1,8 @@
 // Finnhub quote API — requires a free API key (FINNHUB_API_KEY env var),
-// unlike every other source in this directory. Free-tier coverage of
-// non-US indices is NOT yet verified live; adjust src/lib/countryStockIndex.ts
-// if a given symbol comes back empty/wrong once a key is available.
+// unlike every other source in this directory. CONFIRMED 2026-09-08: the
+// free tier's real-time coverage is US equities only — non-US indices in
+// src/lib/countryStockIndex.ts need a paid Finnhub plan to resolve (they
+// come back as a silent null, not an error). See docs/API_SOURCES.md.
 // https://finnhub.io/docs/api/quote
 const FINNHUB_ENDPOINT = "https://finnhub.io/api/v1/quote";
 

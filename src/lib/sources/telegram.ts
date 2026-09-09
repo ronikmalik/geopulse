@@ -1,4 +1,5 @@
 import type { Category } from "../categories";
+import { stripEmoji } from "../textSanitize";
 import type { DirectItem } from "./direct";
 import { COUNTRY_CENTROIDS } from "../countryCentroids";
 import { translateBatch } from "../translate";
@@ -92,7 +93,8 @@ function sanitizeForStorage(text: string): string {
     if (isControlChar && !isTabOrNewline) continue;
     out += ch;
   }
-  return out.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
+  out = out.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
+  return stripEmoji(out);
 }
 
 function decodeEntities(html: string): string {
