@@ -65,11 +65,15 @@ Not covered by the brief's own acceptance criteria, but now core to the live pro
   PortWatch chokepoint traffic, and UN Comtrade trade partners. All unscored,
   display-only — see `docs/API_SOURCES.md`'s Integrated table.
 - **Shadow-mode predictive risk model** (2026-09-09, not user-facing) — a hand-rolled
-  logistic regression (no new dependency), trained weekly, predicting whether a
-  country's Pulse Level jumps 2+ within 14 days. Backtested on real held-out history
-  and separately shadow-predicts + self-grades every country live, but stays internal
-  until a run's backtest actually clears a real accuracy bar — visibility gated on
-  measured evidence, not a guessed date. See `docs/ARCHITECTURE.md` §9a.
+  linear regression (no new dependency), trained weekly, predicting a country's actual
+  future score at 7 horizons (1-14 days out — a trajectory, not a yes/no flag), Pulse
+  Level derived from that via the same function `risk.ts` already uses elsewhere.
+  Training data starts strictly from 2026-09-09 onward (the app's launch week is
+  excluded — verified to contain cold-start artifacts, not real signal), plus a
+  per-country burn-in for the same reason. Backtested against a naive
+  no-change baseline and separately shadow-predicts + self-grades every country live,
+  but stays internal until a run's backtest actually beats that baseline — visibility
+  gated on measured evidence, not a guessed date. See `docs/ARCHITECTURE.md` §9a.
 
 See `docs/ARCHITECTURE.md` for how all of this fits together.
 

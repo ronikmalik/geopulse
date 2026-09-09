@@ -292,24 +292,48 @@ country over the following ~2 weeks rather than flagging anything off noisy earl
 
 ### 9a. Shadow-mode predictive risk model (not user-facing)
 
-`src/lib/riskModel.ts` — a hand-rolled logistic regression (`src/lib/
-logisticRegression.ts`; no ML dependency added, package.json has none and this data
-scale doesn't warrant one), trained weekly (`.github/workflows/train-risk-model.yml` →
-`GET /api/admin/train-risk-model`, not a `vercel.ts` cron entry — see that workflow's
-own comment) on a self-supervised label derived from `country_state_history` itself:
-did a country's Pulse Level jump 2+ within 14 days of a given snapshot. Backtested on a
-time-based (not random) held-out split, and separately shadow-predicts every country
-from its latest snapshot each run, graded later once each prediction's own 14-day
-window resolves (`src/lib/riskModelGrading.ts`, daily via `/api/admin/snapshot`,
-piggybacked onto that route rather than its own cron). This live-graded track record is
-the real calibration evidence — stronger than the historical backtest alone, since
-these predictions are made before their outcome is knowable.
+`src/lib/riskModel.ts` — redesigned 2026-09-09 (same day as first shipped) from a
+binary escalation classifier to **multi-horizon score regression**: a hand-rolled
+linear regression (`src/lib/linearRegression.ts`; no ML dependency, same reasoning as
+every other from-scratch statistical piece in this app) predicting a country's actual
+future decayed-weight `score` at `PREDICTION_HORIZONS_DAYS = [1, 2, 3, 5, 7, 10, 14]`
+days out — a trajectory, not a single yes/no flag. Predicted Pulse Level is *derived*
+from predicted score via `threat.ts`'s `weightToThreatLevel()`, the exact function
+`risk.ts` already uses everywhere else, so a predicted level is always consistent with
+how the app defines Pulse Level rather than a second, independent notion of it. Each
+horizon is trained, backtested, and promoted **independently** (its own row in
+`risk_model_runs`) — a 3-day forecast can earn trust well before a 14-day one does.
+
+Training data is deliberately bounded two ways: a hard cutoff (`TRAINING_DATA_START`,
+2026-09-09) discards the app's launch week outright — live-verified during the first
+build attempt, Russia's threatLevel went 2→4 between its literal first two daily
+snapshots, the score still climbing from an artificial "no history yet" cold start, not
+a real escalation — and a **per-country** burn-in on top (7 days past each country's own
+first post-cutoff snapshot), since that same cold-start pattern can recur for any
+country whenever it's first tracked, not just at the table's global launch. Features
+include a 7-day trailing anomaly-corroboration count from `anomaly_findings` (Tier 1) —
+viable now that both tables share the same 2026-09-09 starting line.
+
+Backtested on a time-based (not random) held-out split, reporting MAE/RMSE against the
+naive "predict no change from today" baseline — a forecasting model that can't beat
+that baseline has no real skill, so the baseline's own MAE is stored alongside the
+model's for direct comparison, not just the model's number in isolation. L2
+regularization strength is chosen via a nested validation split over several candidates
+rather than fixed to one guess, and gradient descent uses early
+stopping (converged-loss check) rather than one iteration count assumed to suit every
+horizon equally. Each run separately shadow-predicts every country from its latest
+snapshot, graded later once that specific horizon's window resolves
+(`src/lib/riskModelGrading.ts`, daily via `/api/admin/snapshot`, piggybacked onto that
+route rather than its own cron) — this live-graded track record is the real calibration
+evidence, stronger than the historical backtest alone, since these predictions are made
+before their outcome is knowable.
 
 Nothing from this reaches a user yet. A run is marked `promoted` in `risk_model_runs`
-only once its backtest clears a real sample floor and beats the naive majority-class
-baseline on both precision and recall — as of this table's current depth (~6 days),
-there are zero eligible labeled examples, so training runs, correctly logs "insufficient
-data," and waits. That's the intended behavior: visibility is gated on measured
+only once its backtest clears a real sample floor and its MAE beats the naive
+persistence baseline — given the 2026-09-09 cutoff plus the 7-day burn-in plus each
+horizon's own resolution time, nothing is trainable before **2026-09-17 at the
+earliest** (the 1-day horizon, first to resolve). Training correctly logs "insufficient
+data" and waits until then — the intended behavior: visibility is gated on measured
 evidence, not a guessed calendar date.
 
 ## 10. Backend architecture — what's built, and why it deviates from the brief

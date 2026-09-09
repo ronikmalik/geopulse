@@ -591,50 +591,62 @@ export const classifierCalibration = pgTable(
   (table) => [index("classifier_calibration_active_idx").on(table.active)],
 );
 
-// Shadow-mode predictive risk model (2026-09-09) — see src/lib/riskModel.ts.
-// One row per weekly training attempt, a durable log of the whole
-// calibration story over time, not just the latest fit. Nothing reads
-// `promoted` as "show this to users" yet — it only marks "the best
-// validated run so far" for internal bookkeeping. JSON-encoded text
-// columns (features/coefficients/featureMeans/featureStdDevs) rather than
-// one column per feature — a changed feature set shouldn't need a schema
+// Shadow-mode predictive risk model — see src/lib/riskModel.ts. Redesigned
+// 2026-09-09 (same day as first shipped) per user request: predicts a
+// country's actual future score over several horizons via linear
+// regression, not a binary escalation flag via logistic regression — the
+// original shape (positiveCount, backtest precision/recall) was dropped
+// and recreated rather than migrated forward, since only 2 test rows
+// existed and neither was real data.
+//
+// One row per (training run, horizon) — horizonDays distinguishes which
+// of PREDICTION_HORIZONS_DAYS this row is; each horizon is trained,
+// backtested, and promoted independently. Nothing reads `promoted` as
+// "show this to users" yet — it only marks "the best validated run so
+// far for this horizon" for internal bookkeeping. `modelParams` is one
+// JSON blob (the whole LinearRegressionModel — weights, bias, feature/
+// target standardization stats) rather than several parallel array
+// columns — simpler once there's more than a couple pieces of fitted
+// state to track, and a changed feature set still doesn't need a schema
 // migration, same "don't build ahead of a consumer" reasoning ROADMAP.md
 // already states for structural decisions elsewhere in this app.
 export const riskModelRuns = pgTable("risk_model_runs", {
   id: serial("id").primaryKey(),
   trainedAt: timestamp("trained_at", { withTimezone: true }).notNull().defaultNow(),
+  horizonDays: integer("horizon_days").notNull(),
   sampleSize: integer("sample_size").notNull(),
-  positiveCount: integer("positive_count").notNull(),
   // Nullable — when sampleSize is too low to train at all (today's
-  // reality: 0 eligible labeled examples), there is no real fit to
-  // record. Null here means exactly that, not a fabricated all-zero
-  // model that would silently predict something meaningless.
+  // reality: 0 eligible labeled examples for every horizon, since
+  // training data now only starts 2026-09-09), there is no real fit to
+  // record. Null here means exactly that, not a fabricated model that
+  // would silently predict something meaningless.
   features: text("features"), // JSON string[]
-  coefficients: text("coefficients"), // JSON number[]
-  featureMeans: text("feature_means"), // JSON number[]
-  featureStdDevs: text("feature_std_devs"), // JSON number[]
+  modelParams: text("model_params"), // JSON LinearRegressionModel
+  selectedL2: doublePrecision("selected_l2"), // the L2 strength nested validation picked
   backtestSampleSize: integer("backtest_sample_size").notNull(),
-  // Nullable, not a fabricated 0/100 — precision/recall are genuinely
-  // undefined when the held-out test split has zero predicted/actual
-  // positives (divide-by-zero in the metric's own definition, not a
-  // missing-data gap this app should paper over).
-  backtestAccuracy: doublePrecision("backtest_accuracy"),
-  backtestPrecision: doublePrecision("backtest_precision"),
-  backtestRecall: doublePrecision("backtest_recall"),
+  // Nullable, not a fabricated 0 — undefined when there was no backtest
+  // split to evaluate at all.
+  backtestMae: doublePrecision("backtest_mae"),
+  backtestRmse: doublePrecision("backtest_rmse"),
+  // The naive "predict no change from today's score" baseline's own MAE,
+  // stored alongside the model's — promotion (see riskModel.ts) requires
+  // genuinely beating this, not just producing a number.
+  backtestNaiveMae: doublePrecision("backtest_naive_mae"),
   promoted: boolean("promoted").notNull().default(false),
   notes: text("notes"),
 });
 
-// Shadow predictions — one row per country per training run, generated at
-// train time from that run's own coefficients, graded later once its
-// 14-day window actually resolves (src/lib/riskModelGrading.ts, run daily
-// via /api/admin/snapshot). This IS the live calibration record: a
-// genuinely out-of-sample, prospectively-graded track record, not just a
-// historical backtest. modelRunId is a plain integer, not a Drizzle
-// .references() FK — this schema has no precedent for that anywhere
-// (primaryEventId's real FK constraint is added via raw SQL in the
-// migrate route instead), so this follows that same established
-// convention rather than introducing a new one for the first time here.
+// Shadow predictions — one row per country per (training run, horizon),
+// generated at train time from that horizon's own model, graded later
+// once its own horizon's window actually resolves
+// (src/lib/riskModelGrading.ts, run daily via /api/admin/snapshot). This
+// IS the live calibration record: a genuinely out-of-sample,
+// prospectively-graded track record, not just a historical backtest.
+// modelRunId is a plain integer, not a Drizzle .references() FK — this
+// schema has no precedent for that anywhere (primary_event_id's real FK
+// constraint is added via raw SQL in the migrate route instead), so this
+// follows that same established convention rather than introducing a new
+// one for the first time here.
 export const riskPredictions = pgTable(
   "risk_predictions",
   {
@@ -642,10 +654,21 @@ export const riskPredictions = pgTable(
     generatedAt: timestamp("generated_at", { withTimezone: true }).notNull().defaultNow(),
     modelRunId: integer("model_run_id").notNull(),
     country: text("country").notNull(),
-    predictedProbability: doublePrecision("predicted_probability").notNull(),
+    predictedScore: doublePrecision("predicted_score").notNull(),
+    // Derived from predictedScore via threat.ts's weightToThreatLevel —
+    // the exact same function risk.ts uses everywhere else, so a
+    // predicted Pulse Level is always consistent with how the app defines
+    // Pulse Level, not a second independent notion of "level."
+    predictedThreatLevel: smallint("predicted_threat_level").notNull(),
     inputFeatures: text("input_features").notNull(), // JSON number[]
     resolvesAt: timestamp("resolves_at", { withTimezone: true }).notNull(),
-    actualOutcome: boolean("actual_outcome"), // null = not yet graded
+    // Both null = not yet graded. absoluteError is the primary grading
+    // metric for a regression target — a boolean "was this right" would
+    // throw away exactly the information a continuous score prediction
+    // is supposed to carry.
+    actualScore: doublePrecision("actual_score"),
+    actualThreatLevel: smallint("actual_threat_level"),
+    absoluteError: doublePrecision("absolute_error"),
     gradedAt: timestamp("graded_at", { withTimezone: true }),
   },
   (table) => [

@@ -186,19 +186,29 @@ const STATEMENTS = [
   sql`CREATE INDEX IF NOT EXISTS anomaly_findings_detected_at_idx ON anomaly_findings (detected_at)`,
   sql`CREATE INDEX IF NOT EXISTS anomaly_findings_country_idx ON anomaly_findings (country)`,
   sql`CREATE INDEX IF NOT EXISTS anomaly_findings_signal_type_idx ON anomaly_findings (signal_type)`,
+  // Redesigned 2026-09-09 (same day as first shipped): the shadow model
+  // now predicts a country's actual future score over several horizons
+  // (linear regression) instead of a binary escalation flag (logistic
+  // regression) — see riskModelRuns/riskPredictions's doc comments in
+  // schema.ts. The old shape's tables were dropped and recreated by hand
+  // in production once (2 test rows, no real data) rather than migrated
+  // column-by-column here — a DROP has no business living in this file's
+  // permanent, repeatedly-run statement list, so these CREATE statements
+  // below reflect the new shape directly, safe for a genuinely fresh
+  // install; they no-op (IF NOT EXISTS) against the production table this
+  // file's own history already established by hand.
   sql`CREATE TABLE IF NOT EXISTS risk_model_runs (
     id SERIAL PRIMARY KEY,
     trained_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    horizon_days INTEGER NOT NULL,
     sample_size INTEGER NOT NULL,
-    positive_count INTEGER NOT NULL,
     features TEXT,
-    coefficients TEXT,
-    feature_means TEXT,
-    feature_std_devs TEXT,
+    model_params TEXT,
+    selected_l2 DOUBLE PRECISION,
     backtest_sample_size INTEGER NOT NULL,
-    backtest_accuracy DOUBLE PRECISION,
-    backtest_precision DOUBLE PRECISION,
-    backtest_recall DOUBLE PRECISION,
+    backtest_mae DOUBLE PRECISION,
+    backtest_rmse DOUBLE PRECISION,
+    backtest_naive_mae DOUBLE PRECISION,
     promoted BOOLEAN NOT NULL DEFAULT false,
     notes TEXT
   )`,
@@ -207,10 +217,13 @@ const STATEMENTS = [
     generated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     model_run_id INTEGER NOT NULL,
     country TEXT NOT NULL,
-    predicted_probability DOUBLE PRECISION NOT NULL,
+    predicted_score DOUBLE PRECISION NOT NULL,
+    predicted_threat_level SMALLINT NOT NULL,
     input_features TEXT NOT NULL,
     resolves_at TIMESTAMPTZ NOT NULL,
-    actual_outcome BOOLEAN,
+    actual_score DOUBLE PRECISION,
+    actual_threat_level SMALLINT,
+    absolute_error DOUBLE PRECISION,
     graded_at TIMESTAMPTZ
   )`,
   sql`CREATE INDEX IF NOT EXISTS risk_predictions_resolves_at_idx ON risk_predictions (resolves_at)`,
