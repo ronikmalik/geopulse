@@ -54,17 +54,11 @@ export const LIVE_CHANNELS: Record<string, LiveChannel> = {
     name: "Africanews",
     region: "Africa",
   },
-  // TEMP candidates for embeddability testing — remove before final ship.
-  nbcnews: { id: "UCeY0bbntWzzVIaj2z3QigXg", name: "NBC News", region: "TEST" },
-  abcnews: { id: "UCBi2mrWuNuyYy4gbM6fU18Q", name: "ABC News", region: "TEST" },
-  cbsnews: { id: "UC8p1vwvWtl6T73JiExfWs1g", name: "CBS News", region: "TEST" },
-  bloomberg: { id: "UCIALMKvObZNtJ6AmdCLP7Lg", name: "Bloomberg TV", region: "TEST" },
-  euronews: { id: "UCSrZ3UV4jOidv8ppoVuvW9Q", name: "euronews", region: "TEST" },
-  trtworld: { id: "UC7fWeaHhqgM4Ry-RMpM2YYw", name: "TRT World", region: "TEST" },
-  reuters: { id: "UChqUTb7kYRX8-EiaN3XFrSQ", name: "Reuters", region: "TEST" },
-  ap: { id: "UCAb6wjEu3EOzsVihpR9N1Ug", name: "AP", region: "TEST" },
-  arirang: { id: "UCCW7Z4RTTQoFix1dvn0D3LA", name: "ArirangTV", region: "TEST" },
-  i24news: { id: "UCvHDpsWKADrDia0c99X37vg", name: "i24NEWS English", region: "TEST" },
+  // TEMP candidates for embeddability testing (round 2) — remove before final ship.
+  abscbn: { id: "UCE2606prvXQc_noEqKxVJXA", name: "ABS-CBN News", region: "TEST" },
+  rappler: { id: "UCdnZdQxYXnbN4uWJg96oGxw", name: "Rappler", region: "TEST" },
+  timesnow: { id: "UC6RJ7-PaXg6TIH2BzZfTV7w", name: "Times Now", region: "TEST" },
+  ndtv: { id: "UCZFMm1mMw0F81Z37aaEzTUA", name: "NDTV", region: "TEST" },
 };
 
 export type LiveChannelId = keyof typeof LIVE_CHANNELS;
@@ -98,9 +92,8 @@ const REGION_MAP: Record<LiveChannelId, string[]> = {
     "NG", "ZA", "KE", "ET", "GH", "UG", "TZ", "ZW", "ZM", "MZ", "AO",
     "CM", "CD", "RW", "SO", "SS",
   ],
-  // TEMP candidates — remove before final ship.
-  nbcnews: [], abcnews: [], cbsnews: [], bloomberg: [], euronews: [],
-  trtworld: [], reuters: [], ap: [], arirang: [], i24news: [],
+  // TEMP candidates (round 2) — remove before final ship.
+  abscbn: [], rappler: [], timesnow: [], ndtv: [],
 };
 
 const COUNTRY_TO_CHANNEL: Record<string, LiveChannelId> = Object.entries(
