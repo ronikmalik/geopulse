@@ -11,12 +11,17 @@ deliberately NOT added, and why.
 
 ## Added: NASA FIRMS (satellite thermal-anomaly detection)
 
-`src/lib/sources/firms.ts`, live in the regular ingest cycle. VIIRS
-satellite passes detect thermal anomalies (fires, large explosions,
-industrial incidents — anything hot enough and large enough to register)
-with **~3 hours** latency from satellite overpass to API availability, per
-NASA's own stated NRT latency figure — a direct sensor reading, not
-something that had to be observed, written up, and published first.
+`src/lib/sources/firms.ts`, live in the regular ingest cycle. Queries
+MODIS_NRT, not VIIRS — confirmed live 2026-09-09 that this app's
+`FIRMS_MAP_KEY` gets a valid-but-empty response (200 OK, correct header,
+zero rows) from all three VIIRS products (SNPP/NOAA-20/NOAA-21) while
+MODIS_NRT returns real global detections on the same request, pointing to
+an account-level access restriction rather than a satellite outage. This
+had silently zeroed out the wildfire tracker for days (source_health
+showed a healthy 0-item "success" every cycle, no error to alert on) until
+caught by a direct diagnostic query. MODIS's ~1km pixel is coarser than
+VIIRS's ~375m, but it's a direct sensor reading, not something that had to
+be observed, written up, and published first.
 
 **What it can't tell you, and the code is explicit about this**: FIRMS
 detects a thermal anomaly, full stop. The NRT product's own "type" column
@@ -27,16 +32,17 @@ zone is worth surfacing as corroborating signal; it is never asserted as
 "a strike happened here." The summary text on every event says this
 explicitly.
 
-**Filtering, to avoid drowning real signal in noise**: VIIRS detects
-thousands of small fires globally every day (mostly agricultural burning),
-so raw detections are grid-clustered (~28km cells) and only clusters with
-8+ high-confidence detections and 500+ MW combined radiative power are
-surfaced — the same "not every raw signal is reportable" judgment call
-already made for IODA's outage counts (`src/lib/sources/ioda.ts`). These
-two thresholds are a conservative first guess with no real-world tuning
-data behind them yet; revisit once actual ingest data shows what "big"
-looks like in practice, the same way IODA's `MIN_REPORTABLE_EVENT_COUNT`
-was tuned after observing it drowning out other pillars.
+**Filtering, to avoid drowning real signal in noise**: raw detections are
+grid-clustered (~28km cells) and only clusters with 8+ high-confidence
+detections and 500+ MW combined radiative power are surfaced — the same
+"not every raw signal is reportable" judgment call already made for
+IODA's outage counts (`src/lib/sources/ioda.ts`). Confirmed live against
+an ordinary day's MODIS_NRT feed (83 global detections, 20 high-confidence)
+that one genuine large cluster clears both bars while routine smaller
+burns don't — not just an untested guess — though the exact numbers are
+still a first cut; revisit once more ingest history builds up, the same
+way IODA's `MIN_REPORTABLE_EVENT_COUNT` was tuned after observing it
+drowning out other pillars.
 
 **Setup required**: a free `FIRMS_MAP_KEY` — instant email signup at
 https://firms.modaps.eosdis.nasa.gov/api/map_key/, no approval wait. The

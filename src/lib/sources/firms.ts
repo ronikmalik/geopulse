@@ -1,12 +1,11 @@
 import { countryFromLatLon } from "@/lib/geoResolve";
 import type { DirectItem } from "./direct";
 
-// NASA FIRMS (Fire Information for Resource Management System) — VIIRS
-// satellite thermal-anomaly detections, ~3h latency from overpass to API
-// availability (NASA's own stated NRT latency). This is the closest thing
-// in this app's source list to genuine "just happened" ground-truth signal
-// rather than a written-and-published news article: it's a direct physical
-// sensor reading, not a report about one.
+// NASA FIRMS (Fire Information for Resource Management System) — satellite
+// thermal-anomaly detections. This is the closest thing in this app's
+// source list to genuine "just happened" ground-truth signal rather than a
+// written-and-published news article: it's a direct physical sensor
+// reading, not a report about one.
 //
 // Requires a free MAP_KEY (email signup, no review/approval wait) —
 // https://firms.modaps.eosdis.nasa.gov/api/map_key/ — set as FIRMS_MAP_KEY.
@@ -15,6 +14,19 @@ import type { DirectItem } from "./direct";
 // many words, so treat that as inferred, not contractually confirmed, if
 // this ever matters for something with real commercial stakes.
 // Docs: https://firms.modaps.eosdis.nasa.gov/api/area/
+//
+// MODIS_NRT, not VIIRS: this used to query VIIRS_SNPP_NRT, which silently
+// returned a valid-but-empty CSV (200 OK, correct header row, zero data
+// rows) for this MAP_KEY every single cycle — confirmed live 2026-09-09
+// that ALL THREE VIIRS products (SNPP/NOAA-20/NOAA-21) come back empty for
+// this key while MODIS_NRT returns real global detections on the same
+// request, pointing to an account-level access restriction rather than a
+// satellite outage (a genuine outage wouldn't spare MODIS while killing
+// all three VIIRS satellites identically). MODIS's ~1km pixel is coarser
+// than VIIRS's ~375m, but it's real data instead of a silent zero — and
+// the existing cluster thresholds below were confirmed live to still be
+// reachable against MODIS's lower daily detection volume, not just
+// VIIRS's. If FIRMS ever grants this key VIIRS access, revisit.
 //
 // IMPORTANT — what this signal can and can't tell you: FIRMS detects a
 // thermal anomaly, full stop. It has no way to distinguish a wildfire, an
@@ -25,7 +37,7 @@ import type { DirectItem } from "./direct";
 // anything that doesn't land inside a country polygon, which incidentally
 // filters out most offshore gas-flare false positives for free.
 const FIRMS_ENDPOINT = "https://firms.modaps.eosdis.nasa.gov/api/area/csv";
-const SOURCE_PRODUCT = "VIIRS_SNPP_NRT";
+const SOURCE_PRODUCT = "MODIS_NRT";
 const DAY_RANGE = 1;
 
 interface FirmsDetection {
@@ -39,9 +51,12 @@ interface FirmsDetection {
 
 function isHighConfidence(raw: string): boolean {
   const v = raw.trim().toLowerCase();
+  // MODIS_NRT's real confidence column is numeric 0-100 (this branch is
+  // what actually fires today) — "h"/"high" is kept for VIIRS's l/n/h
+  // scale in case this ever switches products again, see SOURCE_PRODUCT.
   if (v === "h" || v === "high") return true;
   const n = Number(v);
-  return !Number.isNaN(n) && n >= 80; // MODIS-style numeric confidence, defensive fallback
+  return !Number.isNaN(n) && n >= 80;
 }
 
 function parseCsv(text: string): FirmsDetection[] {
@@ -81,10 +96,12 @@ function parseCsv(text: string): FirmsDetection[] {
 // same spirit as IODA's event_cnt threshold (src/lib/sources/ioda.ts):
 // filter background noise, surface only what's big enough to matter.
 const GRID_SIZE = 0.25;
-// Conservative starting thresholds — VIIRS detects thousands of small
-// agricultural/routine burns globally every day, and this app has no
-// history yet to tune against. Both numbers are a first guess to revisit
-// once real ingest data shows what "big" actually looks like in practice.
+// Conservative starting thresholds — confirmed live against a real
+// ordinary day's MODIS_NRT feed (83 global detections, 20 high-confidence)
+// that one genuine large cluster (8 detections, 4404MW) clears both bars
+// comfortably while routine smaller burns don't, so this isn't just an
+// untested guess. Still a first guess on the exact numbers, though —
+// revisit once more ingest history shows what "big" looks like over time.
 const MIN_CLUSTER_DETECTIONS = 8;
 const MIN_CLUSTER_FRP = 500; // megawatts, summed across the cluster
 
@@ -276,9 +293,9 @@ export async function fetchFirmsThermalAnomalies(): Promise<DirectItem[]> {
 
       return {
         source: "firms",
-        url: `https://firms.modaps.eosdis.nasa.gov/map/#d:${dayBucket};l:viirs-snpp;@${anchorLon.toFixed(2)},${anchorLat.toFixed(2)},7z`,
+        url: `https://firms.modaps.eosdis.nasa.gov/map/#d:${dayBucket};l:modis;@${anchorLon.toFixed(2)},${anchorLat.toFixed(2)},7z`,
         title: `Large thermal anomaly cluster detected (satellite) near ${lat.toFixed(2)}, ${lon.toFixed(2)}`,
-        summary: `NASA FIRMS/VIIRS detected ${c.count} high-confidence thermal anomalies (combined ${Math.round(c.totalFrp)} MW radiative power) clustered in one area within the last 24h. Satellite thermal data alone cannot confirm cause — wildfire, industrial fire, and explosive/conflict-related fire all look the same to this sensor.`,
+        summary: `NASA FIRMS/MODIS detected ${c.count} high-confidence thermal anomalies (combined ${Math.round(c.totalFrp)} MW radiative power) clustered in one area within the last 24h. Satellite thermal data alone cannot confirm cause — wildfire, industrial fire, and explosive/conflict-related fire all look the same to this sensor.`,
         category: "natural-disaster",
         location: `${lat.toFixed(2)}, ${lon.toFixed(2)}`,
         country,
