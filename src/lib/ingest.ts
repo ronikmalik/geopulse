@@ -28,6 +28,7 @@ import { archiveFeedItems } from "./feedArchive";
 import { fetchRecentPrimaries, findDuplicateOf, type PrimaryCandidate } from "./eventDedup";
 import { backfillFeedArchiveEmbeddings } from "./embeddingBackfill";
 import { runClassifierAuditSlice, reviewPendingEvents } from "./classifierAudit";
+import { backfillEventGeocodes } from "./geocodeBackfill";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -617,21 +618,27 @@ export async function runIngest(): Promise<IngestResult> {
   // is raced against its own short deadline the same way withDeadline
   // already guards the GDELT fetch.
   //
-  // embeddingBackfill runs fully in parallel with the other two — it's a
-  // different Gemini model (gemini-embedding, its own separate RPM
+  // embeddingBackfill runs fully in parallel with the other three — it's
+  // a different Gemini model (gemini-embedding, its own separate RPM
   // quota) so it can't contend with them for rate limit headroom.
-  // reviewPendingEvents and runClassifierAuditSlice both call the SAME
-  // model (gemini-3.5-flash-lite) though, and real production 429s
-  // (2026-09-08, found while answering the user's "are we within
-  // Gemini's capacity" question) showed exactly this: two independent
-  // callers, each individually paced internally, still stacking enough
-  // concurrent requests between them to burst past the 15 RPM ceiling.
-  // Running them sequentially instead — never both in flight at once —
-  // closes that gap by construction rather than hoping their internal
-  // pacing happens not to overlap. reviewPendingEvents goes first since
-  // it's the one gating publish latency; runClassifierAuditSlice (pure
-  // backlog cleanup) gets a shorter budget since it's already getting a
-  // second, smaller bite at the same cron-job.org 30s ingest budget.
+  // reviewPendingEvents, runClassifierAuditSlice, and
+  // backfillEventGeocodes all call the SAME model (gemini-3.5-flash-lite)
+  // though, and real production 429s (2026-09-08, found while answering
+  // the user's "are we within Gemini's capacity" question) showed exactly
+  // this: two independent callers, each individually paced internally,
+  // still stacking enough concurrent requests between them to burst past
+  // the 15 RPM ceiling. Running them sequentially instead — never more
+  // than one in flight at once — closes that gap by construction rather
+  // than hoping their internal pacing happens not to overlap.
+  // reviewPendingEvents goes first since it's the one gating publish
+  // latency; runClassifierAuditSlice and backfillEventGeocodes (both pure
+  // backlog cleanup, neither gating anything user-visible) split the
+  // remaining slice of the same cron-job.org 30s ingest budget.
+  // backfillEventGeocodes goes last, not first, deliberately — it's the
+  // newest of the three (2026-09-09, see geocodeEvents.ts) and least
+  // proven in production; if it ever misbehaves and eats its whole
+  // deadline, that should degrade its own coverage, not steal budget from
+  // the two established passes ahead of it.
   async function runGeminiAuditChain(): Promise<void> {
     try {
       await withDeadline(reviewPendingEvents(), 8_000, "pendingEventReview");
@@ -642,6 +649,11 @@ export async function runIngest(): Promise<IngestResult> {
       await withDeadline(runClassifierAuditSlice(), 5_000, "classifierAuditSlice");
     } catch (err) {
       errors.push(`classifierAuditSlice: ${err}`);
+    }
+    try {
+      await withDeadline(backfillEventGeocodes(), 5_000, "eventGeocodeBackfill");
+    } catch (err) {
+      errors.push(`eventGeocodeBackfill: ${err}`);
     }
   }
 

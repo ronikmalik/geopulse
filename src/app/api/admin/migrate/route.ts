@@ -156,6 +156,8 @@ const STATEMENTS = [
     last_reinforced_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
   sql`CREATE INDEX IF NOT EXISTS classifier_calibration_active_idx ON classifier_calibration (active)`,
+  sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS geocoded_at TIMESTAMPTZ`,
+  sql`CREATE INDEX IF NOT EXISTS events_geocoded_at_idx ON events (geocoded_at)`,
 ];
 
 export async function GET(req: NextRequest) {

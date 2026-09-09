@@ -86,6 +86,18 @@ export const events = pgTable(
     // column was added (see the migrate route) — this was never meant
     // to retroactively hide anything already live.
     reviewStatus: text("review_status").notNull().default("pending"),
+    // NULL = not yet run through src/lib/geocodeBackfill.ts's Gemini
+    // location-resolution pass — still sitting at classify.ts's
+    // country-centroid fallback lat/lon. Set the moment that pass has
+    // considered the row, whether or not it actually found a better
+    // coordinate (see geocodeBackfill.ts's own doc comment for why a
+    // failed lookup still gets stamped rather than retried forever).
+    // Only ever populated for source LIKE 'rss:%' OR 'telegram:%' rows —
+    // GDELT and the direct/structural sources (USGS/EONET/GDACS/IODA/
+    // FIRMS, which already carry real event-level coordinates) are never
+    // queried by that pass and stay NULL permanently; harmless, since
+    // nothing reads this column as "needs attention" for those rows.
+    geocodedAt: timestamp("geocoded_at", { withTimezone: true }),
   },
   (table) => [
     index("events_created_at_idx").on(table.createdAt),
@@ -94,6 +106,7 @@ export const events = pgTable(
     index("events_correlation_group_idx").on(table.correlationGroupId),
     index("events_primary_event_id_idx").on(table.primaryEventId),
     index("events_review_status_idx").on(table.reviewStatus),
+    index("events_geocoded_at_idx").on(table.geocodedAt),
   ],
 );
 
