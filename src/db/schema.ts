@@ -107,6 +107,13 @@ export const events = pgTable(
     index("events_primary_event_id_idx").on(table.primaryEventId),
     index("events_review_status_idx").on(table.reviewStatus),
     index("events_geocoded_at_idx").on(table.geocodedAt),
+    // Added 2026-09-09 alongside the anomaly-detection event-volume
+    // signals (src/lib/eventVolumeAnomaly.ts), which GROUP BY
+    // date_trunc('day', published_at) — but every date-window query in
+    // this app already filters on this column (risk.ts's
+    // getCountryCategoryRows/getEventsByCountry/getEventsByCategories),
+    // so this benefits those existing hot paths too, not just the new one.
+    index("events_published_at_idx").on(table.publishedAt),
   ],
 );
 
@@ -161,13 +168,19 @@ export const countryStateHistory = pgTable(
 export type CountryStateHistoryRow = typeof countryStateHistory.$inferSelect;
 export type NewCountryStateHistoryRow = typeof countryStateHistory.$inferInsert;
 
-// One row per country per daily snapshot of currently-tracked military
-// aircraft (see src/lib/flightBaseline.ts and the /api/admin/snapshot-flights
+// One row per country per daily snapshot of currently-tracked aircraft
+// (see src/lib/flightBaseline.ts and the /api/admin/snapshot-flights
 // cron) — the same "record it now, judge it later" pattern as
-// countryStateHistory above. There is no anomaly detection yet because
-// there is no baseline yet; this table exists to build one honestly over a
-// few weeks of real counts instead of shipping a surge threshold guessed
-// with no data behind it. See docs/OSINT_SOURCES.md.
+// countryStateHistory above. Anomaly detection now reads this table (see
+// src/lib/anomalyBaseline.ts, 2026-09-09) once a country clears its own
+// 14-sample baseline — this table started 2026-09-03, so that happens
+// gradually per country rather than all at once.
+//
+// `kind` distinguishes military (the original, still the default for
+// existing rows) from commercial (added 2026-09-09, see
+// snapshotCommercialAircraftCounts in flightBaseline.ts) — one table, a
+// discriminator column, rather than two near-identical tables; matches
+// this schema's existing classifier_audit `kind` idiom below.
 export const aircraftCountHistory = pgTable(
   "aircraft_count_history",
   {
@@ -177,15 +190,85 @@ export const aircraftCountHistory = pgTable(
       .notNull()
       .defaultNow(),
     count: integer("count").notNull(),
+    kind: text("kind").notNull().default("military"),
   },
   (table) => [
     index("aircraft_count_history_country_idx").on(table.country),
     index("aircraft_count_history_snapshot_at_idx").on(table.snapshotAt),
+    index("aircraft_count_history_kind_idx").on(table.kind),
   ],
 );
 
 export type AircraftCountHistoryRow = typeof aircraftCountHistory.$inferSelect;
 export type NewAircraftCountHistoryRow = typeof aircraftCountHistory.$inferInsert;
+
+// One row per country per daily GPS/GNSS jamming snapshot (see
+// src/lib/gpsJammingHistory.ts) — badCellCount/badAircraftCount mirror
+// gpsjam.ts's own JammedRegion shape exactly (a count, not a percentage;
+// see that file for why). Same baseline-building posture as
+// aircraftCountHistory above — no anomaly detection until a country
+// clears its own 14-sample baseline.
+export const gpsJammingHistory = pgTable(
+  "gps_jamming_history",
+  {
+    id: serial("id").primaryKey(),
+    country: text("country").notNull(), // ISO 3166-1 alpha-2
+    snapshotAt: timestamp("snapshot_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    badCellCount: integer("bad_cell_count").notNull(),
+    badAircraftCount: integer("bad_aircraft_count").notNull(),
+  },
+  (table) => [
+    index("gps_jamming_history_country_idx").on(table.country),
+    index("gps_jamming_history_snapshot_at_idx").on(table.snapshotAt),
+  ],
+);
+
+export type GpsJammingHistoryRow = typeof gpsJammingHistory.$inferSelect;
+export type NewGpsJammingHistoryRow = typeof gpsJammingHistory.$inferInsert;
+
+// Output of the daily anomaly scan (src/lib/anomalyScan.ts) — one table,
+// a `signalType` discriminator column, same idiom as classifierAudit's
+// `kind` column below rather than one table per signal.
+//
+// This table is read as "the latest generation of findings," not as a
+// time series the way every table above it is — a scan run sets ONE
+// detectedAt timestamp at its start and reuses it for every row that run
+// inserts, so "current findings" is always
+// `WHERE detectedAt = (SELECT MAX(detectedAt) FROM anomaly_findings)`,
+// never a time window. A window would be unsafe here: this table has no
+// idempotency guard (a manually re-triggered or double-fired scan just
+// inserts again, matching every other snapshot table's existing posture),
+// so two runs within a naive window would leave overlapping — possibly
+// contradictory — generations of findings with no way to prefer one.
+export const anomalyFindings = pgTable(
+  "anomaly_findings",
+  {
+    id: serial("id").primaryKey(),
+    detectedAt: timestamp("detected_at", { withTimezone: true }).notNull(),
+    signalType: text("signal_type").notNull(),
+    country: text("country").notNull(),
+    // Only set for the event-volume-per-category signal; null for every
+    // country-level-only signal (aircraft, GPS jamming, all-category
+    // event volume).
+    category: text("category"),
+    observedValue: doublePrecision("observed_value").notNull(),
+    baselineMean: doublePrecision("baseline_mean").notNull(),
+    baselineStdDev: doublePrecision("baseline_std_dev").notNull(),
+    sampleSize: integer("sample_size").notNull(),
+    jump: doublePrecision("jump").notNull(),
+    zScore: doublePrecision("z_score").notNull(),
+  },
+  (table) => [
+    index("anomaly_findings_detected_at_idx").on(table.detectedAt),
+    index("anomaly_findings_country_idx").on(table.country),
+    index("anomaly_findings_signal_type_idx").on(table.signalType),
+  ],
+);
+
+export type AnomalyFindingRow = typeof anomalyFindings.$inferSelect;
+export type NewAnomalyFindingRow = typeof anomalyFindings.$inferInsert;
 
 // One row per UTC day this app has called the Google Cloud Translation
 // API — see src/lib/translationUsage.ts. This is what lets

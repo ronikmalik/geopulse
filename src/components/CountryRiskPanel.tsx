@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useWatchlist } from "@/lib/useWatchlist";
 import type { CountryRiskScore } from "@/lib/useCountryRisk";
-import type { AircraftAnomaly } from "@/lib/useAircraftAnomalies";
+import type { AnomalyFindingResponse } from "@/lib/useAnomalies";
+import { signalDescription } from "@/lib/anomalyLabels";
 import {
   THREAT_COLORS,
   momentumArrow,
@@ -105,18 +106,24 @@ const compactNumber = new Intl.NumberFormat("en-US", {
 
 interface CountryRiskPanelProps {
   scores: CountryRiskScore[];
-  aircraftAnomalies: Map<string, AircraftAnomaly>;
+  anomalies: Map<string, AnomalyFindingResponse[]>;
   selectedCountry: string | null;
   onSelectCountry: (country: string | null) => void;
 }
 
-function AnomalyBadge({ anomaly }: { anomaly: AircraftAnomaly }) {
+// Collapsed-row badge — a count, not a blended score (see docs/ROADMAP.md's
+// "no falsely precise single score" principle): "3 unusual signals" is
+// honest about what was checked and found unusual; a single composite
+// number would imply weighting/rigor no hand-picked formula actually has.
+function AnomalyBadge({ findings }: { findings: AnomalyFindingResponse[] }) {
+  if (findings.length === 0) return null;
+  const title = findings.map(signalDescription).join(" · ");
   return (
     <span
       className="rounded-sm border border-amber-600/60 px-1 py-0 font-mono text-[9px] text-amber-500"
-      title={`${anomaly.todayCount} tracked today vs. a ${anomaly.baselineMean} average over the last ${anomaly.sampleSize} days (z=${anomaly.zScore})`}
+      title={title}
     >
-      ✈ +{Math.round(anomaly.todayCount - anomaly.baselineMean)}
+      ⚠ {findings.length} unusual
     </span>
   );
 }
@@ -173,7 +180,7 @@ function MomentumTag({
 
 export default function CountryRiskPanel({
   scores,
-  aircraftAnomalies,
+  anomalies,
   selectedCountry,
   onSelectCountry,
 }: CountryRiskPanelProps) {
@@ -271,7 +278,7 @@ export default function CountryRiskPanel({
             "momentumDirection" in r ? r.momentumDirection : 0;
           const eventCount = "eventCount" in r ? r.eventCount : 0;
           const lastEventAt = "lastEventAt" in r ? r.lastEventAt : "";
-          const anomaly = aircraftAnomalies.get(r.country);
+          const findings = anomalies.get(r.country) ?? [];
           return (
             <div key={r.country} className="border-b border-red-950">
               <div className="flex items-center gap-2 px-4 py-2.5">
@@ -296,7 +303,7 @@ export default function CountryRiskPanel({
                     </span>
                     {!isPlaceholder && (
                       <div className="flex items-center gap-2">
-                        {anomaly && <AnomalyBadge anomaly={anomaly} />}
+                        {findings.length > 0 && <AnomalyBadge findings={findings} />}
                         <MomentumTag magnitude={momentum} direction={momentumDirection} />
                         <ThreatBadge level={threatLevel} label={threatLabel} />
                       </div>
@@ -335,15 +342,19 @@ export default function CountryRiskPanel({
                           </p>
                         </div>
                       )}
-                      {anomaly && (
+                      {findings.length > 0 && (
                         <div className="mb-2 border-b border-red-950/70 pb-2">
                           <span className="font-mono text-[9px] uppercase tracking-wider text-amber-500">
-                            ⚠ Unusual military aircraft activity
+                            ⚠ {findings.length} unusual signal{findings.length > 1 ? "s" : ""}
                           </span>
-                          <p className="mt-1 font-mono text-[10px] leading-relaxed text-neutral-400">
-                            {anomaly.todayCount} tracked today vs. a {anomaly.baselineMean}{" "}
-                            average over the last {anomaly.sampleSize} days (z={anomaly.zScore}).
-                          </p>
+                          {findings.map((f) => (
+                            <p
+                              key={`${f.signalType}:${f.category ?? ""}`}
+                              className="mt-1 font-mono text-[10px] leading-relaxed text-neutral-400"
+                            >
+                              {signalDescription(f)}.
+                            </p>
+                          ))}
                         </div>
                       )}
                       {snapshot?.country === r.country && snapshot.dossier && (

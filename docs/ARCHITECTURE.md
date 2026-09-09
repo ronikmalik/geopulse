@@ -253,18 +253,42 @@ In the order they'd actually get built:
    proximity queries (`ST_DWithin` etc.) rather than naive lat/lon math.
 8. **Momentum baselined against a country's own history** — see §5.
 
-## 9. Country/aircraft history snapshots
+## 9. Country/aircraft history snapshots + statistical anomaly detection
 
-Two daily snapshot jobs (see `vercel.ts`), unblocking future trend/baseline work:
+Two daily snapshot jobs (see `vercel.ts`):
 
 - `country_state_history` (`src/lib/history.ts`, `GET /api/admin/snapshot`) — every
   country's Pulse Level/Momentum, once/day. Charted live in the frontend's Trends tab
   (`src/components/TrendsPanel.tsx` → `GET /api/history`) with a deterministic,
   computed-from-the-numbers trend summary (`summarizeHistory` — not an LLM answer).
-- `aircraft_count_history` (`src/lib/flightBaseline.ts`,
-  `GET /api/admin/snapshot-flights`) — per-country tracked military aircraft counts,
-  building a baseline for future surge/anomaly detection (surfaced as anomaly badges
-  in the Risk tab, not its own chart).
+- `GET /api/admin/snapshot-flights` — one route, four pieces of daily write work, all
+  piggybacked onto this single cron (2026-09-09; Vercel's Hobby tier caps cron count,
+  and every signal here is daily-cadence anyway, so a 5th/6th cron entry would cost
+  something for no benefit):
+  1. `aircraft_count_history` (`src/lib/flightBaseline.ts`) — per-country tracked
+     aircraft counts, both military (original) and commercial (added 2026-09-09,
+     distinguished by a `kind` column). Commercial coverage is real but narrow — only
+     the 9 fixed hub points `fetchAdsbLolCommercial` samples, see that file's own doc
+     comment.
+  2. `gps_jamming_history` (`src/lib/gpsJammingHistory.ts`) — per-country daily
+     jammed-cell/aircraft counts from `gpsjam.ts`, previously display-only.
+  3. The anomaly scan itself (`src/lib/anomalyScan.ts`) — runs a shared z-score engine
+     (`src/lib/anomalyBaseline.ts`, extracted from the original aircraft-only
+     implementation) across five signals: aircraft military, aircraft commercial (the
+     one signal that flags large *drops*, not rises — an airspace closure), GPS
+     jamming, and two live-SQL signals with no snapshot table of their own — event
+     volume per country and per country×category, queried directly against `events`
+     (`src/lib/eventVolumeAnomaly.ts`) using rolling 24h windows relative to scan time
+     rather than calendar-day buckets, so a partial "today" is never compared against
+     full historical days. Findings persist to `anomaly_findings`, read as "the latest
+     scan generation" (`MAX(detectedAt)`, not a time window — see that table's own
+     schema comment for why), surfaced via `GET /api/anomalies` as a signal-agnostic
+     "N unusual signals" badge on both the Risk tab and the Trends tab. Deliberately a
+     count, not a blended composite score — see the Roadmap's design principles.
+
+Every signal here needs each country to individually clear its own 14-sample baseline
+before it says anything — snapshots began 2026-09-03/09-04, so this self-activates per
+country over the following ~2 weeks rather than flagging anything off noisy early data.
 
 ## 10. Backend architecture — what's built, and why it deviates from the brief
 

@@ -43,11 +43,21 @@ Not covered by the brief's own acceptance criteria, but now core to the live pro
   posts.
 - **Semantic similarity search** (Gemini embeddings + pgvector) for "similar events."
 - **Daily AI country situation briefs**, strictly grounded on real recent events.
-- **Aircraft anomaly detection** (military aircraft tracking + a daily count-history
-  baseline) and **live data layers**: commercial/military flights, weather, GDP,
-  population, forex, CFTC positioning, cyber (CISA KEV).
-- **Daily country Pulse Level/Momentum snapshots** (`country_state_history`) —
-  unblocks future trend charts and baseline-relative momentum, neither built yet.
+- **Statistical anomaly detection** (2026-09-09) — generalized beyond the original
+  aircraft-only z-score into one shared engine (`anomalyBaseline.ts`) applied to five
+  signals: military aircraft, commercial aircraft (flags large drops — airspace
+  closures — not just rises), GPS/GNSS jamming, event volume per country, and event
+  volume per country×category. Findings persist to `anomaly_findings` (one daily scan,
+  piggybacked on the existing `/api/admin/snapshot-flights` cron, zero new cron
+  entries) and surface as a signal-agnostic "N unusual signals" badge on the Risk tab
+  and a recent-anomalies section on the Trends tab — a count, not a blended score, per
+  this file's own no-falsely-precise-score principle. Live data layers: commercial/
+  military flights, weather, GDP, population, forex, CFTC positioning, cyber (CISA KEV).
+- **Daily country Pulse Level/Momentum snapshots** (`country_state_history`) — feeds
+  the Trends tab's history charts. Momentum itself is still not baselined against a
+  country's own history (see ARCHITECTURE.md §5) — the anomaly signals above are a
+  separate, complementary layer (raw counts vs. each country's own trailing baseline),
+  not a baselined momentum.
 - **Nine new context layers** (2026-09-08, sourced from a deep-dive into
   worldmonitor.app's own public data-fetching code): GPS/GNSS jamming, submarine
   cable exposure, US travel advisories (also in the country dossier), World Bank
@@ -90,9 +100,10 @@ See `docs/ARCHITECTURE.md` for how all of this fits together.
   filtering): historical charting is **done** — `country_state_history` snapshots
   (daily cron, `vercel.ts` → `/api/admin/snapshot`) are charted live in the frontend's
   Trends tab (`TrendsPanel.tsx` → `GET /api/history`) with a deterministic trend
-  summary. `aircraft_count_history` (daily, `/api/admin/snapshot-flights`) backs
-  anomaly badges on the Risk tab. Cross-risk relationships, alerting, and search are
-  not started.
+  summary. Statistical anomaly detection is **done** (2026-09-09, see above) —
+  `anomaly_findings` (daily scan, `/api/admin/snapshot-flights`) backs a generalized
+  anomaly badge on both the Risk and Trends tabs, across five signals rather than just
+  aircraft. Cross-risk relationships, alerting, and search are not started.
 - **AI/ML layer** (not in the brief's original phasing, built alongside Phase 6-7):
   Gemini pre-publish review, post-hoc audit, recursive calibration, embeddings/similar
   events, daily country briefs, Telegram translation — all **done** and live. See

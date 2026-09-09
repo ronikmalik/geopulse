@@ -158,6 +158,34 @@ const STATEMENTS = [
   sql`CREATE INDEX IF NOT EXISTS classifier_calibration_active_idx ON classifier_calibration (active)`,
   sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS geocoded_at TIMESTAMPTZ`,
   sql`CREATE INDEX IF NOT EXISTS events_geocoded_at_idx ON events (geocoded_at)`,
+  sql`CREATE INDEX IF NOT EXISTS events_published_at_idx ON events (published_at)`,
+  sql`ALTER TABLE aircraft_count_history ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'military'`,
+  sql`CREATE INDEX IF NOT EXISTS aircraft_count_history_kind_idx ON aircraft_count_history (kind)`,
+  sql`CREATE TABLE IF NOT EXISTS gps_jamming_history (
+    id SERIAL PRIMARY KEY,
+    country TEXT NOT NULL,
+    snapshot_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    bad_cell_count INTEGER NOT NULL,
+    bad_aircraft_count INTEGER NOT NULL
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS gps_jamming_history_country_idx ON gps_jamming_history (country)`,
+  sql`CREATE INDEX IF NOT EXISTS gps_jamming_history_snapshot_at_idx ON gps_jamming_history (snapshot_at)`,
+  sql`CREATE TABLE IF NOT EXISTS anomaly_findings (
+    id SERIAL PRIMARY KEY,
+    detected_at TIMESTAMPTZ NOT NULL,
+    signal_type TEXT NOT NULL,
+    country TEXT NOT NULL,
+    category TEXT,
+    observed_value DOUBLE PRECISION NOT NULL,
+    baseline_mean DOUBLE PRECISION NOT NULL,
+    baseline_std_dev DOUBLE PRECISION NOT NULL,
+    sample_size INTEGER NOT NULL,
+    jump DOUBLE PRECISION NOT NULL,
+    z_score DOUBLE PRECISION NOT NULL
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS anomaly_findings_detected_at_idx ON anomaly_findings (detected_at)`,
+  sql`CREATE INDEX IF NOT EXISTS anomaly_findings_country_idx ON anomaly_findings (country)`,
+  sql`CREATE INDEX IF NOT EXISTS anomaly_findings_signal_type_idx ON anomaly_findings (signal_type)`,
 ];
 
 export async function GET(req: NextRequest) {

@@ -2,10 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { CountryRiskScore } from "@/lib/useCountryRisk";
+import type { AnomalyFindingResponse } from "@/lib/useAnomalies";
+import { signalDescription } from "@/lib/anomalyLabels";
 import { THREAT_COLORS, type ThreatLevel } from "@/lib/threat";
 
 interface TrendsPanelProps {
   countryScores: CountryRiskScore[];
+  anomalies: Map<string, AnomalyFindingResponse[]>;
 }
 
 // Mirrors HistorySnapshot/HistorySummary from src/lib/history.ts — defined
@@ -69,7 +72,7 @@ function HistoryChart({ history }: { history: HistorySnapshot[] }) {
   );
 }
 
-export default function TrendsPanel({ countryScores }: TrendsPanelProps) {
+export default function TrendsPanel({ countryScores, anomalies }: TrendsPanelProps) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [history, setHistory] = useState<HistorySnapshot[]>([]);
@@ -197,6 +200,21 @@ export default function TrendsPanel({ countryScores }: TrendsPanelProps) {
                 <p className="mt-3 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-neutral-300">
                   {summary?.text}
                 </p>
+                {(anomalies.get(selected) ?? []).length > 0 && (
+                  <div className="mt-3 rounded border border-amber-900/60 bg-amber-950/10 p-2">
+                    <span className="font-mono text-[9px] uppercase tracking-wider text-amber-500">
+                      ⚠ Recent anomalies
+                    </span>
+                    {(anomalies.get(selected) ?? []).map((f) => (
+                      <p
+                        key={`${f.signalType}:${f.category ?? ""}`}
+                        className="mt-1 font-mono text-[10px] leading-relaxed text-neutral-400"
+                      >
+                        {signalDescription(f)}.
+                      </p>
+                    ))}
+                  </div>
+                )}
               </>
             )}
           </div>

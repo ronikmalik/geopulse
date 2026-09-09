@@ -9,7 +9,7 @@ import { getAircraftAnomalies } from "@/lib/flightBaseline";
 // samples before this can say anything statistically honest.
 export async function GET() {
   try {
-    const anomalies = await getAircraftAnomalies();
+    const anomalies = await getAircraftAnomalies("military");
     return NextResponse.json({ anomalies });
   } catch (err) {
     console.error(`aircraft-anomalies failed: ${err}`);

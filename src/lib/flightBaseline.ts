@@ -1,21 +1,25 @@
-import { sql, desc } from "drizzle-orm";
+import { sql, desc, eq, and } from "drizzle-orm";
 import { getDb } from "@/db";
 import { aircraftCountHistory } from "@/db/schema";
-import { fetchAdsbLolMilitary } from "@/lib/sources/adsblol";
+import { fetchAdsbLolMilitary, fetchAdsbLolCommercial } from "@/lib/sources/adsblol";
 import { countryFromLatLon } from "@/lib/geoResolve";
+import { detectAnomaly, DEFAULT_BASELINE_CONFIG, type AnomalyOutcome } from "@/lib/anomalyBaseline";
 
-// Snapshots today's currently-tracked military aircraft, bucketed by
-// reverse-geocoded country, into aircraft_count_history — the first step
-// toward the "surge above baseline" detection described in
-// docs/OSINT_SOURCES.md. Aircraft that resolve to no country (open ocean,
-// international airspace) are excluded: this table is a per-country
-// baseline, not a global count, and a real anomaly detector needs
-// several weeks of these snapshots before it has anything honest to
-// compare a given day against. Called by /api/admin/snapshot-flights on
-// the daily cron defined in vercel.ts.
-export async function snapshotAircraftCounts(): Promise<{ inserted: number; countriesSeen: number }> {
-  const aircraft = await fetchAdsbLolMilitary();
+export type AircraftKind = "military" | "commercial";
 
+// Snapshots today's currently-tracked aircraft, bucketed by reverse-
+// geocoded country, into aircraft_count_history — the first step toward
+// the "surge above baseline" detection described in docs/OSINT_SOURCES.md.
+// Aircraft that resolve to no country (open ocean, international
+// airspace) are excluded: this table is a per-country baseline, not a
+// global count, and a real anomaly detector needs several weeks of these
+// snapshots before it has anything honest to compare a given day against.
+// Called by /api/admin/snapshot-flights on the daily cron defined in
+// vercel.ts.
+async function snapshotAircraft(
+  kind: AircraftKind,
+  aircraft: { lat: number; lon: number }[],
+): Promise<{ inserted: number; countriesSeen: number }> {
   const countsByCountry = new Map<string, number>();
   for (const a of aircraft) {
     const country = countryFromLatLon(a.lat, a.lon);
@@ -28,6 +32,7 @@ export async function snapshotAircraftCounts(): Promise<{ inserted: number; coun
   const rows = Array.from(countsByCountry.entries()).map(([country, count]) => ({
     country,
     count,
+    kind,
   }));
 
   const db = getDb();
@@ -39,44 +44,63 @@ export async function snapshotAircraftCounts(): Promise<{ inserted: number; coun
   return { inserted: result.length, countriesSeen: countsByCountry.size };
 }
 
+export async function snapshotAircraftCounts(): Promise<{ inserted: number; countriesSeen: number }> {
+  return snapshotAircraft("military", await fetchAdsbLolMilitary());
+}
+
+// Commercial coverage is real but narrow — fetchAdsbLolCommercial samples
+// 9 fixed geopolitical hub points (London, Frankfurt, Istanbul, Dubai, Tel
+// Aviv, Moscow, DC, Hong Kong, Seoul) at 250nm radius, not global traffic
+// (see adsblol.ts's own doc comment). A commercial-flight anomaly for a
+// given country is only ever meaningful for countries near one of those
+// hubs; a country whose airspace sits between two overlapping hubs (e.g.
+// UK/France near London+Frankfurt) has counts shaped by adsblol.ts's own
+// cross-hub dedup, not a true regional total. Same honesty standard that
+// file already holds its live layer to, extended to this historical use.
+export async function snapshotCommercialAircraftCounts(): Promise<{
+  inserted: number;
+  countriesSeen: number;
+}> {
+  return snapshotAircraft("commercial", await fetchAdsbLolCommercial());
+}
+
 // Pure statistics, not ML — plain z-score against each country's own
 // trailing history, same "honest baseline, no fabricated threshold" spirit
 // as this table's own doc comment in src/db/schema.ts. Snapshots began
-// 2026-09-03, so any given country only clears MIN_BASELINE_SAMPLES once
-// its own daily cron has actually run that many times — this naturally
-// self-activates per country over the following ~2 weeks rather than
-// flagging anything off a handful of noisy data points today. Computed on
-// read (no stored table), same "pure JS aggregation, not re-derived SQL"
-// approach as risk.ts's getCountryCategoryRows.
+// 2026-09-03, so any given country only clears the baseline sample
+// requirement once its own daily cron has actually run that many times —
+// this naturally self-activates per country over the following ~2 weeks
+// rather than flagging anything off a handful of noisy data points today.
+// Computed on read (no stored table), same "pure JS aggregation, not
+// re-derived SQL" approach as risk.ts's getCountryCategoryRows.
+//
+// Commercial counts use allowNegativeJump — a large DROP (an airspace
+// closure) is the meaningful signal for commercial traffic, unlike
+// military presence where only a rise matters. This is the one signal in
+// the whole anomaly system where a decrease, not an increase, is flagged.
 export interface AircraftAnomaly {
+  kind: AircraftKind;
   country: string;
   todayCount: number;
   baselineMean: number;
   baselineStdDev: number;
   sampleSize: number;
+  jump: number;
   zScore: number;
 }
 
 const ANOMALY_LOOKBACK_DAYS = 30;
-// Two weeks of daily samples before trusting a mean/stddev estimate at
-// all — fewer than this and a single unusual day would swing the
-// baseline itself, not just flag against it.
-const MIN_BASELINE_SAMPLES = 14;
-// Conservative on purpose (see eventDedup.ts's SIMILARITY_THRESHOLD
-// comment for the same precision-over-recall reasoning applied there) —
-// this is a brand-new, uncalibrated signal with no real-world validation
-// yet, so it should surface only genuinely large deviations at first.
-const Z_SCORE_THRESHOLD = 2.5;
-// Also require an absolute jump, not just a statistical one — a country
-// whose baseline is "0 or 1 aircraft most days" can have a technically
-// enormous z-score from a single-aircraft increase, which isn't a
-// meaningful "surge" in the way this feature means it.
-const MIN_ABSOLUTE_JUMP = 2;
-// Guards against flagging off a stale row if a day's snapshot cron never
-// fired — "today's count" should actually be recent.
-const MAX_LATEST_AGE_MS = 36 * 60 * 60_000;
 
-export async function getAircraftAnomalies(): Promise<AircraftAnomaly[]> {
+export interface AircraftAnomalyOutcome {
+  country: string;
+  outcome: AnomalyOutcome;
+}
+
+// Returns EVERY country checked, not just the anomalous ones — used by
+// anomalyScan.ts to also report insufficient-baseline/stale counts, not
+// just findings. getAircraftAnomalies below is the simple filtered view
+// most callers (the live /api/aircraft-anomalies route) actually want.
+export async function getAircraftAnomalyOutcomes(kind: AircraftKind): Promise<AircraftAnomalyOutcome[]> {
   const db = getDb();
   const rows = await db
     .select({
@@ -86,46 +110,48 @@ export async function getAircraftAnomalies(): Promise<AircraftAnomaly[]> {
     })
     .from(aircraftCountHistory)
     .where(
-      sql`${aircraftCountHistory.snapshotAt} > now() - interval '${sql.raw(String(ANOMALY_LOOKBACK_DAYS))} days'`,
+      and(
+        eq(aircraftCountHistory.kind, kind),
+        sql`${aircraftCountHistory.snapshotAt} > now() - interval '${sql.raw(String(ANOMALY_LOOKBACK_DAYS))} days'`,
+      ),
     )
     .orderBy(desc(aircraftCountHistory.snapshotAt));
 
-  const byCountry = new Map<string, { count: number; snapshotAt: Date }[]>();
+  const byCountry = new Map<string, { value: number; at: Date }[]>();
   for (const r of rows) {
     const list = byCountry.get(r.country) ?? [];
-    list.push({ count: r.count, snapshotAt: r.snapshotAt });
+    list.push({ value: r.count, at: r.snapshotAt });
     byCountry.set(r.country, list);
   }
 
-  const anomalies: AircraftAnomaly[] = [];
+  const outcomes: AircraftAnomalyOutcome[] = [];
   for (const [country, samples] of byCountry) {
     // samples is already sorted newest-first (query orderBy desc).
-    const [latest, ...baseline] = samples;
-    if (!latest || baseline.length < MIN_BASELINE_SAMPLES) continue;
-    if (Date.now() - latest.snapshotAt.getTime() > MAX_LATEST_AGE_MS) continue;
+    const outcome = detectAnomaly(samples, {
+      ...DEFAULT_BASELINE_CONFIG,
+      lookbackDays: ANOMALY_LOOKBACK_DAYS,
+      allowNegativeJump: kind === "commercial",
+    });
+    outcomes.push({ country, outcome });
+  }
+  return outcomes;
+}
 
-    const mean = baseline.reduce((sum, b) => sum + b.count, 0) / baseline.length;
-    const variance =
-      baseline.reduce((sum, b) => sum + (b.count - mean) ** 2, 0) / (baseline.length - 1);
-    const stdDev = Math.sqrt(variance);
-
-    const jump = latest.count - mean;
-    if (jump < MIN_ABSOLUTE_JUMP) continue;
-    // stdDev === 0 means a perfectly flat baseline just moved — a real
-    // anomaly, but "divide by zero" isn't a number JSON can carry, so it's
-    // reported as a capped sentinel (99) rather than Infinity.
-    const zScore = stdDev > 0 ? Math.min(99, jump / stdDev) : 99;
-    if (zScore < Z_SCORE_THRESHOLD) continue;
-
+export async function getAircraftAnomalies(kind: AircraftKind): Promise<AircraftAnomaly[]> {
+  const outcomes = await getAircraftAnomalyOutcomes(kind);
+  const anomalies: AircraftAnomaly[] = [];
+  for (const { country, outcome } of outcomes) {
+    if (outcome.status !== "anomaly") continue;
     anomalies.push({
+      kind,
       country,
-      todayCount: latest.count,
-      baselineMean: Math.round(mean * 10) / 10,
-      baselineStdDev: Math.round(stdDev * 10) / 10,
-      sampleSize: baseline.length,
-      zScore: Math.round(zScore * 10) / 10,
+      todayCount: outcome.data.observedValue,
+      baselineMean: outcome.data.baselineMean,
+      baselineStdDev: outcome.data.baselineStdDev,
+      sampleSize: outcome.data.sampleSize,
+      jump: outcome.data.jump,
+      zScore: outcome.data.zScore,
     });
   }
-
   return anomalies.sort((a, b) => b.zScore - a.zScore);
 }
