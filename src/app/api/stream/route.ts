@@ -176,7 +176,14 @@ export async function GET(req: NextRequest) {
 
           send("ping", { lastId, t: Date.now() });
         } catch (err) {
-          send("error", { message: String(err) });
+          // Logged server-side only — this stream has no auth, so a raw
+          // exception (query text, column names, etc.) has no business
+          // going out to an anonymous client. The client doesn't even
+          // listen for this event type today (see useEventStream.ts); it's
+          // sent purely so a future consumer has something to react to
+          // without us having to remember to sanitize it then too.
+          console.error(`/api/stream poll failed: ${err}`);
+          send("error", { message: "internal error" });
         }
 
         await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
