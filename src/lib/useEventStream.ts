@@ -24,11 +24,50 @@ export function useEventStream() {
   const seenIds = useRef<Set<number>>(new Set());
   const lastIdRef = useRef(0);
 
+  // Batches individual "event" SSE messages into one state update per
+  // animation frame instead of one per message. Matters most exactly when
+  // the user reports lag: switching back to a backgrounded tab. The
+  // browser pauses requestAnimationFrame for hidden tabs, so every row
+  // that streams in (or trickles in via the reconnect poll loop —
+  // api/stream/route.ts sends up to 50 rows per 4s poll, individually, not
+  // batched) while the tab is hidden just accumulates here with zero
+  // re-renders; the moment the tab becomes visible again, rAF resumes and
+  // the whole backlog — which could be 50-100+ rows after a long-hidden
+  // tab during a busy news cycle — applies as exactly ONE setEvents/
+  // setIncoming update instead of one per row. Same rAF-coalescing idiom
+  // Globe.tsx's refreshPolygons already uses for the identical reason.
+  const pendingRowsRef = useRef<GeoEvent[]>([]);
+  const flushScheduledRef = useRef(false);
+  const flushFrameRef = useRef<number | null>(null);
+
   useEffect(() => {
     let source: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectDelay = INITIAL_RECONNECT_MS;
     let cancelled = false;
+
+    function scheduleFlush() {
+      if (flushScheduledRef.current) return;
+      flushScheduledRef.current = true;
+      flushFrameRef.current = requestAnimationFrame(() => {
+        flushScheduledRef.current = false;
+        if (cancelled || pendingRowsRef.current.length === 0) return;
+        const batch = pendingRowsRef.current;
+        pendingRowsRef.current = [];
+        setEvents((prev) => {
+          const next = [...prev, ...batch];
+          if (next.length <= MAX_BUFFERED_EVENTS) return next;
+          const trimmed = next.slice(next.length - MAX_BUFFERED_EVENTS);
+          // seenIds must track exactly what's still buffered — otherwise a
+          // dropped-off-the-front event's id stays "seen" forever, so if it
+          // were ever re-sent (e.g. a future backfill window) it would be
+          // silently ignored instead of being added back.
+          seenIds.current = new Set(trimmed.map((e) => e.id));
+          return trimmed;
+        });
+        setIncoming((prev) => [...prev, ...batch]);
+      });
+    }
 
     // The server (api/stream/route.ts) closes each connection cleanly
     // after ~45s to stay under serverless duration limits rather than
@@ -67,18 +106,8 @@ export function useEventStream() {
         reconnectDelay = INITIAL_RECONNECT_MS;
         if (seenIds.current.has(row.id)) return;
         seenIds.current.add(row.id);
-        setEvents((prev) => {
-          const next = [...prev, row];
-          if (next.length <= MAX_BUFFERED_EVENTS) return next;
-          const trimmed = next.slice(next.length - MAX_BUFFERED_EVENTS);
-          // seenIds must track exactly what's still buffered — otherwise a
-          // dropped-off-the-front event's id stays "seen" forever, so if it
-          // were ever re-sent (e.g. a future backfill window) it would be
-          // silently ignored instead of being added back.
-          seenIds.current = new Set(trimmed.map((e) => e.id));
-          return trimmed;
-        });
-        setIncoming((prev) => [...prev, row]);
+        pendingRowsRef.current.push(row);
+        scheduleFlush();
       });
 
       es.addEventListener("ping", (e) => {
@@ -121,6 +150,7 @@ export function useEventStream() {
     return () => {
       cancelled = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (flushFrameRef.current !== null) cancelAnimationFrame(flushFrameRef.current);
       source?.close();
     };
   }, []);

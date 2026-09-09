@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTabVisible } from "./useTabVisible";
 
 export interface AircraftAnomaly {
   country: string;
@@ -18,8 +19,15 @@ const POLL_INTERVAL_MS = 5 * 60_000;
 
 export function useAircraftAnomalies(): Map<string, AircraftAnomaly> {
   const [anomalies, setAnomalies] = useState<Map<string, AircraftAnomaly>>(new Map());
+  const visible = useTabVisible();
 
+  // Paused while the tab is hidden (2026-09-09) — same posture as every
+  // other polling hook now (useLiveLayer, useCountryRisk): no reason to
+  // keep fetching a signal the user can't see, and re-running on
+  // visibility return gets a fresh read immediately rather than waiting
+  // out this already-long 5-minute interval.
   useEffect(() => {
+    if (!visible) return;
     let cancelled = false;
     const load = async () => {
       try {
@@ -40,7 +48,7 @@ export function useAircraftAnomalies(): Map<string, AircraftAnomaly> {
       cancelled = true;
       clearInterval(interval);
     };
-  }, []);
+  }, [visible]);
 
   return anomalies;
 }

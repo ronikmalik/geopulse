@@ -1,11 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTabVisible } from "./useTabVisible";
 
 // Generic polling hook shared by every /api/layers/* data layer. Fetching
 // only happens while `enabled` is true — flipping a layer off in the
 // dashboard stops the poll loop entirely rather than fetching in the
-// background forever.
+// background forever. Also pauses while the tab is hidden (2026-09-09):
+// a backgrounded tab has no business burning bandwidth/CPU on layers the
+// user can't see, and re-running this effect the moment the tab becomes
+// visible again means a fresh fetch happens right then instead of
+// waiting for the browser's own throttled interval to next fire —
+// sometimes stale by the layer's full intervalMs (up to 6h for some
+// layers), sometimes several independently-throttled layers all firing
+// in the same burst.
 export function useLiveLayer<T>(
   url: string,
   intervalMs: number,
@@ -13,9 +21,10 @@ export function useLiveLayer<T>(
 ) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const visible = useTabVisible();
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || !visible) return;
     let cancelled = false;
 
     const load = async () => {
@@ -44,7 +53,7 @@ export function useLiveLayer<T>(
       cancelled = true;
       clearInterval(id);
     };
-  }, [url, intervalMs, enabled]);
+  }, [url, intervalMs, enabled, visible]);
 
   return { data, error };
 }
