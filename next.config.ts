@@ -1,12 +1,18 @@
 import type { NextConfig } from "next";
 
-// This app has no external runtime dependencies from the browser: globe.gl
-// renders without a texture URL (see Globe.tsx — no globeImageUrl is ever
-// set), fonts are self-hosted via next/font/google (downloaded at build
-// time, never fetched from fonts.googleapis.com at request time), and every
-// client-side fetch() call targets this app's own /api/* routes (verified
-// across CountryRiskPanel/FeedPanel/TrendsPanel/page.tsx). That makes a
-// same-origin CSP safe here, not just a best-effort default.
+// This app has almost no external runtime dependencies from the browser:
+// globe.gl renders without a texture URL (see Globe.tsx — no
+// globeImageUrl is ever set), fonts are self-hosted via next/font/google
+// (downloaded at build time, never fetched from fonts.googleapis.com at
+// request time), and every client-side fetch() call targets this app's
+// own /api/* routes (verified across CountryRiskPanel/FeedPanel/
+// TrendsPanel/page.tsx). The one real exception is LiveWirePanel's
+// embedded YouTube live-broadcast <iframe> (src/lib/liveNews.ts) —
+// frame-src has to explicitly allow youtube.com or the browser silently
+// drops the embed (frame-src falls back to default-src 'self' when
+// unset, and a cross-origin iframe isn't 'self'). Learned this the hard
+// way: shipping this CSP without frame-src broke Live Wire in production
+// with zero console signal pointing at CSP as the cause.
 //
 // script-src/style-src need 'unsafe-inline': Next's App Router streams RSC
 // payloads to the client via inline `<script>self.__next_f.push(...)</script>`
@@ -20,7 +26,7 @@ import type { NextConfig } from "next";
 // dangerouslySetInnerHTML anywhere in src/), so there's no injection point
 // for an attacker-controlled inline <script> to exploit in the first place.
 // The rest of the policy (no external script/style/img/font/connect hosts,
-// no plugins, no framing) still holds.
+// no plugins, no framing of this site by others) still holds.
 const CSP = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline'",
@@ -28,6 +34,7 @@ const CSP = [
   "img-src 'self' data:",
   "font-src 'self'",
   "connect-src 'self'",
+  "frame-src https://www.youtube.com",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
