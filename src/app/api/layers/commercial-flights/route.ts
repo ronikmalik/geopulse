@@ -1,24 +1,21 @@
 import { NextResponse } from "next/server";
-import { fetchOpenSkyStates } from "@/lib/sources/opensky";
+import { fetchAdsbLolCommercial } from "@/lib/sources/adsblol";
 import { withCache } from "@/lib/layerCache";
 
-// See src/app/api/layers/flights/route.ts's 2026-09-04 comment — this was
-// the route that actually crashed live (a 500 with no body) when OpenSky
-// hiccuped, prompting the audit that found the same gap in every other
-// layer route.
-//
-// Still degrades to a 200 with an empty list on failure (never break the
-// panel), but now includes the real reason in an `error` field — found
-// live (2026-09-04) that OpenSky was consistently failing from Vercel's
-// shared outbound IP while working fine from elsewhere, and the previous
-// silent-empty-array behavior made that indistinguishable from genuinely
-// zero live aircraft over Europe/Middle East, which never happens.
+// Switched from OpenSky to adsb.lol 2026-09-09 — OpenSky's bounding-box
+// endpoint was confirmed live to be blocked/empty specifically from
+// Vercel's shared outbound IP (see the old opensky.ts, removed in this
+// change, for the original diagnosis), so this layer had been silently
+// dead in production. adsb.lol is already proven reliable from this same
+// environment (it powers the military "flights" layer) — see
+// fetchAdsbLolCommercial's own comment for why it's several hub-point
+// queries merged together rather than one global call.
 export async function GET() {
   try {
     const aircraft = await withCache(
       "layer:commercial-flights",
       20_000,
-      () => fetchOpenSkyStates(),
+      fetchAdsbLolCommercial,
     );
     return NextResponse.json({ aircraft });
   } catch (err) {

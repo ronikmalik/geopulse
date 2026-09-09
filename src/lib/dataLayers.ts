@@ -64,7 +64,7 @@ export const DATA_LAYER_DESCRIPTIONS: Record<DataLayerId, string> = {
   flights:
     "adsb.lol — live-tracked military aircraft. Unusual concentrations or airspace activity are a Geopolitical & Security signal.",
   "commercial-flights":
-    "OpenSky Network — live commercial air traffic over Europe/Middle East. A sharp drop can indicate an airspace closure or disruption.",
+    "adsb.lol — live commercial air traffic over several geopolitically dense hubs (Europe, Gulf, Levant, Russia, US East Coast, East Asia). A sharp drop can indicate an airspace closure or disruption.",
   weather: "Open-Meteo — current conditions at 12 monitored capitals, for Climate & Environment context.",
   gdp: "World Bank — GDP by country. Structural context for how much economic exposure a threat in that country represents.",
   population: "World Bank — population by country. Structural context for how many people a threat in that country could affect.",
@@ -83,7 +83,7 @@ export const DATA_LAYER_DESCRIPTIONS: Record<DataLayerId, string> = {
   "food-price-index":
     "FAO — global monthly Food Price Index. Food price spikes are a well-established driver of political instability (see the 2007-08 and 2010-11 spikes preceding the Arab Spring).",
   "air-quality":
-    "OpenAQ — ground-station PM2.5 at the same 12 monitored capitals as Weather. Environmental context only, not fed into the risk model.",
+    "Open-Meteo — model-estimated PM2.5 at the same 12 monitored capitals as Weather. Environmental context only, not fed into the risk model.",
   "port-congestion":
     "IMF PortWatch — daily vessel transits through the world's 28 major maritime chokepoints, Infrastructure & Connectivity / Supply Chain context.",
   "trade-balance":

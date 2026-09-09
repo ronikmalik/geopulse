@@ -22,6 +22,7 @@ import {
   tradeBalanceToPoints,
   portCongestionToPoints,
   airQualityToPoints,
+  cisaKevToPoints,
 } from "@/lib/mapPoints";
 import { CATEGORIES, type Category } from "@/lib/categories";
 import { DATA_LAYER_POLL_MS, type DataLayerId } from "@/lib/dataLayers";
@@ -338,6 +339,9 @@ export default function Home() {
     if (activeDataLayers.has("air-quality") && airQualityLayer.data) {
       points.push(...airQualityToPoints(airQualityLayer.data.readings));
     }
+    if (activeDataLayers.has("cyber") && cyberLayer.data) {
+      points.push(...cisaKevToPoints(cyberLayer.data.vulnerabilities));
+    }
     return points;
   }, [
     activeDataLayers,
@@ -352,6 +356,7 @@ export default function Home() {
     tradeBalanceLayer.data,
     portCongestionLayer.data,
     airQualityLayer.data,
+    cyberLayer.data,
   ]);
 
   const dashboardProps = {

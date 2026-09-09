@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { GeoEvent } from "@/lib/types";
 import { CATEGORY_LABELS, type Category } from "@/lib/categories";
 import { sourceLabel } from "@/lib/sourceLabels";
@@ -155,6 +155,18 @@ export default function FeedPanel({
     (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime(),
   );
 
+  // Clicking a pulse on the globe selects its event (see page.tsx's
+  // onSelect) and switches to this tab, but the matching card can easily
+  // be scrolled off-screen in a long feed — highlighting it via isSelected
+  // below did nothing visible if the user never scrolled to find it. This
+  // brings the selected card into view whenever selectedId changes,
+  // regardless of whether the selection came from a globe click, an alert
+  // toast, or a direct card click.
+  const selectedRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    selectedRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [selectedId]);
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto">
@@ -174,6 +186,7 @@ export default function FeedPanel({
           return (
           <button
             key={event.id}
+            ref={isSelected ? selectedRef : undefined}
             onClick={() => onSelect(event)}
             className={`block w-full border-b border-red-950 px-4 py-3 text-left transition hover:bg-red-950/30 ${
               isSelected ? "bg-red-950/40" : ""

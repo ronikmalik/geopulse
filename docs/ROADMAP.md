@@ -51,7 +51,7 @@ Not covered by the brief's own acceptance criteria, but now core to the live pro
 - **Nine new context layers** (2026-09-08, sourced from a deep-dive into
   worldmonitor.app's own public data-fetching code): GPS/GNSS jamming, submarine
   cable exposure, US travel advisories (also in the country dossier), World Bank
-  grid-loss, OWID energy mix, FAO Food Price Index, OpenAQ air quality, IMF
+  grid-loss, OWID energy mix, FAO Food Price Index, Open-Meteo air quality, IMF
   PortWatch chokepoint traffic, and UN Comtrade trade partners. All unscored,
   display-only — see `docs/API_SOURCES.md`'s Integrated table.
 

@@ -7,7 +7,8 @@ import type { WorldBankObservation } from "@/lib/sources/worldbank";
 import type { OwidEnergyCountry } from "@/lib/sources/owidEnergy";
 import type { CountryTradeSummary } from "@/lib/sources/comtrade";
 import type { ChokepointTransit } from "@/lib/sources/portwatch";
-import type { AirQualityReading } from "@/lib/sources/openaq";
+import type { AirQualityReading } from "@/lib/sources/openMeteoAirQuality";
+import type { KevEntry } from "@/lib/sources/cisakev";
 import { COUNTRY_CENTROIDS } from "@/lib/countryCentroids";
 import { ALPHA2_TO_ALPHA3 } from "@/lib/iso3";
 
@@ -27,7 +28,8 @@ export interface ExtraMapPoint {
     | "energy-mix"
     | "trade-balance"
     | "port-congestion"
-    | "air-quality";
+    | "air-quality"
+    | "cyber";
   id: string;
   lat: number;
   lon: number;
@@ -281,4 +283,94 @@ export function airQualityToPoints(readings: AirQualityReading[]): ExtraMapPoint
       radius: 0.24,
       label: `<b>${r.location.name}</b><br/>PM2.5: ${r.pm25} ${r.unit}${r.stationName ? ` (${r.stationName})` : ""}`,
     }));
+}
+
+const CYBER_COLOR = "#ec4899"; // magenta — visually distinct from every other layer's color
+
+// CISA KEV entries have no native geolocation (cisakev.ts's own header
+// comment: "a global feed (vendor/product, not a country)") — a vulnerable
+// product doesn't tell you where it's being exploited. The best available
+// proxy is where the vendor is headquartered, so this app plots on that
+// basis (same "known compromise, not perfect precision" spirit as every
+// other proxy-based layer here). Ordered, case-insensitive substring match
+// against the raw vendorProject string — first match wins; an unmatched
+// vendor is dropped rather than mis-plotted, same rule every other
+// function in this file follows.
+const VENDOR_COUNTRY: [string, string][] = [
+  ["microsoft", "US"], ["apple", "US"], ["google", "US"], ["cisco", "US"],
+  ["oracle", "US"], ["adobe", "US"], ["vmware", "US"], ["broadcom", "US"],
+  ["ivanti", "US"], ["juniper", "US"], ["f5", "US"], ["citrix", "US"],
+  ["palo alto", "US"], ["solarwinds", "US"], ["kaseya", "US"],
+  ["progress software", "US"], ["moveit", "US"], ["fortra", "US"],
+  ["dell", "US"], ["hp inc", "US"], ["hewlett", "US"], ["ibm", "US"],
+  ["red hat", "US"], ["gitlab", "US"], ["atlassian", "AU"],
+  ["apache software foundation", "US"], ["wordpress", "US"],
+  ["automattic", "US"], ["php group", "US"], ["mozilla", "US"],
+  ["n-able", "US"], ["qualcomm", "US"], ["cloudflare", "US"],
+  ["zoom", "US"], ["linux", "US"],
+  ["sap", "DE"], ["siemens", "DE"], ["ashlar", "DE"],
+  ["fortinet", "US"], ["sonicwall", "US"], ["watchguard", "US"],
+  ["zoho", "IN"],
+  ["samsung", "KR"],
+  ["huawei", "CN"], ["zte", "CN"], ["tp-link", "CN"], ["xiaomi", "CN"],
+  ["d-link", "TW"], ["zyxel", "TW"], ["qnap", "TW"], ["draytek", "TW"],
+  ["asus", "TW"], ["realtek", "TW"], ["synology", "TW"],
+  ["trend micro", "JP"], ["mitsubishi electric", "JP"],
+  ["sophos", "GB"],
+  ["schneider electric", "FR"],
+  ["netgear", "US"],
+  ["drupal", "BE"],
+  ["honeywell", "US"],
+  ["sangoma", "CA"],
+];
+
+function attributeVendorCountry(vendorProject: string): string | null {
+  const v = vendorProject.toLowerCase();
+  for (const [needle, iso2] of VENDOR_COUNTRY) {
+    if (v.includes(needle)) return iso2;
+  }
+  return null;
+}
+
+export function cisaKevToPoints(vulnerabilities: KevEntry[]): ExtraMapPoint[] {
+  const byCountry = new Map<
+    string,
+    { count: number; ransomwareCount: number; vendors: Set<string> }
+  >();
+  for (const kev of vulnerabilities) {
+    const iso2 = attributeVendorCountry(kev.vendorProject);
+    if (!iso2) continue;
+    const existing = byCountry.get(iso2);
+    if (existing) {
+      existing.count++;
+      if (kev.knownRansomwareUse) existing.ransomwareCount++;
+      existing.vendors.add(kev.vendorProject);
+    } else {
+      byCountry.set(iso2, {
+        count: 1,
+        ransomwareCount: kev.knownRansomwareUse ? 1 : 0,
+        vendors: new Set([kev.vendorProject]),
+      });
+    }
+  }
+
+  const maxCount = Math.max(...[...byCountry.values()].map((v) => v.count), 1);
+  return [...byCountry.entries()]
+    .map(([iso2, agg]): ExtraMapPoint | null => {
+      const c = centroidFor(iso2);
+      if (!c) return null;
+      const vendorList = [...agg.vendors].slice(0, 5).join(", ");
+      return {
+        kind: "cyber",
+        id: `cyber-${iso2}`,
+        lat: c.lat,
+        lon: c.lon,
+        color: CYBER_COLOR,
+        radius: scaleRadius(agg.count, maxCount, 0.18, 0.45),
+        label: `<b>${COUNTRY_CENTROIDS[iso2]?.name ?? iso2}-based vendors</b><br/>${agg.count} actively exploited vulnerabilities (CISA KEV)${
+          agg.ransomwareCount > 0 ? `, ${agg.ransomwareCount} tied to ransomware` : ""
+        }<br/>${vendorList}`,
+      };
+    })
+    .filter((p): p is ExtraMapPoint => p !== null);
 }

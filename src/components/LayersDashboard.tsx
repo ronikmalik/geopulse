@@ -391,7 +391,7 @@ export default function LayersDashboard({
           Context Layers
         </h2>
         <p className="mb-2 font-mono text-[10px] text-red-800">
-          Structural and situational context, not scored events. Flights, Weather, GPS Jamming, Submarine Cables, Travel Advisories, Grid Losses, Energy Mix, Trade Balance, Chokepoint Traffic, and Air Quality all render as points on the globe (toggle one, then look at the map) and preview here; GDP/Population/Cyber/Telegram/Food Price Index are ticker-only for now.
+          Structural and situational context, not scored events. Flights, Commercial Air Traffic, Weather, GPS Jamming, Submarine Cables, Travel Advisories, Grid Losses, Energy Mix, Trade Balance, Chokepoint Traffic, Air Quality, and Cyber (Actively Exploited Vulnerabilities, plotted by vendor headquarters — a proxy, not the real exploitation location) all render as points on the globe (toggle one, then look at the map) and preview here; GDP/Population/Telegram/Food Price Index are ticker-only for now.
         </p>
         {DATA_LAYERS.map((id) => {
           const isActive = activeDataLayers.has(id);

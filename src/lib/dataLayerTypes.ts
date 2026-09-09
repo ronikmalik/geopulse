@@ -11,7 +11,7 @@ import type { SubmarineCableSummary } from "@/lib/sources/submarineCables";
 import type { TravelAdvisory } from "@/lib/sources/travelAdvisories";
 import type { OwidEnergyCountry } from "@/lib/sources/owidEnergy";
 import type { FaoFoodPriceIndex } from "@/lib/sources/faoFoodPrice";
-import type { AirQualityReading } from "@/lib/sources/openaq";
+import type { AirQualityReading } from "@/lib/sources/openMeteoAirQuality";
 import type { ChokepointTransit } from "@/lib/sources/portwatch";
 import type { CountryTradeSummary } from "@/lib/sources/comtrade";
 
@@ -33,11 +33,11 @@ export interface PopulationResponse {
 
 export interface CommercialFlightsResponse {
   aircraft: TrackedAircraft[];
-  // Set when the upstream OpenSky fetch failed — an empty aircraft array
-  // alone is indistinguishable from "genuinely no traffic right now",
-  // which never happens for a live Europe/Middle East bounding box, so
-  // this route surfaces the real reason instead of masking it (same
-  // principle as GDELT's 429 fix elsewhere in this app).
+  // Set when the underlying withCache call itself throws (individual hub
+  // queries in fetchAdsbLolCommercial already catch their own failures and
+  // resolve to zero aircraft for that hub, so this is a rarer, more total
+  // failure) — surfaced instead of masking it, same principle as GDELT's
+  // 429 fix elsewhere in this app.
   error?: string;
 }
 

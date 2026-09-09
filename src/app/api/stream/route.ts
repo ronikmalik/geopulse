@@ -164,13 +164,30 @@ export async function GET(req: NextRequest) {
               sawUnresolvedPending = true;
               continue;
             }
+            // 2026-09-09 fix: this used to send() an approved row here
+            // unconditionally, even after sawUnresolvedPending had already
+            // gone true this batch — meaning row 106 (approved) got sent
+            // to the client immediately while row 105 (lower id, still
+            // pending) hadn't resolved yet, then row 105 arrived as its
+            // own "new" toast one or more polls later, once review caught
+            // up. From the client's point of view that's a toast for an
+            // older event appearing chronologically AFTER a newer one it
+            // already saw — exactly the "glitchy out-of-order popup" bug
+            // reported live. Skipping every row once a pending gap is seen
+            // (not just skipping the advance) keeps send order identical
+            // to advance order: strictly ascending, chronological, and
+            // never revisited out of turn. Rows past the halt point still
+            // get re-checked (and, once resolved, sent+advanced in order)
+            // on later polls — same as before, just no longer jumping
+            // ahead of the row that's blocking them.
+            if (sawUnresolvedPending) continue;
             if (row.reviewStatus === "approved" && !sentIds.has(row.id)) {
               send("event", row);
               sentIds.add(row.id);
             }
             // "rejected" rows are silently skipped — never sent, but safe
             // to advance the cursor past since that's a terminal state.
-            if (!sawUnresolvedPending) advanceTo = row.id;
+            advanceTo = row.id;
           }
           lastId = advanceTo;
 

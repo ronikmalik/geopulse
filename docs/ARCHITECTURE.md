@@ -234,7 +234,7 @@ In the order they'd actually get built:
 4. **Structural country context** (GDP, trade dependence, governance indicators) —
    World Bank GDP/population/grid-loss, OWID energy mix, IMF PortWatch (chokepoint
    transits), UN Comtrade (top trade partners), FAO Food Price Index, US travel
-   advisories, GPS/GNSS jamming, submarine cable exposure, and OpenAQ air quality are
+   advisories, GPS/GNSS jamming, submarine cable exposure, and Open-Meteo air quality are
    all wired as standalone context/ticker layers (`src/lib/dataLayers.ts`, added
    2026-09-08 — see `docs/API_SOURCES.md`), not joined into the risk/exposure model.
    WGI itself is currently unreachable (see §4). WTO, EIA, full FAOSTAT: not started.
