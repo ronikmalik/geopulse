@@ -34,6 +34,42 @@ function polygonCountryCode(feature: unknown): string | null {
   return id ? (ISO_NUMERIC_TO_ALPHA2[id] ?? null) : null;
 }
 
+// Multiple events can legitimately land on the exact same coordinate —
+// pre-backfill RSS/Telegram events still sitting at classify.ts's
+// country-centroid fallback (see geocodeBackfill.ts), two real stories
+// about the same city, or independent Gemini geocode calls landing on
+// slightly different points for the same place. Rather than stack
+// indistinguishable markers where whichever one three-globe's raycaster
+// happens to hit first "wins" the click (2026-09-09 user report: a
+// Russia click landed on an 18-hour-old avalanche story instead of a
+// 49-minute-old update sitting at the exact same point), only the single
+// most recent event at each coordinate is actually plotted as a
+// clickable/hoverable point on the globe — every event stays fully
+// visible in the Feed panel regardless, this only thins out what
+// competes for the same globe pixel. Rounded to 2 decimal degrees
+// (~1.1km) rather than an exact match so near-identical-but-not-quite
+// coordinates still collapse to one marker instead of two dots a user
+// can't visually tell apart at globe scale.
+function dedupeByCoordinateKeepingNewest(items: GeoEvent[]): GeoEvent[] {
+  const byKey = new Map<string, GeoEvent>();
+  for (const item of items) {
+    const key = `${item.lat.toFixed(2)},${item.lon.toFixed(2)}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, item);
+      continue;
+    }
+    // publishedAt travels over JSON (SSE/fetch) as a plain string, same
+    // as usePulsingEvents.ts's identical cast-and-parse.
+    const itemTime = new Date(item.publishedAt as unknown as string).getTime();
+    const existingTime = new Date(existing.publishedAt as unknown as string).getTime();
+    if (itemTime > existingTime || (itemTime === existingTime && item.id > existing.id)) {
+      byKey.set(key, item);
+    }
+  }
+  return [...byKey.values()];
+}
+
 function severityColor(severity: number): string {
   if (severity >= 5) return "#ff0000";
   if (severity >= 4) return "#ff3b3b";
@@ -305,13 +341,17 @@ export default function GlobeView({
   useEffect(() => {
     const globe = globeRef.current;
     if (!globe || !ready) return;
-    globe.pointsData([...events, ...extraPoints]);
+    const visibleEvents = dedupeByCoordinateKeepingNewest(events);
+    globe.pointsData([...visibleEvents, ...extraPoints]);
 
     // Every still-recent event pulses at its exact plotted location
     // (regardless of severity/category) — see usePulsingEvents. Filtered
-    // against `events` (the already-category-filtered list) so a category
-    // the user has toggled off never rings either, matching the fact that
-    // it's not plotted as a point in the first place.
+    // against `events` (the already-category-filtered list), not
+    // `visibleEvents` — an older event a coordinate collision hid from
+    // the point layer should still ripple when it first arrives; the
+    // ring renders at the same lat/lon as whichever point is currently
+    // showing there either way, so this reads as "something just
+    // happened here," not a stray ring with nothing under it.
     globe.ringsData(
       pulsingIds ? events.filter((e) => pulsingIds.has(e.id)) : [],
     );
