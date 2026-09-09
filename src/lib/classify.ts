@@ -583,9 +583,29 @@ export function classifyGdeltItem(item: RawItem): ClassifiedItem | null {
   const severity = keywordSeverity(text);
   if (severity < 2) return null;
 
+  // Title-derived category wins whenever the headline itself matches a
+  // specific one — gdeltCategory only fills in when it doesn't. Trusting
+  // gdeltCategory first (the original order here) turned out unsafe: GDELT
+  // indexes a source URL's FULL page text, and outlets often publish
+  // rolling live-blogs bundling several unrelated stories under one URL.
+  // A real 2026-09-08 case: a livemint.com page headlined "US strikes
+  // Iranian tankers after attempted missile attacks on its Navy warship"
+  // got tagged israel-palestine, because the same page also had an
+  // unrelated "Israel strikes South Lebanon" sub-story further down that
+  // tripped the israel-palestine GDELT query's full-text match — even
+  // though nothing in the actual stored headline mentions Israel at all.
+  // The identical story via Haaretz's RSS feed correctly got us-iran,
+  // because RSS items have no pre-assigned category to blindly trust and
+  // always run through this same categorizeByKeywords call on the real
+  // title. GDELT's own query-of-origin is still a useful signal when the
+  // headline is genuinely category-ambiguous (categorizeByKeywords finds
+  // nothing and would otherwise fall through to "other") — just not one
+  // that should override a category the headline itself actually names.
+  const keywordCategory = categorizeByKeywords(item.title, text);
   const category =
-    (item.gdeltCategory as NewsCategory | undefined) ??
-    categorizeByKeywords(item.title, text);
+    keywordCategory !== "other"
+      ? keywordCategory
+      : (item.gdeltCategory as NewsCategory | undefined) ?? "other";
 
   const resolvedCountry =
     resolveCountryFromText(item.title) ?? resolveCountryFromText(item.snippet);
