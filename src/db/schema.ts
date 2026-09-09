@@ -591,4 +591,73 @@ export const classifierCalibration = pgTable(
   (table) => [index("classifier_calibration_active_idx").on(table.active)],
 );
 
+// Shadow-mode predictive risk model (2026-09-09) — see src/lib/riskModel.ts.
+// One row per weekly training attempt, a durable log of the whole
+// calibration story over time, not just the latest fit. Nothing reads
+// `promoted` as "show this to users" yet — it only marks "the best
+// validated run so far" for internal bookkeeping. JSON-encoded text
+// columns (features/coefficients/featureMeans/featureStdDevs) rather than
+// one column per feature — a changed feature set shouldn't need a schema
+// migration, same "don't build ahead of a consumer" reasoning ROADMAP.md
+// already states for structural decisions elsewhere in this app.
+export const riskModelRuns = pgTable("risk_model_runs", {
+  id: serial("id").primaryKey(),
+  trainedAt: timestamp("trained_at", { withTimezone: true }).notNull().defaultNow(),
+  sampleSize: integer("sample_size").notNull(),
+  positiveCount: integer("positive_count").notNull(),
+  // Nullable — when sampleSize is too low to train at all (today's
+  // reality: 0 eligible labeled examples), there is no real fit to
+  // record. Null here means exactly that, not a fabricated all-zero
+  // model that would silently predict something meaningless.
+  features: text("features"), // JSON string[]
+  coefficients: text("coefficients"), // JSON number[]
+  featureMeans: text("feature_means"), // JSON number[]
+  featureStdDevs: text("feature_std_devs"), // JSON number[]
+  backtestSampleSize: integer("backtest_sample_size").notNull(),
+  // Nullable, not a fabricated 0/100 — precision/recall are genuinely
+  // undefined when the held-out test split has zero predicted/actual
+  // positives (divide-by-zero in the metric's own definition, not a
+  // missing-data gap this app should paper over).
+  backtestAccuracy: doublePrecision("backtest_accuracy"),
+  backtestPrecision: doublePrecision("backtest_precision"),
+  backtestRecall: doublePrecision("backtest_recall"),
+  promoted: boolean("promoted").notNull().default(false),
+  notes: text("notes"),
+});
+
+// Shadow predictions — one row per country per training run, generated at
+// train time from that run's own coefficients, graded later once its
+// 14-day window actually resolves (src/lib/riskModelGrading.ts, run daily
+// via /api/admin/snapshot). This IS the live calibration record: a
+// genuinely out-of-sample, prospectively-graded track record, not just a
+// historical backtest. modelRunId is a plain integer, not a Drizzle
+// .references() FK — this schema has no precedent for that anywhere
+// (primaryEventId's real FK constraint is added via raw SQL in the
+// migrate route instead), so this follows that same established
+// convention rather than introducing a new one for the first time here.
+export const riskPredictions = pgTable(
+  "risk_predictions",
+  {
+    id: serial("id").primaryKey(),
+    generatedAt: timestamp("generated_at", { withTimezone: true }).notNull().defaultNow(),
+    modelRunId: integer("model_run_id").notNull(),
+    country: text("country").notNull(),
+    predictedProbability: doublePrecision("predicted_probability").notNull(),
+    inputFeatures: text("input_features").notNull(), // JSON number[]
+    resolvesAt: timestamp("resolves_at", { withTimezone: true }).notNull(),
+    actualOutcome: boolean("actual_outcome"), // null = not yet graded
+    gradedAt: timestamp("graded_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("risk_predictions_resolves_at_idx").on(table.resolvesAt),
+    index("risk_predictions_country_idx").on(table.country),
+    index("risk_predictions_model_run_id_idx").on(table.modelRunId),
+  ],
+);
+
+export type RiskModelRunRow = typeof riskModelRuns.$inferSelect;
+export type NewRiskModelRunRow = typeof riskModelRuns.$inferInsert;
+export type RiskPredictionRow = typeof riskPredictions.$inferSelect;
+export type NewRiskPredictionRow = typeof riskPredictions.$inferInsert;
+
 export type ClassifierCalibrationRow = typeof classifierCalibration.$inferSelect;

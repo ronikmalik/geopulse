@@ -1,0 +1,35 @@
+name: Train shadow risk model
+
+# Weekly, not daily — training is cheap at this data scale (see
+# src/lib/riskModel.ts) but there's no reason to refit more often than
+# new labeled examples can even appear (a snapshot's 14-day forward
+# window doesn't resolve any faster than once/day). Runs via GitHub
+# Actions rather than a new vercel.ts cron entry — this project's
+# established pattern for anything that isn't strict daily-floor duty
+# (see ingest.yml's own doc comment: the Vercel cron there is explicitly
+# a third-tier floor, GitHub Actions is the real scheduler for anything
+# with different needs).
+on:
+  schedule:
+    - cron: "0 12 * * 0"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Call /api/admin/train-risk-model
+        run: |
+          status=$(curl -sS -o /tmp/body.txt -w "%{http_code}" \
+            -X GET "https://geopulse-green.vercel.app/api/admin/train-risk-model" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          echo "HTTP $status"
+          cat /tmp/body.txt
+          if [ "$status" -ge 300 ]; then
+            echo "Training request failed"
+            exit 1
+          fi

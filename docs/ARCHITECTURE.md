@@ -290,6 +290,28 @@ Every signal here needs each country to individually clear its own 14-sample bas
 before it says anything — snapshots began 2026-09-03/09-04, so this self-activates per
 country over the following ~2 weeks rather than flagging anything off noisy early data.
 
+### 9a. Shadow-mode predictive risk model (not user-facing)
+
+`src/lib/riskModel.ts` — a hand-rolled logistic regression (`src/lib/
+logisticRegression.ts`; no ML dependency added, package.json has none and this data
+scale doesn't warrant one), trained weekly (`.github/workflows/train-risk-model.yml` →
+`GET /api/admin/train-risk-model`, not a `vercel.ts` cron entry — see that workflow's
+own comment) on a self-supervised label derived from `country_state_history` itself:
+did a country's Pulse Level jump 2+ within 14 days of a given snapshot. Backtested on a
+time-based (not random) held-out split, and separately shadow-predicts every country
+from its latest snapshot each run, graded later once each prediction's own 14-day
+window resolves (`src/lib/riskModelGrading.ts`, daily via `/api/admin/snapshot`,
+piggybacked onto that route rather than its own cron). This live-graded track record is
+the real calibration evidence — stronger than the historical backtest alone, since
+these predictions are made before their outcome is knowable.
+
+Nothing from this reaches a user yet. A run is marked `promoted` in `risk_model_runs`
+only once its backtest clears a real sample floor and beats the naive majority-class
+baseline on both precision and recall — as of this table's current depth (~6 days),
+there are zero eligible labeled examples, so training runs, correctly logs "insufficient
+data," and waits. That's the intended behavior: visibility is gated on measured
+evidence, not a guessed calendar date.
+
 ## 10. Backend architecture — what's built, and why it deviates from the brief
 
 **Current**: Next.js App Router, deployed entirely on Vercel (frontend + serverless API

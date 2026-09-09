@@ -186,6 +186,49 @@ const STATEMENTS = [
   sql`CREATE INDEX IF NOT EXISTS anomaly_findings_detected_at_idx ON anomaly_findings (detected_at)`,
   sql`CREATE INDEX IF NOT EXISTS anomaly_findings_country_idx ON anomaly_findings (country)`,
   sql`CREATE INDEX IF NOT EXISTS anomaly_findings_signal_type_idx ON anomaly_findings (signal_type)`,
+  sql`CREATE TABLE IF NOT EXISTS risk_model_runs (
+    id SERIAL PRIMARY KEY,
+    trained_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    sample_size INTEGER NOT NULL,
+    positive_count INTEGER NOT NULL,
+    features TEXT,
+    coefficients TEXT,
+    feature_means TEXT,
+    feature_std_devs TEXT,
+    backtest_sample_size INTEGER NOT NULL,
+    backtest_accuracy DOUBLE PRECISION,
+    backtest_precision DOUBLE PRECISION,
+    backtest_recall DOUBLE PRECISION,
+    promoted BOOLEAN NOT NULL DEFAULT false,
+    notes TEXT
+  )`,
+  sql`CREATE TABLE IF NOT EXISTS risk_predictions (
+    id SERIAL PRIMARY KEY,
+    generated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    model_run_id INTEGER NOT NULL,
+    country TEXT NOT NULL,
+    predicted_probability DOUBLE PRECISION NOT NULL,
+    input_features TEXT NOT NULL,
+    resolves_at TIMESTAMPTZ NOT NULL,
+    actual_outcome BOOLEAN,
+    graded_at TIMESTAMPTZ
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS risk_predictions_resolves_at_idx ON risk_predictions (resolves_at)`,
+  sql`CREATE INDEX IF NOT EXISTS risk_predictions_country_idx ON risk_predictions (country)`,
+  sql`CREATE INDEX IF NOT EXISTS risk_predictions_model_run_id_idx ON risk_predictions (model_run_id)`,
+  // Real FK, added via raw SQL rather than Drizzle's .references() (this
+  // schema has no .references() usage anywhere else to match, and
+  // primary_event_id's own doc comment in schema.ts describes the same
+  // raw-SQL-in-migrate approach). Postgres has no `ADD CONSTRAINT IF NOT
+  // EXISTS` (unlike `ADD COLUMN IF NOT EXISTS`, which is supported) — the
+  // DO-block/exception idiom below is the standard idempotent equivalent,
+  // safe to run on every /api/admin/migrate call the same as every other
+  // statement in this file.
+  sql`DO $$ BEGIN
+    ALTER TABLE risk_predictions ADD CONSTRAINT risk_predictions_model_run_id_fkey
+      FOREIGN KEY (model_run_id) REFERENCES risk_model_runs(id);
+  EXCEPTION WHEN duplicate_object THEN NULL;
+  END $$`,
 ];
 
 export async function GET(req: NextRequest) {
