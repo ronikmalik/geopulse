@@ -21,6 +21,20 @@ const LABEL_WINDOW_DAYS = 14;
 const ESCALATION_THRESHOLD = 2; // threatLevel jump of +2 or more within the window
 const FEATURE_NAMES = ["threatLevel", "score", "momentum", "momentumDirection", "eventCount"];
 const TEST_SPLIT_FRACTION = 0.2;
+// Burn-in exclusion — verified live 2026-09-09: country_state_history's
+// very first snapshots (e.g. Russia went threatLevel 2→4 between its
+// first two daily snapshots) reflect the decayed-weight score still
+// climbing from an artificial "no history yet" cold start toward its
+// real steady-state value, not a genuine escalation. Left in, this
+// contaminates the label set — 51/51 labeled examples came back positive
+// on the very first training run, which is the data warming up, not a
+// real base rate. Excluding snapshots taken within this many days of the
+// table's own earliest row removes that artifact. 7 days (not an
+// arbitrary round number) is ~2x risk.ts's own HALF_LIFE_DAYS=3 — the
+// same decay constant already governing how long a country's score takes
+// to reflect its real recent-event picture, reused here rather than a
+// second, independently-guessed constant.
+const BURN_IN_DAYS = 7;
 // Below this, don't even attempt a fit — a handful of points isn't a
 // model, it's noise with extra steps. This is deliberately much lower
 // than the promotion floor (see PROMOTION_MIN_BACKTEST_SAMPLE below):
@@ -54,6 +68,20 @@ export interface LabeledExample {
 // treating "no jump yet" as a confirmed negative before the window has
 // even had a chance to resolve would silently poison every recent
 // snapshot as a false negative.
+//
+// Also excludes any CANDIDATE snapshot taken within BURN_IN_DAYS of the
+// table's own earliest row (computed from the data itself, not a
+// hardcoded date — this logic is correct on day 1 of a fresh table just
+// as much as it is months later). Verified live 2026-09-09: without this,
+// the very first training run came back 51/51 positive — country scores
+// were still climbing from an artificial "no history yet" cold start
+// toward their real steady-state value in their first few days, not
+// genuinely escalating. Later snapshots from within the burn-in window
+// still count as valid evidence of a jump for an OUT-of-burn-in
+// candidate (time only moves forward from a candidate, so anything used
+// to detect ITS jump is automatically at least as recent as it is) —
+// only candidates themselves are excluded, not filtered out of the
+// dataset entirely.
 export function buildLabeledExamples(all: Snapshot[]): LabeledExample[] {
   const byCountry = new Map<string, Snapshot[]>();
   for (const s of all) {
@@ -66,10 +94,14 @@ export function buildLabeledExamples(all: Snapshot[]): LabeledExample[] {
   const windowMs = LABEL_WINDOW_DAYS * 86_400_000;
   const examples: LabeledExample[] = [];
 
+  const earliestMs = all.length > 0 ? Math.min(...all.map((s) => s.snapshotAt.getTime())) : 0;
+  const burnInCutoffMs = earliestMs + BURN_IN_DAYS * 86_400_000;
+
   for (const snapshots of byCountry.values()) {
     const sorted = [...snapshots].sort((a, b) => a.snapshotAt.getTime() - b.snapshotAt.getTime());
     for (let i = 0; i < sorted.length; i++) {
       const s = sorted[i];
+      if (s.snapshotAt.getTime() < burnInCutoffMs) continue;
       const windowEndMs = s.snapshotAt.getTime() + windowMs;
       let jumped = false;
       for (let j = i + 1; j < sorted.length; j++) {
