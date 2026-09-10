@@ -15,6 +15,7 @@ import {
   deletePending,
   expireStalePending,
 } from "../pendingTranslation";
+import { hasLikelyForeignIncidentLanguage } from "../foreignIncidentKeywords";
 
 // Public-channel scraping via Telegram's own no-auth web preview
 // (t.me/s/<channel>) — no bot token, no login, never touches groups or
@@ -156,7 +157,11 @@ async function fetchChannelHtml(handle: string): Promise<string> {
 // A short excerpt, not the full post — this is a citation pointing at the
 // source, the same restraint applied to RSS (headline + link, no full-text
 // reproduction) in src/lib/sources/rss.ts.
-const EXCERPT_MAX_CHARS = 280;
+// 280 -> 200 (2026-09-10, translation-budget optimization): kept posts
+// averaged 230 chars, dropped posts averaged 158 — most real incident
+// reports fit comfortably under 200, this just trims the tail on the
+// (usually-dropped) longer end rather than losing real signal.
+const EXCERPT_MAX_CHARS = 200;
 
 // A live run found `sanitizeForStorage`'s unpaired-surrogate stripping
 // getting undone right afterward: plain `.slice()` counts UTF-16 code
@@ -357,21 +362,61 @@ export async function fetchTelegramChannel(
 
   const excerpts = posts.map((p) => excerptOf(p.text));
 
+  const archiveOutcomes: ClassificationOutcome[] = [];
+
+  // Pre-translation triage (2026-09-10, translation-budget optimization —
+  // see foreignIncidentKeywords.ts's own doc comment for the full
+  // reasoning and real numbers). English channels skip this — there's
+  // nothing to save by pre-filtering text that was never going to be
+  // translated anyway. Posts that don't even look like they contain
+  // incident/threat language in their OWN language are archived as
+  // dropped immediately, at zero translation cost, instead of being
+  // translated first just to find out.
+  const toTranslateIdx: number[] = [];
+  if (config.language !== "en") {
+    posts.forEach((p, i) => {
+      if (hasLikelyForeignIncidentLanguage(excerpts[i], config.language)) {
+        toTranslateIdx.push(i);
+      } else {
+        archiveOutcomes.push({
+          source: `telegram:${config.handle}`,
+          url: `https://t.me/${p.id}`,
+          title: excerpts[i].slice(0, 200),
+          snippet: excerpts[i],
+          kept: false,
+          severity: 1,
+          category: null,
+          publishedAt: p.publishedAt,
+        });
+      }
+    });
+  } else {
+    posts.forEach((_, i) => toTranslateIdx.push(i));
+  }
+
+  if (toTranslateIdx.length === 0) {
+    await archiveClassifications(archiveOutcomes);
+    return [];
+  }
+
+  const candidatePosts = toTranslateIdx.map((i) => posts[i]);
+  const candidateExcerpts = toTranslateIdx.map((i) => excerpts[i]);
+
   // Batch-translate the whole channel's excerpts in one request rather
   // than per-post — see src/lib/translate.ts. Soft-degrades to the
   // original-language excerpts (translated: false) if no key is
   // configured or the channel is already English (presstv) — never
   // blocks ingest on translation being available.
-  let finalExcerpts = excerpts;
+  let finalExcerpts = candidateExcerpts;
   let translated = false;
   if (config.language !== "en") {
-    const result = await translateBatch(excerpts, config.language).catch(() => null);
+    const result = await translateBatch(candidateExcerpts, config.language).catch(() => null);
     if (result) {
       finalExcerpts = result.map((t, i) =>
         // Translation runs on the already-sanitized excerpt, but the API
         // response itself needs the same control-char/surrogate cleanup
         // applied before it can safely reach Postgres.
-        sanitizeForStorage(t) || excerpts[i],
+        sanitizeForStorage(t) || candidateExcerpts[i],
       );
       translated = true;
     } else {
@@ -381,20 +426,26 @@ export async function fetchTelegramChannel(
       // right now (user, 2026-09-05: "dont remove stuff just because we
       // run out of translation tokens"), park these brand-new posts for
       // drainPendingTelegramTranslations to retry on a later cycle, once
-      // budget frees up or the API recovers.
+      // budget frees up or the API recovers. Only the pre-filtered
+      // candidates get queued — the pre-filtered-out posts above are
+      // already archived, not lost, just never queued in the first place.
       await enqueuePendingTranslations(
-        posts.map((p, i) => ({
+        candidatePosts.map((p, i) => ({
           url: `https://t.me/${p.id}`,
           handle: config.handle,
-          excerpt: excerpts[i],
+          excerpt: candidateExcerpts[i],
           publishedAt: p.publishedAt,
         })),
       ).catch((err) => console.error(`enqueuePendingTranslations failed: ${err}`));
+      await archiveClassifications(archiveOutcomes);
       return [];
     }
   }
 
-  if (!canAssess(config, translated)) return [];
+  if (!canAssess(config, translated)) {
+    await archiveClassifications(archiveOutcomes);
+    return [];
+  }
 
   // Every scoreable post — kept AND dropped — is archived to
   // classification_archive (see src/lib/classificationArchive.ts), same
@@ -403,9 +454,7 @@ export async function fetchTelegramChannel(
   // for archival purposes — there's no meaningful difference for
   // vocabulary-discovery purposes between "scored 1" and "suppressed
   // outright", both mean "nothing here looks like an incident."
-  const archiveOutcomes: ClassificationOutcome[] = [];
-
-  const items = posts
+  const items = candidatePosts
     .map((p, i) => {
       const severity = assessIncidentSeverity(finalExcerpts[i]);
       const kept = isKeptConflictPost(finalExcerpts[i], severity, config.handle);
@@ -461,6 +510,25 @@ export async function drainPendingTelegramTranslations(): Promise<DirectItem[]> 
     if (!config) {
       // Channel was removed from TELEGRAM_CHANNELS since this was queued
       // — nothing left to reconstruct label/category/country from.
+      processedUrls.push(row.url);
+      continue;
+    }
+
+    // Same pre-translation triage as the live-fetch path above — a post
+    // that sat in the queue is no more likely to contain real incident
+    // language than it was when queued, so check again before spending
+    // budget on it (see foreignIncidentKeywords.ts's own doc comment).
+    if (!hasLikelyForeignIncidentLanguage(row.excerpt, config.language)) {
+      archiveOutcomes.push({
+        source: `telegram:${config.handle}`,
+        url: row.url,
+        title: row.excerpt.slice(0, 200),
+        snippet: row.excerpt,
+        kept: false,
+        severity: 1,
+        category: null,
+        publishedAt: row.publishedAt,
+      });
       processedUrls.push(row.url);
       continue;
     }
