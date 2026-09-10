@@ -112,18 +112,17 @@ group of fields its place.
 
 ## 4. Source registry & licensing
 
-`src/lib/sourceRegistry.ts` is a typed, in-code provider table (not yet a DB table —
-see Gap analysis) covering every source currently wired: GDELT, 35 RSS wires, Telegram
-(~18 channels, a knowing exception to this registry's normal licensing bar — see
-`docs/TELEGRAM_SOURCES.md` for the full reasoning), USGS, NASA EONET, GDACS, IODA,
-NASA FIRMS, CISA KEV, Frankfurter/ECB, the community currency CDN, World Bank, CFTC,
-OpenSky, adsb.lol, Open-Meteo, Finnhub. Each row records provider, license,
-`commercial_use`, `redistribution_allowed`, `attribution_required`, `caching_allowed`,
-rate limit, `api_key_required`, and `terms_last_checked` — implemented as TypeScript
-types rather than a DB schema for now (no UI currently reads it back; see Gap analysis
-for when it should move to Postgres). Every RSS/Telegram outlet is additionally checked
-against independent media-bias/reliability trackers before being wired in — see
-`docs/SOURCE_CREDIBILITY.md` for the full per-outlet writeup.
+`docs/API_SOURCES.md` is the provider table covering every source currently wired:
+GDELT, 35 RSS wires, Telegram (~18 channels, a knowing exception to the normal
+licensing bar — see `docs/TELEGRAM_SOURCES.md` for the full reasoning), USGS, NASA
+EONET, GDACS, IODA, NASA FIRMS, CISA KEV, Frankfurter/ECB, the community currency CDN,
+World Bank, CFTC, OpenSky, adsb.lol, Open-Meteo, Finnhub. Each row records provider,
+license, commercial use, redistribution allowed, attribution required, caching
+allowed, rate limit, API key required, and terms last checked — tracked in
+documentation rather than code or a DB schema for now (no UI currently reads it back;
+see Gap analysis for when it should move to Postgres). Every RSS/Telegram outlet is
+additionally checked against independent media-bias/reliability trackers before being
+wired in — see `docs/SOURCE_CREDIBILITY.md` for the full per-outlet writeup.
 
 **Sources evaluated and explicitly rejected**, with reasons on record (see
 `src/lib/sources/README.md` and `docs/SOURCE_CREDIBILITY.md`):
@@ -414,6 +413,6 @@ infrastructure item on the roadmap.
 `docs/ROADMAP.md` carries the phased build order and day-to-day status;
 `docs/SOURCE_CREDIBILITY.md` carries the per-outlet bias/reliability vetting for every
 RSS/Telegram source; `docs/TELEGRAM_SOURCES.md` and `src/lib/sources/README.md` carry
-per-source integration notes and rejected-source reasoning; `src/lib/sourceRegistry.ts`
+per-source integration notes and rejected-source reasoning; `docs/API_SOURCES.md`
 carries the licensing table itself. This document is the map of how those pieces fit
 together.

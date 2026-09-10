@@ -78,17 +78,6 @@ export async function snapshotCommercialAircraftCounts(): Promise<{
 // closure) is the meaningful signal for commercial traffic, unlike
 // military presence where only a rise matters. This is the one signal in
 // the whole anomaly system where a decrease, not an increase, is flagged.
-export interface AircraftAnomaly {
-  kind: AircraftKind;
-  country: string;
-  todayCount: number;
-  baselineMean: number;
-  baselineStdDev: number;
-  sampleSize: number;
-  jump: number;
-  zScore: number;
-}
-
 const ANOMALY_LOOKBACK_DAYS = 30;
 
 export interface AircraftAnomalyOutcome {
@@ -96,10 +85,9 @@ export interface AircraftAnomalyOutcome {
   outcome: AnomalyOutcome;
 }
 
-// Returns EVERY country checked, not just the anomalous ones — used by
-// anomalyScan.ts to also report insufficient-baseline/stale counts, not
-// just findings. getAircraftAnomalies below is the simple filtered view
-// most callers (the live /api/aircraft-anomalies route) actually want.
+// Returns EVERY country checked, not just the anomalous ones — anomalyScan.ts
+// filters this down to just the actual findings, but also reports
+// insufficient-baseline/stale counts from the unfiltered set.
 export async function getAircraftAnomalyOutcomes(kind: AircraftKind): Promise<AircraftAnomalyOutcome[]> {
   const db = getDb();
   const rows = await db
@@ -135,23 +123,4 @@ export async function getAircraftAnomalyOutcomes(kind: AircraftKind): Promise<Ai
     outcomes.push({ country, outcome });
   }
   return outcomes;
-}
-
-export async function getAircraftAnomalies(kind: AircraftKind): Promise<AircraftAnomaly[]> {
-  const outcomes = await getAircraftAnomalyOutcomes(kind);
-  const anomalies: AircraftAnomaly[] = [];
-  for (const { country, outcome } of outcomes) {
-    if (outcome.status !== "anomaly") continue;
-    anomalies.push({
-      kind,
-      country,
-      todayCount: outcome.data.observedValue,
-      baselineMean: outcome.data.baselineMean,
-      baselineStdDev: outcome.data.baselineStdDev,
-      sampleSize: outcome.data.sampleSize,
-      jump: outcome.data.jump,
-      zScore: outcome.data.zScore,
-    });
-  }
-  return anomalies.sort((a, b) => b.zScore - a.zScore);
 }

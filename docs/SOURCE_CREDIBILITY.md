@@ -281,7 +281,7 @@ USGS, NASA EONET, GDACS, IODA, and CISA KEV are scientific/institutional
 data feeds (seismology, disaster tracking, internet-outage telemetry, a
 government vulnerability catalog), not news outlets with editorial
 judgment — bias/reliability ratings don't apply the same way. Their
-licensing terms are tracked separately in `src/lib/sourceRegistry.ts`.
+licensing terms are tracked separately in `docs/API_SOURCES.md`.
 
 **GDELT** is an aggregator, not a publisher — it indexes tens of
 thousands of outlets globally rather than having its own editorial

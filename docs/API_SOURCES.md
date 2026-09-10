@@ -4,9 +4,8 @@ The prioritized, verified source table requested against the platform brief. Eve
 marked **integrated** has actually been called successfully by this codebase (not just
 read about) — see the verification note per row. Every row marked **candidate** has
 either been evaluated and found unworkable right now, or is a genuine next-phase
-target not yet attempted. `src/lib/sourceRegistry.ts` carries the same licensing fields
-in code for the integrated rows; this file is the fuller picture including what didn't
-make it in and why.
+target not yet attempted. This file is the single source of truth for licensing terms
+across every source, including candidates that didn't make it in and why.
 
 Fields follow the brief's requested schema: provider, endpoint, auth, rate limit,
 license/commercial-use/redistribution, refresh interval, adapter path, and known

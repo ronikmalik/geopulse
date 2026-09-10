@@ -22,7 +22,7 @@ Live at: https://geopulse-green.vercel.app
 - **Live event feed**: GDELT + curated RSS for geopolitical/political news,
   USGS/NASA EONET/GDACS for natural hazards and climate events, IODA for
   internet-outage detection — see `src/lib/sources/README.md` for every
-  integrated source and `src/lib/sourceRegistry.ts` for each one's
+  integrated source and `docs/API_SOURCES.md` for each one's
   licensing/commercial-use terms.
 - **Live data layers**: flights, weather, satellites, crypto, macro
   indicators, forex, CFTC positioning, and actively-exploited

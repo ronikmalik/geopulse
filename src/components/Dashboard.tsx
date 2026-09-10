@@ -102,12 +102,14 @@ const TAB_META: { id: DashboardTab; label: string; dot: string }[] = [
 export default function Dashboard(props: DashboardProps) {
   const { activeTab, onTabChange, showTabBar = true } = props;
 
-  const tabCount: Record<DashboardTab, number> = {
+  // No count badge for "trends" — it has no single natural count to show,
+  // unlike the other tabs (feed length, country count, active layers, forex
+  // pairs).
+  const tabCount: Partial<Record<DashboardTab, number>> = {
     feed: props.events.length,
     risk: props.countryScores.length,
     layers: props.activeDataLayers.size,
     forex: props.forex?.rates.length ?? 0,
-    trends: 0,
   };
 
   return (
@@ -135,7 +137,7 @@ export default function Dashboard(props: DashboardProps) {
                 <span className="flex items-center gap-1.5">
                   <span className={`h-1.5 w-1.5 rounded-full ${tab.dot}`} />
                   {tab.label}
-                  {count > 0 && <span className="text-neutral-600">{count}</span>}
+                  {!!count && count > 0 && <span className="text-neutral-600">{count}</span>}
                 </span>
                 <span
                   className={`h-0.5 w-8 rounded-full transition ${

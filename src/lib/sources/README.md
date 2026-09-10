@@ -48,7 +48,7 @@ exploitation location unknown, not the same claim as every other
 country-coded layer here.
 
 Every integrated source's licensing/commercial-use terms are tracked in
-`src/lib/sourceRegistry.ts` — check there (and the provider's actual terms)
+`docs/API_SOURCES.md` — check there (and the provider's actual terms)
 before relying on any of this for something with real commercial stakes.
 
 **ReliefWeb was investigated and skipped**: as of this writing its v1 API is

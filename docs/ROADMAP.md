@@ -24,7 +24,7 @@ Checked against the platform brief's own §23 acceptance list:
 | 8 | Click a country → what changed, why, evidence | ✅ Feed tab filtered to that country (DB-backed, not just the live buffer); Risk tab has the pillar breakdown; daily AI-generated situation briefs (`src/lib/countryBriefs.ts`) |
 | 9 | Click an event → source, timestamp, location, severity, confidence, related events | ✅ source/timestamp/location/severity/category all shown; a source-diversity confidence tier (single-source/corroborated/cross-confirmed, `src/lib/correlation.ts`) per event; cross-outlet duplicate sources shown as related via `eventDedup.ts`; semantic "similar events" via embeddings (`GET /api/events/[id]/similar`). ⚠️ Still no broader geographic/temporal correlation across genuinely *distinct-but-linked* events (e.g. a strike → a retaliation days later) — see ARCHITECTURE.md Gap analysis §1. |
 | 10 | API failures visible internally | ✅ `GET /api/admin/health` — no UI page rendering it yet |
-| 11 | Source licensing documented | ✅ `src/lib/sourceRegistry.ts` + `docs/API_SOURCES.md`; every RSS/Telegram outlet also individually vetted for bias/reliability (`docs/SOURCE_CREDIBILITY.md`) |
+| 11 | Source licensing documented | ✅ `docs/API_SOURCES.md`; every RSS/Telegram outlet also individually vetted for bias/reliability (`docs/SOURCE_CREDIBILITY.md`) |
 | 12 | Deployed and publicly accessible | ✅ https://geopulse-green.vercel.app |
 
 **11 of 12 fully met, 1 partial** (broader cross-event correlation, tied to the same

@@ -50,8 +50,8 @@ source silently no-ops until that env var is set (doesn't fail ingest).
 
 **Licensing**: general NASA open-data policy is public-domain/CC0-
 equivalent, but no FIRMS-specific terms page was found stating this in so
-many words — tracked as "unclear" in `src/lib/sourceRegistry.ts` rather
-than assumed clear, consistent with how every other source here is tracked.
+many words — tracked as "unclear" in `docs/API_SOURCES.md` rather than
+assumed clear, consistent with how every other source here is tracked.
 
 ## Investigated and NOT added: ACLED
 
