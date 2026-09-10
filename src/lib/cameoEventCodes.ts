@@ -51,7 +51,9 @@ export const CAMEO_ROOT_LABELS: Record<string, string> = {
 // protest sub-codes span from a peaceful demonstration to a violent riot
 // and this root-level mapping can't see that distinction directly — using
 // GoldsteinScale (more negative = more destabilizing) as the next-best
-// signal for which end of that range a given event sits on.
+// signal for which end of that range a given event sits on. Roots 16 and 17
+// are the exception to "matches a specific severity pattern" — see their
+// own inline comments below for why they're deliberately generic instead.
 const ROOT_VERB_PHRASE: Record<string, string> = {
   "01": "issues a statement about",
   "02": "appeals to",
@@ -67,8 +69,23 @@ const ROOT_VERB_PHRASE: Record<string, string> = {
   "12": "rejects a proposal from",
   "13": "threatens",
   "15": "mobilizes forces near",
-  "16": "recalls its ambassador from",
-  "17": "imposes sanctions on",
+  // 16 (REDUCE RELATIONS) and 17 (COERCE) are each a WIDE CAMEO root
+  // spanning several distinct leaf actions (16: sever diplomatic ties, halt
+  // negotiations, expel aid agencies/peacekeepers, among others; 17: impose
+  // sanctions, blockade, curfew, martial law, give an ultimatum, among
+  // others) that this app only has verified labels for at the root level,
+  // not the specific leaf EventCode. An earlier version used "recalls its
+  // ambassador from" / "imposes sanctions on" for the WHOLE root — live-
+  // tested 2026-09-10 and found making a specific factual claim the
+  // underlying leaf code often didn't support (e.g. "Police imposes
+  // sanctions on Cuba" for what was likely a blockade/curfew-type action,
+  // not sanctions). Deliberately generic here instead — accurate for the
+  // whole root, at the cost of not matching classify.ts's MODERATE_SEVERITY
+  // vocabulary (so these two roots now score severity 1 and are filtered
+  // out downstream) until a verified leaf-code table lets this be both
+  // specific and correct.
+  "16": "reduces diplomatic relations with",
+  "17": "takes coercive action against",
   "18": "attacks",
   "19": "is fighting",
   "20": "launches a major offensive against",

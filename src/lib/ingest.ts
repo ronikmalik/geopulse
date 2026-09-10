@@ -17,7 +17,6 @@ import {
 import type { DirectItem } from "./sources/direct";
 import {
   classifyByKeywords,
-  classifyGdeltItem,
   isLikelyGeopolitical,
   assessIncidentSeverity,
   type ClassifiedItem,
@@ -446,16 +445,23 @@ export async function runIngest(
     const failedItems: RawItem[] = [];
     const rows = fresh
       .map((item, i) => {
-        // GDELT queries are already scoped to a specific flashpoint topic
-        // (see CATEGORY_QUERIES), so a GDELT hit is inherently on-topic in
-        // a way a general RSS firehose isn't — the user asked GDELT be
-        // "far less restrictive than the others... as long as it is new
-        // info and about what is happening in a country let them through."
-        // classifyGdeltItem drops the MIN_SEVERITY_TO_INCLUDE floor and the
-        // routine/benign suppression RSS/Telegram use, keeping only the
-        // "is this actually new info" checks (not a retrospective, not a
-        // rhetorical/opinion piece, not a pure explainer headline).
-        const c = item.source === "gdelt" ? classifyGdeltItem(item) : classifyByKeywords(item);
+        // classifyGdeltItem's looser bar (2026-09-04) was justified
+        // specifically because GDELT items back then came from hand-written
+        // CATEGORY_QUERIES already scoped to one named flashpoint topic — a
+        // hit was inherently on-topic in a way a general RSS firehose isn't.
+        // That justification no longer holds (2026-09-10): GDELT items now
+        // come from gdeltBulk.ts's indiscriminate 15-minute Event Database
+        // file covering every country and CAMEO event type globally, not a
+        // hand-scoped search. Routing them through the SAME strict bar as
+        // RSS/Telegram (MIN_SEVERITY_TO_INCLUDE=3, full BENIGN_PATTERNS/
+        // ONGOING_COVERAGE_PATTERNS suppression) is what "heavily filtered
+        // to only be live breaking news" now actually requires — a mere
+        // threat (MILD, severity 2) or a routine "holds talks with"
+        // consultation is exactly the noise this bar exists to cut, the
+        // same as it already does for every other source. classifyGdeltItem
+        // itself is now unused by any live path — left in place, not yet
+        // deleted, in case a future narrowly-scoped GDELT path needs it.
+        const c = classifyByKeywords(item);
         if (!c) {
           failedItems.push(item);
           return null;

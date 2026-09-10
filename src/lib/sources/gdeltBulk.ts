@@ -95,11 +95,15 @@ function parseFloatSafe(v: string): number {
 // GDELT 2.0 Event Codebook's field descriptions — 61 columns, 0-indexed
 // here since that's how the split array is addressed.
 const COL = {
+  actor1Name: 6,
+  actor1CountryCode: 7,
+  actor1KnownGroupCode: 8,
+  actor2Name: 16,
+  actor2CountryCode: 17,
+  actor2KnownGroupCode: 18,
   eventRootCode: 28,
   goldsteinScale: 30,
   numSources: 32,
-  actor1Name: 6,
-  actor2Name: 16,
   actionGeoType: 51,
   actionGeoFullName: 52,
   actionGeoCountryCode: 53,
@@ -123,6 +127,27 @@ export async function fetchGdeltBulkEvents(): Promise<RawItem[]> {
 
     const sourceUrl = f[COL.sourceUrl]?.trim();
     if (!sourceUrl || !/^https?:\/\//.test(sourceUrl) || seenUrls.has(sourceUrl)) continue;
+
+    // Requires at least one actor to be a real state/political/organizational
+    // entity — a populated Actor_CountryCode (the actor's CAMEO political
+    // affiliation, NOT the geographic location field below) or a
+    // KnownGroupCode (a named IGO/NGO/rebel/terror organization with its own
+    // CAMEO code) — added 2026-09-10 after live-testing surfaced GDELT's
+    // well-known automated-coding noise: generic TABARI actor-TYPE labels
+    // like "Criminal", "Serial Killer", "Firefighter", "Illegal Immigrant"
+    // (used when GDELT can't identify a specific named entity) were getting
+    // CAMEO-coded as ASSAULT/FIGHT root events from ordinary local
+    // crime/human-interest content with zero geopolitical relevance —
+    // "Criminal is fighting in Flensburg, Germany" is not a security event,
+    // it's a police-blotter item mis-extracted. A real government, military,
+    // named country, or organized political/armed group will have one of
+    // these two fields populated; a generic role match won't.
+    const hasRealActor =
+      Boolean(f[COL.actor1CountryCode]?.trim()) ||
+      Boolean(f[COL.actor1KnownGroupCode]?.trim()) ||
+      Boolean(f[COL.actor2CountryCode]?.trim()) ||
+      Boolean(f[COL.actor2KnownGroupCode]?.trim());
+    if (!hasRealActor) continue;
 
     // ActionGeo_CountryCode is this app's preferred field per the
     // codebook's own guidance (§ "When looking for events in or relating
