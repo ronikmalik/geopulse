@@ -173,14 +173,27 @@ one non-generative translation API — all direct REST calls, no SDK:
   before anything changes — this never auto-writes to the live feed or to
   `classify.ts`'s rules directly, by design (see the table's own doc comment in
   `schema.ts` for the manipulation-surface reasoning).
-- **Recursive calibration loop** (`classifier_calibration` table, added 2026-09-08) —
-  the actual self-improving piece. When a review reveals a *generalizable* pattern
-  (not a one-off), the reviewer records a short "lesson" keyed by a stable pattern
-  slug. Every subsequent audit prompt (both above) injects the accumulated active
-  lessons — live on the very next call, no redeploy required. A lesson that keeps
-  getting reinforced (tracked via an `occurrences` counter) is a candidate to graduate
-  into the permanent hand-maintained prompt constants
-  (`DELIBERATE_EXCLUSIONS`/`SEVERITY_RUBRIC`/`COUNTRY_GUIDANCE`), which never expire.
+- **Recursive calibration loop** (`classifier_calibration` table, added 2026-09-08,
+  made fully autonomous 2026-09-10) — the actual self-improving piece, and the one
+  that no longer needs a human to turn. Every audit call (both above) may now propose
+  a `pattern`+`lesson` directly on any finding it flags — but a single Gemini proposal
+  is never trusted straight into the live prompt: it's staged as one row of
+  `classifier_calibration_evidence` (see that table's own doc comment in `schema.ts`)
+  and only promoted once the same pattern slug has been **independently corroborated
+  across multiple distinct sources and articles, spread over a minimum time span**
+  (`maybeAutoPromote`'s `AUTO_PROMOTE_*` constants in `classifierAudit.ts`) — a bar a
+  single article (however cleverly it tries to prompt-inject the auditor) cannot clear
+  by itself, so no human review is required for the loop to run. A human/Claude
+  reviewer can still shortcut this immediately via `reviewAuditFinding`'s `lesson`
+  param, but it's now optional, not load-bearing. Once promoted, every subsequent
+  audit prompt injects the accumulated active lessons — live on the very next call, no
+  redeploy required. `GET /api/admin/classifier-audit/calibration?pending=1` shows
+  what's still accumulating evidence but hasn't cleared the bar yet. A lesson that
+  keeps getting reinforced (tracked via an `occurrences` counter) is still a candidate
+  for a human to eventually graduate into the permanent hand-maintained prompt
+  constants (`DELIBERATE_EXCLUSIONS`/`SEVERITY_RUBRIC`/`COUNTRY_GUIDANCE`), which never
+  expire — that graduation step is the one piece of this that's still manual, since it
+  means editing and redeploying code, not just writing a database row.
 - **Daily AI country situation briefs** (`src/lib/countryBriefs.ts`) — one Gemini call
   per currently-active country (ranked by score, capped per run), strictly grounded on
   that country's own real recent events.

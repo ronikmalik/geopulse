@@ -670,6 +670,13 @@ export type ClassifierAuditRow = typeof classifierAudit.$inferSelect;
 // mistake reinforces the SAME row (upsert-by-pattern, incrementing
 // `occurrences`) rather than accumulating near-duplicate lessons that bloat
 // the prompt over time.
+// A lesson reaches this table (and starts influencing every future audit
+// prompt) two ways: a human/Claude reviewer calling reviewAuditFinding with
+// a `lesson` param (the original 2026-09-08 design), or — as of 2026-09-10 —
+// autonomously, once classifierCalibrationEvidence below shows the same
+// pattern independently corroborated across distinct sources/articles/time.
+// Both paths write through the same recordCalibrationLesson upsert; this
+// table doesn't know or care which one triggered a given row.
 export const classifierCalibration = pgTable(
   "classifier_calibration",
   {
@@ -703,6 +710,61 @@ export const classifierCalibration = pgTable(
       .defaultNow(),
   },
   (table) => [index("classifier_calibration_active_idx").on(table.active)],
+);
+
+// The autonomous half of the calibration loop (2026-09-10 user request:
+// "make the learning actually recursive and not need a human"). Gemini may
+// now propose a `pattern`+`lesson` on any finding it flags (see
+// buildKeptAuditPrompt/buildFalseNegativePrompt in classifierAudit.ts), but
+// a single proposal is never trusted directly into classifierCalibration —
+// that table's own doc comment (and classifier_audit's, above) already
+// establishes why: an LLM auditor is itself a manipulation surface, and a
+// hostile article's body text could contain prompt-injection content
+// aimed at planting a self-serving "lesson" that then biases every future
+// audit call reading it back. This table is the staging ground instead:
+// one row per (pattern, archiveId) — the same article can't vote for the
+// same pattern twice — and maybeAutoPromote in classifierAudit.ts only
+// promotes a pattern into classifierCalibration once it's been
+// independently proposed across multiple DISTINCT sources and articles,
+// spread over a minimum time span (AUTO_PROMOTE_* constants). A single
+// poisoned article can bias its own audit call, but it cannot make the
+// same pattern slug organically reappear from unrelated outlets on
+// unrelated days — that recurrence, not any one model's word, is what
+// actually gets trusted, the identical philosophy corroboratedCountry
+// already applies to false_negative auto-apply.
+export const classifierCalibrationEvidence = pgTable(
+  "classifier_calibration_evidence",
+  {
+    id: serial("id").primaryKey(),
+    pattern: text("pattern").notNull(),
+    // The most recently proposed wording for this pattern — the winning
+    // promotion call uses whichever piece of evidence completes the bar,
+    // not necessarily the first one proposed.
+    lesson: text("lesson").notNull(),
+    // "kept" | "dropped" only (never "both") — deterministically set from
+    // which prompt produced this evidence, not read from Gemini's own
+    // claim about its scope, so a proposal can't self-declare broader
+    // reach than the one prompt it actually demonstrated a miss on.
+    appliesTo: text("applies_to").notNull(),
+    archiveId: integer("archive_id").notNull(),
+    // The outlet this evidence came from — corroboration requires distinct
+    // SOURCES, not just distinct articles, since a single compromised or
+    // unusual outlet publishing several similar items shouldn't alone
+    // manufacture "independent" corroboration.
+    source: text("source").notNull(),
+    // Provenance — the classifier_audit.id this evidence was attached to,
+    // if any (auto-applied false_negative recoveries also contribute
+    // evidence without necessarily having a durable finding row to point
+    // back to in every case).
+    findingId: integer("finding_id"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("classifier_calibration_evidence_pattern_archive_unique").on(table.pattern, table.archiveId),
+    index("classifier_calibration_evidence_pattern_idx").on(table.pattern),
+  ],
 );
 
 // Shadow-mode predictive risk model — see src/lib/riskModel.ts. Redesigned
@@ -810,3 +872,4 @@ export type RiskPredictionRow = typeof riskPredictions.$inferSelect;
 export type NewRiskPredictionRow = typeof riskPredictions.$inferInsert;
 
 export type ClassifierCalibrationRow = typeof classifierCalibration.$inferSelect;
+export type ClassifierCalibrationEvidenceRow = typeof classifierCalibrationEvidence.$inferSelect;

@@ -280,10 +280,18 @@ const STATEMENTS = [
     distance DOUBLE PRECISION
   )`,
   sql`CREATE INDEX IF NOT EXISTS narrative_novelty_findings_detected_at_idx ON narrative_novelty_findings (detected_at)`,
+  // UNIQUE (not just FK/CHECK) constraints hit a real Postgres quirk the
+  // other DO-blocks in this file don't: ADD CONSTRAINT ... UNIQUE creates
+  // a backing index with the same name, and re-running after that index
+  // already exists raises 42P07 "relation already exists" (duplicate_
+  // table), not 42710 (duplicate_object) — confirmed live 2026-09-10, this
+  // exact statement 500ing on every migrate call after its first success
+  // is what caught it. Both must be caught for this to actually be
+  // idempotent.
   sql`DO $$ BEGIN
     ALTER TABLE narrative_novelty_findings ADD CONSTRAINT narrative_novelty_findings_feed_archive_id_key
       UNIQUE (feed_archive_id);
-  EXCEPTION WHEN duplicate_object THEN NULL;
+  EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
   END $$`,
   sql`DO $$ BEGIN
     ALTER TABLE narrative_novelty_findings ADD CONSTRAINT narrative_novelty_findings_feed_archive_id_fkey
@@ -312,6 +320,27 @@ const STATEMENTS = [
     promoted BOOLEAN NOT NULL DEFAULT false,
     notes TEXT
   )`,
+  // Autonomous calibration corroboration staging (2026-09-10) — see
+  // classifierCalibrationEvidence's own doc comment in schema.ts.
+  sql`CREATE TABLE IF NOT EXISTS classifier_calibration_evidence (
+    id SERIAL PRIMARY KEY,
+    pattern TEXT NOT NULL,
+    lesson TEXT NOT NULL,
+    applies_to TEXT NOT NULL,
+    archive_id INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    finding_id INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  // See the narrative_novelty_findings DO-block above for why UNIQUE
+  // constraints need OR duplicate_table here, unlike the plain FK/CHECK
+  // ones elsewhere in this file.
+  sql`DO $$ BEGIN
+    ALTER TABLE classifier_calibration_evidence ADD CONSTRAINT classifier_calibration_evidence_pattern_archive_unique
+      UNIQUE (pattern, archive_id);
+  EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
+  END $$`,
+  sql`CREATE INDEX IF NOT EXISTS classifier_calibration_evidence_pattern_idx ON classifier_calibration_evidence (pattern)`,
 ];
 
 export async function GET(req: NextRequest) {

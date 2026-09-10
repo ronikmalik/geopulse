@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCalibrationLessons, deactivateCalibrationLesson } from "@/lib/classifierAudit";
+import { getCalibrationLessons, deactivateCalibrationLesson, getPendingCalibrationEvidence } from "@/lib/classifierAudit";
 import { isCronAuthorized } from "@/lib/cronAuth";
 
 // Visibility into the recursive-learning table (classifier_calibration —
@@ -8,6 +8,13 @@ import { isCronAuthorized } from "@/lib/cronAuth";
 // the reviewer can sanity-check what it's taught the system rather than
 // that growing invisibly. Defaults to active-only (what's actually live
 // in prompts right now); ?all=1 includes deactivated/retired lessons too.
+//
+// ?pending=1 instead shows the autonomous promotion pipeline's staging
+// ground (classifier_calibration_evidence — see maybeAutoPromote in
+// classifierAudit.ts) — patterns Gemini has proposed that haven't yet
+// independently corroborated across enough distinct sources/articles/time
+// to auto-promote. This is how the fully-autonomous loop (2026-09-10, no
+// human required) stays observable without direct DB access.
 //
 // ?deactivate=<pattern> retires one lesson (soft-delete, reversible by
 // re-recording the same pattern via reviewAuditFinding's lesson param) —
@@ -24,6 +31,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(found ? { ok: true, deactivated: deactivatePattern } : { error: "pattern not found" }, {
       status: found ? 200 : 404,
     });
+  }
+
+  if (req.nextUrl.searchParams.get("pending") === "1") {
+    const pending = await getPendingCalibrationEvidence();
+    return NextResponse.json({ count: pending.length, pending });
   }
 
   const activeOnly = req.nextUrl.searchParams.get("all") !== "1";

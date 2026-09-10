@@ -36,9 +36,12 @@ Not covered by the brief's own acceptance criteria, but now core to the live pro
 
 - **A pre-publish Gemini review gate** and **post-hoc classifier audit** — every
   classified item is independently re-checked before and after going live.
-- **A recursive calibration loop** (`classifier_calibration` table) — corrections from
-  real reviews get fed back into every future audit prompt, so the audit system
-  measurably improves over time instead of repeating the same mistakes.
+- **A recursive calibration loop** (`classifier_calibration` table, fully autonomous as
+  of 2026-09-10) — corrections get fed back into every future audit prompt, so the
+  audit system measurably improves over time instead of repeating the same mistakes.
+  No human review required: a Gemini-proposed pattern only promotes once independently
+  corroborated across distinct sources/articles/time (see ARCHITECTURE.md §6) — the
+  same corroboration-over-trust philosophy the false_negative auto-apply already used.
 - **Telegram ingestion** (~18 channels) with a translation pipeline for non-English
   posts.
 - **Semantic similarity search** (Gemini embeddings + pgvector) for "similar events."
