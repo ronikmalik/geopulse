@@ -27,7 +27,21 @@ import { embedBatch } from "./embeddings";
 // still doesn't finish in time is fine either way (withDeadline races
 // rather than blocks — see the doc comment on the call site in
 // ingest.ts), this sizing just keeps that the exception, not routine.
-const BACKFILL_BATCH_SIZE = 12;
+//
+// 12 -> 4 (2026-09-10, live-caught): this file's own 12/cycle plus
+// classificationArchiveEmbeddingBackfill.ts's own separate 12/cycle add up
+// to 24 embedding calls every ~15min ingest cycle — up to 2,304/day against
+// the embedding model's confirmed 1,000 RPD free-tier cap (see embeddings.
+// ts's own 2026-09-08 rate-limit-dashboard comment), which a live production
+// window showed genuinely exhausted mid-day. This backfill doesn't gate
+// what publishes (see the file's own header comment — "no business
+// blocking whether an event actually makes it onto the live feed"), so
+// it's the correct place to spend less and go slower: 4+4=8/cycle now,
+// 768/day max, real margin under the cap, leaving RPD/RPM headroom for the
+// paths that DO gate credibility. A bigger backfill delay is an accepted
+// tradeoff (2026-09-10 user priority: credibility over speed) — see
+// embeddings.ts's own circuit-breaker comment for the other half of this.
+const BACKFILL_BATCH_SIZE = 4;
 const MAX_INPUT_CHARS = 2000;
 
 export interface BackfillResult {

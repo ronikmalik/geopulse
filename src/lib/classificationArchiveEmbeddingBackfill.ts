@@ -18,7 +18,13 @@ import { embedBatch } from "./embeddings";
 // "never more than one caller of a rate-limited API in flight at once"
 // discipline already applied to the Gemini text-audit chain after real
 // production 429s.
-const BACKFILL_BATCH_SIZE = 12;
+// 12 -> 4 (2026-09-10, live-caught) — see embeddingBackfill.ts's own
+// identical comment: this file's 12/cycle plus that one's 12/cycle
+// together blew well past the embedding model's confirmed 1,000 RPD cap.
+// Neither backfill gates what publishes, so both are the right place to
+// go slower rather than the paths that do (reviewPendingEvents/
+// classifierAuditSlice).
+const BACKFILL_BATCH_SIZE = 4;
 const MAX_INPUT_CHARS = 2000;
 
 export interface ClassificationArchiveBackfillResult {

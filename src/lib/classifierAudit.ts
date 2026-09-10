@@ -1148,6 +1148,20 @@ const PENDING_REVIEW_DEADLINE_MS = 8_000;
 // on the feed" (2026-09-05 user priority, re: translation budget, same
 // principle applies here) outweighs holding the whole feed hostage to
 // one enrichment layer's availability.
+//
+// EXCEPT gdelt (2026-09-10, explicit user override: "everything that does
+// appear should be highly credible" / "a bigger delay is ok") — see the
+// source-exclusion on the UPDATE below. GDELT bulk items are synthesized
+// from raw CAMEO codes, not journalist-written (buildEventDescription in
+// cameoEventCodes.ts), and live testing the same day found real published
+// examples this safety net let through unreviewed that no deterministic
+// filter catches (e.g. "Al Qaeda is fighting Hamas in Dallas, Texas,
+// United States" — a plausible-sounding but nonsensical actor/location
+// pairing). RSS/Telegram items are real article headlines already vetted
+// by classify.ts's stricter gates and carry no equivalent demonstrated
+// risk, so the "maximize content" priority still applies to them
+// unchanged — this exception is deliberately scoped to gdelt only, not a
+// reversal of the general policy.
 const PENDING_REVIEW_MAX_AGE_MINUTES = 30;
 
 async function getPendingEventCandidates(limit: number): Promise<PendingEventCandidate[]> {
@@ -1270,6 +1284,14 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
   // Runs regardless of whether GEMINI_API_KEY is even set — a fresh
   // deploy with no key yet should still publish (just without the
   // pre-publish check), not silently accumulate an invisible backlog.
+  //
+  // source != 'gdelt' (2026-09-10) — see PENDING_REVIEW_MAX_AGE_MINUTES's
+  // own doc comment for why. A gdelt item that goes stale here just stays
+  // "pending" (invisible, not deleted) until a future cycle's Gemini
+  // review actually reaches it — no data loss, only delay, matching the
+  // explicit "bigger delay is ok" priority. getPendingEventCandidates
+  // already orders oldest-first, so a backlog drains in order the moment
+  // Gemini capacity is available again rather than growing unbounded.
   let autoPromoted = 0;
   try {
     const db = getDb();
@@ -1277,7 +1299,7 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
       .update(events)
       .set({ reviewStatus: "approved" })
       .where(
-        sql`${events.reviewStatus} = 'pending' and ${events.createdAt} < now() - interval '${sql.raw(String(PENDING_REVIEW_MAX_AGE_MINUTES))} minutes'`,
+        sql`${events.reviewStatus} = 'pending' and ${events.source} != 'gdelt' and ${events.createdAt} < now() - interval '${sql.raw(String(PENDING_REVIEW_MAX_AGE_MINUTES))} minutes'`,
       )
       .returning({ id: events.id });
     autoPromoted = result.length;

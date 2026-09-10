@@ -82,6 +82,14 @@ export const events = pgTable(
     // PENDING_REVIEW_MAX_AGE_MS auto-promotes on the classifier's own
     // original verdict rather than staying invisible forever if Gemini
     // is ever unavailable — see reviewPendingEvents's own doc comment.
+    // EXCEPT gdelt (2026-09-10): that source's stale-pending rows are
+    // deliberately excluded from auto-promotion and can stay "pending"
+    // indefinitely until a real Gemini review reaches them — see
+    // PENDING_REVIEW_MAX_AGE_MINUTES's doc comment in classifierAudit.ts.
+    // /api/stream accounts for this specifically (a gdelt row can't block
+    // its ordering cursor the way any other still-resolving-within-30min
+    // source's pending row can); risk.ts/similarEvents.ts need no special
+    // handling since they're stateless reads, not an incremental cursor.
     // Existing rows were grandfathered to "approved" the moment this
     // column was added (see the migrate route) — this was never meant
     // to retroactively hide anything already live.

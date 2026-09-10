@@ -161,6 +161,31 @@ export async function GET(req: NextRequest) {
           let sawUnresolvedPending = false;
           for (const row of candidates) {
             if (row.reviewStatus === "pending") {
+              // gdelt is exempt from the ordering-halt below (2026-09-10):
+              // classifierAudit.ts's pending-review safety net no longer
+              // auto-promotes stale gdelt rows (see its own doc comment —
+              // "everything that does appear should be highly credible", a
+              // deliberate uncapped delay for that one source). Every OTHER
+              // source still resolves within PENDING_REVIEW_MAX_AGE_MINUTES,
+              // so this loop's original bound (a pending row blocks for at
+              // most ~30min) no longer holds for gdelt specifically — a
+              // single gdelt row stuck pending indefinitely would otherwise
+              // stall live toast delivery for every other source's events
+              // forever, not just delay them. Advance past it like a
+              // rejected row instead of blocking: this connection simply
+              // won't get a live toast for it if it resolves later (a fresh
+              // page load/reconnect still picks it up via the approved-only
+              // backfill query above), which is a far smaller tradeoff than
+              // an unbounded stream stall.
+              if (row.source === "gdelt") {
+                // Only safe to skip past if nothing earlier in THIS batch
+                // is already blocking — an actual (non-gdelt) unresolved
+                // pending row must still halt everything after it,
+                // gdelt included, or a later poll's gt(id, lastId) query
+                // would lose track of that real blocker forever.
+                if (!sawUnresolvedPending) advanceTo = row.id;
+                continue;
+              }
               sawUnresolvedPending = true;
               continue;
             }

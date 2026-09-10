@@ -37,7 +37,12 @@ interface EmbedContentResponse {
   embedding?: { values?: number[] };
 }
 
-async function embedOne(text: string, apiKey: string): Promise<number[] | null> {
+interface EmbedOneResult {
+  vector: number[] | null;
+  quotaExceeded: boolean;
+}
+
+async function embedOne(text: string, apiKey: string): Promise<EmbedOneResult> {
   let res: Response;
   try {
     res = await fetch(`${EMBED_ENDPOINT_BASE}:embedContent?key=${apiKey}`, {
@@ -51,17 +56,17 @@ async function embedOne(text: string, apiKey: string): Promise<number[] | null> 
     });
   } catch (err) {
     console.error(`Embedding request failed: ${err}`);
-    return null;
+    return { vector: null, quotaExceeded: false };
   }
 
   if (!res.ok) {
     const errBody = await res.text().catch(() => "");
     console.error(`Embedding fetch failed: ${res.status} ${errBody.slice(0, 200)}`);
-    return null;
+    return { vector: null, quotaExceeded: res.status === 429 };
   }
 
   const data = (await res.json()) as EmbedContentResponse;
-  return data.embedding?.values ?? null;
+  return { vector: data.embedding?.values ?? null, quotaExceeded: false };
 }
 
 // Returns one embedding per input text, in the SAME order, with `null` in
@@ -95,9 +100,25 @@ export async function embedBatch(texts: string[]): Promise<(number[] | null)[] |
     if (start > 0) await sleep(CHUNK_SPACING_MS);
     const chunk = texts.slice(start, start + CONCURRENCY);
     const chunkResults = await Promise.all(chunk.map((t) => embedOne(t, apiKey)));
+    let quotaExceeded = false;
     chunkResults.forEach((r, i) => {
-      results[start + i] = r;
+      results[start + i] = r.vector;
+      if (r.quotaExceeded) quotaExceeded = true;
     });
+    // Circuit breaker (2026-09-10, live-caught): a real production window
+    // showed EVERY embedContent call in a cycle 429ing with "You exceeded
+    // your current quota" (a hard RPD cap, not the RPM burst CHUNK_SPACING_MS
+    // already paces around — confirmed distinct because the failures were
+    // sustained across many consecutive calls and cycles, not intermittent).
+    // Once one call in a chunk reports quota exhaustion, every remaining
+    // call this invocation is going to fail the exact same way — stop
+    // immediately instead of paying CHUNK_SPACING_MS + a doomed request per
+    // remaining chunk. This doesn't affect credibility (embeddings don't
+    // gate what publishes, only similarity/clustering features not yet
+    // user-facing), so shedding load here is free — the whole point is to
+    // leave the wall-clock and RPD/RPM budget for callers that DO gate
+    // credibility (reviewPendingEvents/classifierAuditSlice).
+    if (quotaExceeded) break;
   }
 
   const succeeded = results.filter((r): r is number[] => r !== null).length;
