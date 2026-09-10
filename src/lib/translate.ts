@@ -1,5 +1,21 @@
 import { canAfford, recordUsage } from "./translationUsage";
 
+// Google's own Cloud Translation - Basic pricing table lists the rate as
+// "$20.00 / 1,000,000 byte" (checked live 2026-09-10) — despite the same
+// page's general "Charged characters" section saying billing is per
+// character/code point elsewhere, the price table itself says byte for
+// this specific tier. Counting UTF-8 bytes here is the conservative
+// reading either way: bytes >= characters for any text, so this can only
+// under-estimate headroom, never over-estimate it. Matters concretely for
+// this app specifically — most translated text is Ukrainian/Russian/Farsi/
+// Arabic (Telegram sources), which run 2 bytes/char in UTF-8 versus 1 for
+// ASCII, so a character-counting cap could meaningfully understate real
+// usage against Google's own meter for exactly the content this app
+// translates the most of.
+function byteLength(text: string): number {
+  return Buffer.byteLength(text, "utf8");
+}
+
 // Google Cloud Translation API v2 ("Basic"), REST + simple API key — no
 // OAuth/service account needed. Verified against Google's own current
 // docs before implementing (POST, form-encoded body, `q` repeatable for
@@ -37,12 +53,14 @@ export async function translateBatch(
   const apiKey = process.env.GOOGLE_TRANSLATE_API_KEY;
   if (!apiKey || texts.length === 0) return null;
 
-  // Hard cap, checked before every call: 499,000 chars/month, portioned
-  // out daily rather than front-loaded — see src/lib/translationUsage.ts.
-  // A DB read failing here fails safe (skip translation, not skip the
-  // check) since the whole point is never risking an overage.
-  const estimatedChars = texts.reduce((sum, t) => sum + t.length, 0);
-  const affordable = await canAfford(estimatedChars).catch(() => false);
+  // Hard cap, checked before every call: 499,000 BYTES/month (see
+  // byteLength's own comment for why bytes, not JS string length),
+  // portioned out across the day rather than front-loaded — see
+  // src/lib/translationUsage.ts. A DB read failing here fails safe (skip
+  // translation, not skip the check) since the whole point is never
+  // risking an overage.
+  const estimatedBytes = texts.reduce((sum, t) => sum + byteLength(t), 0);
+  const affordable = await canAfford(estimatedBytes).catch(() => false);
   if (!affordable) return null;
 
   const body = new URLSearchParams();
@@ -75,11 +93,11 @@ export async function translateBatch(
   if (!translations || translations.length !== texts.length) return null;
 
   // Record actual input length billed, not the pre-call estimate — the
-  // two are the same value here (estimatedChars), but computed
+  // two are the same value here (estimatedBytes), but computed
   // independently on purpose so a future change to what gets sent
   // (e.g. URL-encoding overhead) can't silently desync the budget from
   // reality.
-  await recordUsage(texts.reduce((sum, t) => sum + t.length, 0)).catch((err) => {
+  await recordUsage(texts.reduce((sum, t) => sum + byteLength(t), 0)).catch((err) => {
     console.error(`Failed to record translation usage: ${err}`);
   });
 

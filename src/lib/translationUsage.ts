@@ -3,13 +3,30 @@ import { getDb } from "@/db";
 import { translationUsage } from "@/db/schema";
 
 // Google Cloud Translation's free tier is 500,000 characters/month before
-// billing kicks in. The user asked for a hard ceiling under that, with
-// no exceptions: 499,000/month, always. This is enforced here, not left
-// to "we probably won't hit it" — translateBatch (src/lib/translate.ts)
-// checks this before every API call and skips translation (falling back
-// to original-language text, same as no key being set at all) rather
-// than risk going over.
-export const MONTHLY_CHAR_CAP = 499_000;
+// billing kicks in (applied as an automatic $10/month credit against the
+// standard $20/million rate, not a separate free bucket — see translate.ts's
+// byteLength comment for why this app tracks BYTES against that same
+// 500,000 figure, not JS string length). The user asked for a hard ceiling
+// under that, with no exceptions: 499,000/month, always. This is enforced
+// here, not left to "we probably won't hit it" — translateBatch
+// (src/lib/translate.ts) checks this before every API call and skips
+// translation (falling back to original-language text, same as no key
+// being set at all) rather than risk going over.
+export const MONTHLY_BYTE_CAP = 499_000;
+
+// One-time reconciliation (2026-09-10): this app's own tracking (character-
+// based until today) showed 128,816 used for the month so far, but Google's
+// own billing dashboard showed $3.37 gross cost against the $20/million
+// rate — 168,500 units, checked live same day. Rather than guess which of
+// the two is right, or try to retroactively re-count exact historical text
+// in bytes (not stored verbatim per-row), this assumes Google's own meter
+// is the ground truth and closes the gap as a dated correction so the
+// monthly/daily pacing math below starts from a number that actually
+// matches what Google thinks it's billed, not what this app's own
+// (possibly undercounting) prior logic believed. See recordUsage's own
+// call site in the migrate route or a one-off script — this constant is
+// read once by that reconciliation, not by any ongoing code path.
+export const RECONCILIATION_2026_09_10 = { priorMonthTotal: 128_816, googleReportedTotal: 168_500 };
 
 function todayUtc(): string {
   return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
@@ -24,6 +41,17 @@ export interface UsageBudget {
   todayUsed: number;
   dailyBudget: number; // remaining monthly budget spread over remaining days, recalculated daily
   remainingToday: number;
+  // Paced across the day itself, not just across the month (2026-09-10,
+  // explicit user request: "figure out a more optimized way so that the
+  // telegram stays active 24/7 instead of shutting down"). Previously
+  // remainingToday alone let the FULL day's budget be spent the moment it
+  // rolled over at UTC midnight — with 19 Telegram channels rotating
+  // through every ~15min ingest cycle plus a pending-translation drain
+  // each cycle, real demand was consistently burning a whole day's budget
+  // within the first few hours, then going dark (no non-English Telegram
+  // coverage) for the other ~20 hours until the next UTC day. See
+  // getUsageBudget's own comment for the math.
+  remainingRightNow: number;
 }
 
 // Adaptive, not a flat 1/30th split: dailyBudget = whatever's left in the
@@ -48,7 +76,7 @@ export async function getUsageBudget(): Promise<UsageBudget> {
 
   const dayOfMonth = now.getUTCDate();
   const daysRemaining = daysInMonthUtc(now) - dayOfMonth + 1; // today counts
-  const monthlyRemaining = Math.max(0, MONTHLY_CHAR_CAP - monthUsed);
+  const monthlyRemaining = Math.max(0, MONTHLY_BYTE_CAP - monthUsed);
 
   // dailyBudget is today's fair share of what's left, computed from the
   // pool *before* today's own usage — not monthlyRemaining, which is
@@ -56,14 +84,30 @@ export async function getUsageBudget(): Promise<UsageBudget> {
   // today's usage twice: once implicitly (it's already out of the pool)
   // and again explicitly below (dailyBudget - todayUsed).
   const monthUsedBeforeToday = monthUsed - todayUsed;
-  const poolForRemainingDays = Math.max(0, MONTHLY_CHAR_CAP - monthUsedBeforeToday);
+  const poolForRemainingDays = Math.max(0, MONTHLY_BYTE_CAP - monthUsedBeforeToday);
   const dailyBudget = Math.floor(poolForRemainingDays / Math.max(1, daysRemaining));
+
+  const remainingToday = Math.max(0, Math.min(dailyBudget - todayUsed, monthlyRemaining));
+
+  // Fair share "as of right now" — elapsed UTC hours today / 24, applied to
+  // dailyBudget. A floor of 1 hour's worth keeps translation available
+  // immediately after UTC midnight rather than blocking everything until
+  // real elapsed time accrues from zero; a ceiling of remainingToday keeps
+  // this from ever exceeding what the day-level check already allows (this
+  // narrows that check, never widens it). This is the same "remaining
+  // pool / remaining time" adaptive idea as dailyBudget above, one level
+  // finer — month->day becomes day->hour.
+  const hoursElapsedToday = now.getUTCHours() + now.getUTCMinutes() / 60;
+  const hourlyFloor = dailyBudget / 24;
+  const fairShareByNow = Math.max(hourlyFloor, dailyBudget * (hoursElapsedToday / 24));
+  const remainingRightNow = Math.max(0, Math.min(remainingToday, Math.floor(fairShareByNow) - todayUsed));
 
   return {
     monthUsed,
     todayUsed,
     dailyBudget,
-    remainingToday: Math.max(0, Math.min(dailyBudget - todayUsed, monthlyRemaining)),
+    remainingToday,
+    remainingRightNow,
   };
 }
 
@@ -91,25 +135,26 @@ export async function getUsageBudget(): Promise<UsageBudget> {
 // else still to come.
 const MAX_CHARS_PER_CALL_FRACTION = 12;
 
-export async function canAfford(estimatedChars: number): Promise<boolean> {
+export async function canAfford(estimatedBytes: number): Promise<boolean> {
   const budget = await getUsageBudget();
   const maxPerCall = Math.floor(budget.dailyBudget / MAX_CHARS_PER_CALL_FRACTION);
   return (
-    estimatedChars <= budget.remainingToday &&
-    estimatedChars <= maxPerCall &&
-    budget.monthUsed + estimatedChars <= MONTHLY_CHAR_CAP
+    estimatedBytes <= budget.remainingRightNow &&
+    estimatedBytes <= budget.remainingToday &&
+    estimatedBytes <= maxPerCall &&
+    budget.monthUsed + estimatedBytes <= MONTHLY_BYTE_CAP
   );
 }
 
-export async function recordUsage(chars: number): Promise<void> {
-  if (chars <= 0) return;
+export async function recordUsage(bytes: number): Promise<void> {
+  if (bytes <= 0) return;
   const db = getDb();
   const today = todayUtc();
   await db
     .insert(translationUsage)
-    .values({ date: today, characters: chars })
+    .values({ date: today, characters: bytes })
     .onConflictDoUpdate({
       target: translationUsage.date,
-      set: { characters: sql`${translationUsage.characters} + ${chars}` },
+      set: { characters: sql`${translationUsage.characters} + ${bytes}` },
     });
 }
