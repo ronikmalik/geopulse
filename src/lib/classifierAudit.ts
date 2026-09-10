@@ -117,7 +117,18 @@ const REQUEST_TIMEOUT_MS = 20_000;
 // How many unaudited rows to pull per DB round-trip — generous since the
 // deadline (not this number) is what actually bounds a run's total work.
 const FETCH_LIMIT = 200;
-const BATCH_SIZE = 20;
+// 20 -> 10 (2026-09-10, verified live): REQUEST_TIMEOUT_MS=20s already
+// signals a single call CAN legitimately take that long, and raising
+// classifierAuditSlice's own deadline to match (see SLICE_DEADLINE_MS)
+// still wasn't enough — a real ingest-embedded call still exceeded 8s.
+// Generation time scales with how much a batch asks the model to
+// produce (reasoning + now-optional pattern/lesson per item), so a
+// smaller batch is a direct lever on per-call latency itself, unlike the
+// deadline constants which only ever decide how long to wait, not how
+// fast the work actually happens. Halving this halves the ceiling
+// without needing to keep growing the ingest cycle's shared 30s
+// cron-job.org budget.
+const BATCH_SIZE = 10;
 // Checked live against AI Studio's own Rate Limit dashboard (2026-09-08):
 // gemini-3.5-flash-lite's free-tier cap is 15 RPM, and real production
 // logs showed 429s — 18/15 RPM, bursting past it — from exactly this
