@@ -546,10 +546,28 @@ export async function runIngest(
     // only genuinely promising candidates. Own deadline, same pattern as
     // every other enrichment step in this file — a slow/unavailable
     // translation call degrades this one step, not the whole cycle.
+    //
+    // 4s, not 8s (tightened same day, live-caught): recovered/inserted
+    // rows below still need this call's result (a translated item can't
+    // join cross-outlet dedup or the insert batch until it's classified),
+    // so this genuinely sits on the sequential critical path, unlike the
+    // enrichment passes further down that run against ALREADY-inserted
+    // events in their own parallel Promise.allSettled block. Landing on
+    // top of cycles already running 21-29s pushed several over
+    // cron-job.org's hard 30s HTTP timeout the same morning this shipped —
+    // confirmed live the ingest itself still completed and wrote real rows
+    // every time (Vercel's maxDuration=300 keeps the function running past
+    // cron-job.org's client giving up), so this was never data loss, but
+    // a slow/unavailable translateBatch call was still eating enough of
+    // the shared budget to flip cron-job.org's own health reporting to
+    // "failed." withDeadline doesn't cancel the underlying call (see its
+    // own comment above) — a translateBatch that's still slow at 4s just
+    // gets its result discarded, same graceful degradation as before, not
+    // a smaller total timeout budget.
     try {
       const retryResult = await withDeadline(
         retryFailedClassificationsViaTranslation(failedItems, (item) => item.source === "gdelt"),
-        8_000,
+        4_000,
         "translationRetry",
       );
       for (let j = 0; j < retryResult.recovered.length; j++) {
