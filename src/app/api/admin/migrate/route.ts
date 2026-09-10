@@ -351,6 +351,12 @@ const STATEMENTS = [
     discovered_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
   sql`CREATE INDEX IF NOT EXISTS pending_gdelt_title_discovered_at_idx ON pending_gdelt_title (discovered_at)`,
+  // Shadow-mode native-language classifier (2026-09-10) — built, shipped,
+  // then reverted the same day (see git history) before it accumulated any
+  // real comparison data. Dropping the two columns it added rather than
+  // leaving them orphaned.
+  sql`ALTER TABLE classification_archive DROP COLUMN IF EXISTS native_kept`,
+  sql`ALTER TABLE classification_archive DROP COLUMN IF EXISTS native_severity`,
 ];
 
 export async function GET(req: NextRequest) {
