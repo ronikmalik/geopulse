@@ -212,6 +212,27 @@ export const RSS_FEEDS: { name: string; url: string }[] = [
   { name: "buenos-aires-times", url: "https://www.batimes.com.ar/feed" },
 ];
 
+// A source outlet's own CMS controls its RSS pubDate — unlike GDELT
+// (seendate is GDELT's own crawl timestamp) or Telegram (the channel's
+// own message timestamp), this is a third party's self-reported value
+// with no guarantee it reflects real wall-clock time. Confirmed live
+// 2026-09-10: Daily Maverick's GroundUp piece reported a publishedAt
+// ~11 minutes AHEAD of when we actually fetched it (a scheduling quirk
+// or server clock skew) — a future publishedAt breaks "time ago" (reads
+// "just now" forever until real time catches up to it) and keeps the
+// item artificially pinned near the top of any newest-first sort, which
+// is exactly what the user saw. Fetch time is a safe, always-accurate
+// substitute for a bogus/missing/future date — we know for certain the
+// item existed by then, even if we don't know precisely when it was
+// first published.
+function resolvePublishedAt(isoDate: string | undefined): Date {
+  const now = new Date();
+  if (!isoDate) return now;
+  const parsed = new Date(isoDate);
+  if (Number.isNaN(parsed.getTime())) return now;
+  return parsed.getTime() > now.getTime() ? now : parsed;
+}
+
 export async function fetchRssFeed(feed: {
   name: string;
   url: string;
@@ -225,7 +246,7 @@ export async function fetchRssFeed(feed: {
         url: item.link!,
         title: stripEmoji(item.title!),
         snippet: stripEmoji(item.contentSnippet ?? "").slice(0, 400),
-        publishedAt: item.isoDate ? new Date(item.isoDate) : new Date(),
+        publishedAt: resolvePublishedAt(item.isoDate),
       }));
   } catch (err) {
     console.error(`RSS fetch failed for ${feed.name}:`, err);
