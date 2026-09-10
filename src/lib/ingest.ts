@@ -725,7 +725,14 @@ export async function runIngest(
       errors.push(`embeddingBackfill: ${err}`);
     }
     try {
-      await withDeadline(backfillClassificationArchiveEmbeddings(), 5_000, "classificationArchiveEmbeddingBackfill");
+      // 8s, not 5s (an earlier draft's mistake, caught live in production
+      // 2026-09-10: the deadline fired every single cycle) — this backfill
+      // uses the SAME BACKFILL_BATCH_SIZE=12 as feed_archive's own, which
+      // needs ~8s by embeddingBackfill.ts's own documented math (3 chunks
+      // of embedBatch's CONCURRENCY=4, 2 gaps of CHUNK_SPACING_MS=3s, plus
+      // request time) — there's no reason this backfill would need less
+      // time than that identical-shaped one does.
+      await withDeadline(backfillClassificationArchiveEmbeddings(), 8_000, "classificationArchiveEmbeddingBackfill");
     } catch (err) {
       errors.push(`classificationArchiveEmbeddingBackfill: ${err}`);
     }
