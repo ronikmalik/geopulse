@@ -587,7 +587,15 @@ export type CountryBriefRow = typeof countryBriefs.$inferSelect;
 // injection content aimed at the auditor. Every row here is a proposal
 // a human reviews (see GET /api/admin/classifier-audit and its /review
 // sub-route) before anything in classify.ts changes, same discipline
-// every real vocabulary change already goes through.
+// every real vocabulary change already goes through — that boundary is
+// absolute and unrelated to the one below.
+// A narrower, separate exception (2026-09-10): a false_negative row can
+// auto-apply — recovering that ONE article into the live feed, nothing in
+// classify.ts — without waiting for human/Claude review, but only when
+// backed by independent, deterministic, non-LLM corroboration (see
+// corroboratedCountry in classifierAudit.ts). Gemini's own read is never
+// by itself sufficient for that; anything it flags without that backing
+// still lands here as a plain pending row for review exactly as before.
 // One row per (archive item, finding kind) — a row is only ever created
 // when Gemini actually flags something, not one row per item considered,
 // so this table's size reflects genuine findings, not audit volume. A

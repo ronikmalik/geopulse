@@ -8,6 +8,7 @@ import { correlationGroupId } from "./correlation";
 import type { Category } from "./categories";
 import { archiveFeedItems } from "./feedArchive";
 import { COUNTRY_CENTROIDS } from "./countryCentroids";
+import { resolveCountryFromText } from "./countryNames";
 
 // Gemini pass over classification_archive, auditing the keyword
 // classifier along three independent dimensions:
@@ -34,12 +35,24 @@ import { COUNTRY_CENTROIDS } from "./countryCentroids";
 // GET /api/admin/audit-classifier route (larger budget, for catch-up/
 // on-demand full sweeps) still on its own daily cron as a floor.
 //
-// This still NEVER writes to classify.ts directly, or auto-applies any
-// individual finding — see applyFinding below for per-article actions
-// (still real, but always scoped to one article and only on explicit
-// approval) and the classifier_audit table's own doc comment in
-// schema.ts for the manipulation-surface reasoning behind keeping that
-// boundary. What changed (2026-09-08 user request) is WHO reviews:
+// This still NEVER writes to classify.ts directly — see the classifier_
+// audit table's own doc comment in schema.ts for the manipulation-surface
+// reasoning behind that boundary. Per-article live-feed actions (via
+// applyFinding below) are still always scoped to one article, never a
+// shared rule — but as of 2026-09-10, false_negative recoveries can now
+// auto-apply WITHOUT waiting for human/Claude review, under a narrower
+// exception: see corroboratedCountry below. Gemini's own judgment is
+// never, by itself, enough to auto-publish net-new content — unlike
+// reviewPendingEvents' existing real-time auto-approve (which only ever
+// confirms/rejects something the keyword classifier ALREADY independently
+// flagged as plausible), a false_negative is Gemini alone vouching for
+// content the keyword classifier rejected outright, a bigger trust leap.
+// Auto-apply is therefore gated on independent, deterministic, non-LLM
+// corroboration (the item's own archived keyword-severity plus a country
+// resolveCountryFromText independently agrees with) — anything Gemini
+// flags without that backing still lands as a plain pending finding for
+// human/Claude review, exactly as before. What else changed (2026-09-08
+// user request) is WHO reviews everything that ISN'T auto-applied:
 // findings — especially recurring patterns across several of them, the
 // real "fine-tuning fuel" — get evaluated by Claude on its own recurring
 // monitor cadence, not by the user for each one. A classify.ts change
@@ -139,6 +152,17 @@ const FULL_AUDIT_DEADLINE_MS = 45_000;
 // judge whether it holds up, rather than silently discarding it before
 // anyone sees it.
 const SEVERITY_MISMATCH_THRESHOLD = 1;
+
+// Corroboration floor for false_negative auto-apply (2026-09-10) — the
+// item's own ARCHIVED severity (assessIncidentSeverity/keywordSeverity's
+// deterministic regex read, computed before Gemini ever saw this item,
+// same field classification_archive.severity always stores). Severity 1
+// means literally nothing in HIGH_SEVERITY/MODERATE_SEVERITY/MILD_SEVERITY
+// matched at all — just topical proximity to a flashpoint, zero incident
+// language a non-LLM signal could point to. >=2 means the keyword scorer
+// itself found real escalation/incident language independent of Gemini's
+// read — see corroboratedCountry below for the full gate.
+const AUTO_APPLY_MIN_KEYWORD_SEVERITY = 2;
 
 interface KeptCandidate {
   id: number;
@@ -509,6 +533,10 @@ async function callGeminiJson<T>(prompt: string, apiKey: string): Promise<T[] | 
   }
 }
 
+// Returns the new finding's id (so processDroppedCandidates can
+// immediately auto-apply a corroborated one), or null if nothing was
+// inserted (a DB error, or the onConflictDoNothing dedup already has a
+// row for this archiveId+kind).
 async function insertFinding(
   kind: "false_positive" | "false_negative" | "severity_mismatch" | "country_mismatch",
   item: { id: number; source: string; url: string; publishedAt: Date; title: string; snippet: string; severity: number },
@@ -516,7 +544,7 @@ async function insertFinding(
   suggestedFix: string | null,
   suggestedSeverity: number | null,
   suggestedCountry: string | null,
-): Promise<boolean> {
+): Promise<number | null> {
   const db = getDb();
   try {
     const result = await db
@@ -537,11 +565,38 @@ async function insertFinding(
       })
       .onConflictDoNothing({ target: [classifierAudit.archiveId, classifierAudit.kind] })
       .returning({ id: classifierAudit.id });
-    return result.length > 0;
+    return result.length > 0 ? result[0].id : null;
   } catch (err) {
     console.error(`classifierAudit insert failed for archiveId ${item.id} (${kind}): ${err}`);
-    return false;
+    return null;
   }
+}
+
+// The corroboration gate itself (2026-09-10, see this file's header
+// comment for why Gemini's judgment alone isn't enough for a
+// false_negative). Two deterministic, non-LLM checks, both required:
+//   1. item.severity (the ARCHIVED keywordSeverity read) is >= the floor
+//      above — real incident language, not zero-signal topical proximity.
+//   2. resolveCountryFromText — the exact same heuristic
+//      deriveFieldsForRecovery itself falls back to — independently
+//      resolves a country from the item's OWN original title/snippet, and
+//      if Gemini also supplied a suggestedCountry, the two agree. A
+//      Gemini country guess that conflicts with what the text itself
+//      deterministically resolves to is NOT corroborated (that's exactly
+//      the "affected bystander's nationality" kind of subtlety a regex
+//      can legitimately get wrong and Gemini can legitimately get right —
+//      but auto-apply needs agreement, not just Gemini's word for it; a
+//      disagreement still becomes a normal pending finding for human/
+//      Claude review, same as before this feature existed).
+// Returns the corroborated country (same value applyFinding's own
+// deriveFieldsForRecovery call will independently re-derive), or null if
+// either check fails.
+function corroboratedCountry(item: DroppedCandidate, suggestedCountry: string | null): string | null {
+  if (item.severity < AUTO_APPLY_MIN_KEYWORD_SEVERITY) return null;
+  const resolved = resolveCountryFromText(item.title) ?? resolveCountryFromText(item.snippet);
+  if (!resolved) return null;
+  if (suggestedCountry && suggestedCountry !== resolved) return null;
+  return resolved;
 }
 
 interface KeptAuditCounts {
@@ -585,20 +640,20 @@ async function processKeptCandidates(
             : "Gemini flagged a disagreement but didn't give a reason — verify manually before approving.";
 
         if (a.validInclusion === false) {
-          if (await insertFinding("false_positive", item, reasoning, null, null, null)) counts.falsePositives++;
+          if ((await insertFinding("false_positive", item, reasoning, null, null, null)) !== null) counts.falsePositives++;
           continue; // don't also check severity/country on an item that shouldn't be there
         }
 
         const assessedSeverity = clampSeverity(a.severity);
         if (assessedSeverity !== null && Math.abs(assessedSeverity - item.severity) >= SEVERITY_MISMATCH_THRESHOLD) {
-          if (await insertFinding("severity_mismatch", item, reasoning, null, assessedSeverity, null)) {
+          if ((await insertFinding("severity_mismatch", item, reasoning, null, assessedSeverity, null)) !== null) {
             counts.severityMismatches++;
           }
         }
 
         const assessedCountry = validateCountry(a.country);
         if (assessedCountry && assessedCountry !== item.country) {
-          if (await insertFinding("country_mismatch", item, reasoning, null, null, assessedCountry)) {
+          if ((await insertFinding("country_mismatch", item, reasoning, null, null, assessedCountry)) !== null) {
             counts.countryMismatches++;
           }
         }
@@ -612,13 +667,18 @@ async function processKeptCandidates(
   return counts;
 }
 
+interface DroppedAuditCounts {
+  falseNegatives: number;
+  falseNegativesAutoApplied: number;
+}
+
 async function processDroppedCandidates(
   candidates: DroppedCandidate[],
   apiKey: string,
   deadlineAt: number,
-): Promise<number> {
-  if (candidates.length === 0) return 0;
-  let falseNegatives = 0;
+): Promise<DroppedAuditCounts> {
+  const counts: DroppedAuditCounts = { falseNegatives: 0, falseNegativesAutoApplied: 0 };
+  if (candidates.length === 0) return counts;
   const lessons = await getActiveCalibrationLessons("dropped");
   const batches = chunk(candidates, BATCH_SIZE);
 
@@ -640,15 +700,33 @@ async function processDroppedCandidates(
         const item = byId.get(f.id);
         if (!item) continue;
 
-        const inserted = await insertFinding(
+        const suggestedCountry = validateCountry(f.suggestedCountry);
+        const findingId = await insertFinding(
           "false_negative",
           item,
           f.reasoning,
           typeof f.suggestedFix === "string" ? f.suggestedFix : null,
           clampSeverity(f.suggestedSeverity),
-          validateCountry(f.suggestedCountry),
+          suggestedCountry,
         );
-        if (inserted) falseNegatives++;
+        if (findingId === null) continue;
+        counts.falseNegatives++;
+
+        // Corroboration-gated auto-apply (2026-09-10) — see
+        // corroboratedCountry's own doc comment. Reuses reviewAuditFinding/
+        // applyFinding wholesale (no new insert logic) so an auto-applied
+        // recovery goes through the exact same deriveFieldsForRecovery +
+        // correlationGroupId path, and the exact same audit-trail status
+        // transition (pending -> applied), as a human/Claude approval.
+        const corroborated = corroboratedCountry(item, suggestedCountry);
+        if (corroborated) {
+          const result = await reviewAuditFinding(
+            findingId,
+            "approved",
+            `auto-applied: corroboration-gated — archived keyword-severity ${item.severity} (>= ${AUTO_APPLY_MIN_KEYWORD_SEVERITY}, real incident language independent of Gemini) and country ${corroborated} independently confirmed via resolveCountryFromText; Gemini's judgment alone was not the basis for this`,
+          );
+          if (result.applied) counts.falseNegativesAutoApplied++;
+        }
       }
 
       await markAudited(round[j].map((c) => c.id));
@@ -656,12 +734,15 @@ async function processDroppedCandidates(
   }
 
   await recordAiUsage("audit", batches.length);
-  return falseNegatives;
+  return counts;
 }
 
 export interface ClassifierAuditResult {
   falsePositives: number;
   falseNegatives: number;
+  // Subset of falseNegatives that were corroboration-gated auto-applied
+  // rather than left as a pending finding — see corroboratedCountry.
+  falseNegativesAutoApplied: number;
   severityMismatches: number;
   countryMismatches: number;
   skipped: boolean;
@@ -670,6 +751,7 @@ export interface ClassifierAuditResult {
 const EMPTY_RESULT: ClassifierAuditResult = {
   falsePositives: 0,
   falseNegatives: 0,
+  falseNegativesAutoApplied: 0,
   severityMismatches: 0,
   countryMismatches: 0,
   skipped: true,
@@ -705,7 +787,7 @@ async function runAudit(deadlineAt: number): Promise<ClassifierAuditResult> {
       if (droppedCandidates.length < FETCH_LIMIT) droppedExhausted = true;
       if (keptCandidates.length === 0 && droppedCandidates.length === 0) break;
 
-      const [keptCounts, falseNegatives] = await Promise.all([
+      const [keptCounts, droppedCounts] = await Promise.all([
         processKeptCandidates(keptCandidates, apiKey, deadlineAt),
         processDroppedCandidates(droppedCandidates, apiKey, deadlineAt),
       ]);
@@ -713,7 +795,8 @@ async function runAudit(deadlineAt: number): Promise<ClassifierAuditResult> {
       totals.falsePositives += keptCounts.falsePositives;
       totals.severityMismatches += keptCounts.severityMismatches;
       totals.countryMismatches += keptCounts.countryMismatches;
-      totals.falseNegatives += falseNegatives;
+      totals.falseNegatives += droppedCounts.falseNegatives;
+      totals.falseNegativesAutoApplied += droppedCounts.falseNegativesAutoApplied;
     }
 
     return totals;
@@ -974,9 +1057,12 @@ export interface ReviewOverrides {
 }
 
 // The one place this feature actually touches the live feed — and even
-// here, scoped to exactly the one article a human just approved, never a
-// shared classify.ts rule. See the doc comment on the classifier_audit
-// table for why that boundary matters.
+// here, scoped to exactly the one article just approved (by a human/
+// Claude reviewer, or — for false_negative only, and only when
+// corroboratedCountry backs it — the auto-apply gate in
+// processDroppedCandidates), never a shared classify.ts rule. See the
+// doc comment on the classifier_audit table for why that boundary
+// matters.
 async function applyFinding(
   finding: typeof classifierAudit.$inferSelect,
   overrides?: ReviewOverrides,
