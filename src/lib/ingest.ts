@@ -1,8 +1,8 @@
 import { getDb } from "@/db";
 import { events } from "@/db/schema";
 import { inArray } from "drizzle-orm";
-import { CATEGORY_QUERIES, PRIORITY_GDELT_ALWAYS, PRIORITY_GDELT_ROTATION, type NewsCategory } from "./categories";
-import { fetchGdelt, type RawItem } from "./sources/gdelt";
+import type { RawItem } from "./sources/gdelt";
+import { fetchGdeltBulkEvents } from "./sources/gdeltBulk";
 import { fetchAllRssFeeds } from "./sources/rss";
 import { fetchUsgsEarthquakes } from "./sources/usgs";
 import { fetchNasaEonet } from "./sources/eonet";
@@ -226,23 +226,9 @@ export async function runIngest(
   // — a same-query retry would double this already-tight budget for no
   // benefit, since a failed query this cycle gets a fresh attempt next
   // rotation regardless.
-  const ROTATION_CHUNK_SIZE = 1;
   const ROTATION_INTERVAL_MS = 15 * 60_000;
-  const GDELT_QUERY_SPACING_MS = 1500;
-  // 2026-09-10: live production logs from priorityGdelt runs (after
-  // PRIORITY_GDELT_ROTATION grew to 76 entries and chunk size went to 10)
-  // showed almost every query in almost every run getting 429'd — not a
-  // handful of failures, nearly ALL of them, typically everything after
-  // the first 1-2 queries in a given run. This matches gdelt.ts's own
-  // documented finding that a single 429 triggers a "materially longer,
-  // sticky cooldown," not just simple per-second throttling — 1.5s
-  // spacing (fine for the main rotation's own single query per cycle,
-  // never previously stress-tested against a multi-query burst) is far
-  // too tight once a run fires several queries in sequence. 4s is closer
-  // to GDELT's own stated "one request every 5 seconds" policy.
-  const PRIORITY_GDELT_QUERY_SPACING_MS = 4_000;
-  const GDELT_QUERY_TIMEOUT_MS = 22_000;
   const gdeltQueryErrors: string[] = [];
+  const GDELT_BULK_TIMEOUT_MS = 20_000;
 
   // Same rotation cadence as GDELT (ROTATION_INTERVAL_MS) but its own chunk
   // size — 18 channels (as of the 2026-09-04 v2 pass) at 3 per cycle
@@ -254,77 +240,22 @@ export async function runIngest(
   const telegramErrors: string[] = [];
 
   const [gdelt, rss, usgs, eonet, gdacs, ioda, firms, telegram] = await Promise.all([
-    trackFetch("gdelt", async () => {
-      // priorityGdelt runs PRIORITY_GDELT_ALWAYS (political-instability/
-      // humanitarian) every cycle PLUS a rotating chunk of
-      // PRIORITY_GDELT_ROTATION (see categories.ts — designed to grow to
-      // dozens of country/region-specific queries over time without
-      // needing further code changes here). Safe to run several queries
-      // sequentially here specifically because priorityGdelt's caller
-      // (GitHub Actions, not cron-job.org) isn't bound by the 30s budget
-      // the rotation logic below is sized for — but GitHub Actions' own
-      // 6-minute job timeout still caps how many fit per cycle, hence
-      // PRIORITY_GDELT_ROTATION_CHUNK_SIZE rather than running the whole
-      // (unboundedly growing) rotation list every time.
-      // Dropped from 10 to 5 for the same 429-storm reason as
-      // PRIORITY_GDELT_QUERY_SPACING_MS above — a smaller burst per run
-      // (7 total with the 2 ALWAYS queries) plus wider spacing between
-      // them is what actually gets queries through GDELT's rate limiter,
-      // not GitHub Actions' own 6-minute budget (which was never the
-      // real constraint here). Full rotation cadence slows from ~2h to
-      // ~4h across the (now 76-entry) rotation list, worth it if it means
-      // queries actually run instead of being wasted to 429s.
-      const PRIORITY_GDELT_ROTATION_CHUNK_SIZE = 5;
-      const queries: [NewsCategory, string][] = priorityGdelt
-        ? [
-            ...PRIORITY_GDELT_ALWAYS.map((q) => [q.category, q.query] as [NewsCategory, string]),
-            ...(() => {
-              const chunkCount = Math.max(
-                1,
-                Math.ceil(PRIORITY_GDELT_ROTATION.length / PRIORITY_GDELT_ROTATION_CHUNK_SIZE),
-              );
-              const chunkIndex = Math.floor(Date.now() / ROTATION_INTERVAL_MS) % chunkCount;
-              return PRIORITY_GDELT_ROTATION.slice(
-                chunkIndex * PRIORITY_GDELT_ROTATION_CHUNK_SIZE,
-                chunkIndex * PRIORITY_GDELT_ROTATION_CHUNK_SIZE + PRIORITY_GDELT_ROTATION_CHUNK_SIZE,
-              ).map((q) => [q.category, q.query] as [NewsCategory, string]);
-            })(),
-          ]
-        : (() => {
-            const allQueryEntries = Object.entries(CATEGORY_QUERIES) as [
-              NewsCategory,
-              string,
-            ][];
-            const chunkCount = Math.ceil(allQueryEntries.length / ROTATION_CHUNK_SIZE);
-            const chunkIndex = Math.floor(Date.now() / ROTATION_INTERVAL_MS) % chunkCount;
-            return allQueryEntries.slice(
-              chunkIndex * ROTATION_CHUNK_SIZE,
-              chunkIndex * ROTATION_CHUNK_SIZE + ROTATION_CHUNK_SIZE,
-            );
-          })();
-
-      const results: RawItem[][] = [];
-      for (let i = 0; i < queries.length; i++) {
-        if (i > 0) await sleep(priorityGdelt ? PRIORITY_GDELT_QUERY_SPACING_MS : GDELT_QUERY_SPACING_MS);
-        const [category, query] = queries[i];
-        try {
-          const items = await withDeadline(
-            fetchGdelt(query, 15, 0, GDELT_QUERY_TIMEOUT_MS),
-            GDELT_QUERY_TIMEOUT_MS + 1_000,
-            `gdelt(${query})`,
-          );
-          results.push(items.map((item) => ({ ...item, gdeltCategory: category })));
-        } catch (err) {
-          gdeltQueryErrors.push(`gdelt(${query}): ${err}`);
-          results.push([]);
-        }
-      }
-      const flat = results.flat();
-      if (flat.length === 0 && gdeltQueryErrors.length > 0) {
-        throw new Error(gdeltQueryErrors.join("; "));
-      }
-      return flat;
-    }),
+    // Replaced 2026-09-10: this used to fan out into several sequential
+    // DOC 2.0 search-API queries (one per category, or per-country for
+    // priorityGdelt — see git history / categories.ts's PRIORITY_GDELT_*
+    // constants, now unused). Live production logs showed that API being
+    // 429-rate-limited on Vercel's shared outbound IP the vast majority of
+    // the time, both here and in the priority workflow, regardless of how
+    // conservatively this app paced its own requests — see gdelt.ts's own
+    // header comment for the full investigation. fetchGdeltBulkEvents
+    // (src/lib/sources/gdeltBulk.ts) fetches GDELT's own bulk 15-minute
+    // Event Database file instead — a completely different, unthrottled
+    // host, one small file covering every country and category GDELT
+    // recorded in this window, no per-query search net required. Runs
+    // identically regardless of priorityGdelt now: there's no longer a
+    // "which queries fit in this cycle's budget" problem to split across
+    // two trigger paths.
+    trackFetch("gdelt", () => withDeadline(fetchGdeltBulkEvents(), GDELT_BULK_TIMEOUT_MS, "gdelt-bulk")),
     priorityGdelt ? skippedFetch<RawItem>("rss") : trackFetch("rss", fetchAllRssFeeds),
     priorityGdelt ? skippedFetch<DirectItem>("usgs") : trackFetch("usgs", fetchUsgsEarthquakes),
     priorityGdelt ? skippedFetch<DirectItem>("eonet") : trackFetch("eonet", fetchNasaEonet),

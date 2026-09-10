@@ -11,6 +11,14 @@ export interface RawItem {
   // that produced them — lets classify.ts's GDELT path use the category
   // the query already guarantees instead of re-deriving it by regex.
   gdeltCategory?: string;
+  // Set by gdeltBulk.ts only (2026-09-10) — GDELT's own structured
+  // ActionGeo_CountryCode, already translated FIPS->ISO2 and validated
+  // against COUNTRY_CENTROIDS (see fipsCountryCodes.ts). classify.ts
+  // prefers this over resolveCountryFromText when present: bulk-file items
+  // carry a synthesized title/snippet (not real article prose), so
+  // re-deriving country from that text is strictly worse than trusting the
+  // structured geography GDELT already resolved for the actual event.
+  resolvedCountry?: string;
 }
 
 const GDELT_DOC_ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc";

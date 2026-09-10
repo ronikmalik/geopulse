@@ -608,7 +608,9 @@ export function classifyGdeltItem(item: RawItem): ClassifiedItem | null {
       : (item.gdeltCategory as NewsCategory | undefined) ?? "other";
 
   const resolvedCountry =
-    resolveCountryFromText(item.title) ?? resolveCountryFromText(item.snippet);
+    item.resolvedCountry ??
+    resolveCountryFromText(item.title) ??
+    resolveCountryFromText(item.snippet);
   const country =
     resolvedCountry ??
     (category !== "other" ? CATEGORY_FALLBACK_COUNTRY[category] : undefined);
