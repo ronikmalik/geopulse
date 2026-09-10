@@ -166,11 +166,26 @@ const AUDIT_WINDOW_HOURS = 24;
 // gradually across many ingest cycles rather than needing to finish in
 // one pass, exactly the "over time" pace the user asked for.
 const KEPT_AUDIT_WINDOW_DAYS = 30;
-// The ingest-embedded slice's own time budget — small enough to leave
-// ample room in runIngest's overall 30s hard external-trigger limit
-// (cron-job.org), same order of magnitude as embeddingBackfill's own
-// 8s allowance for the identical reason.
-const SLICE_DEADLINE_MS = 8_000;
+// The ingest-embedded slice's own time budget. MUST match the outer
+// withDeadline(runClassifierAuditSlice(), ..., "classifierAuditSlice")
+// wrapper in ingest.ts exactly — found live 2026-09-10, mismatched at
+// 8s here vs. 5s there: withDeadline doesn't cancel the wrapped promise
+// (see its own comment in ingest.ts), it only stops the CALLER from
+// awaiting it, so a self-imposed deadline longer than the caller's own
+// timeout accomplishes nothing but guaranteeing the caller reports
+// "timeout" on every round that does real work — runAudit's while loop
+// below was, by design, still trying to squeeze in a 6th or 7th second
+// of extra batches the outer wrapper was never going to wait for. Worse,
+// the abandoned call keeps running as a dangling promise, risking the
+// NEXT ingest cycle's fresh slice call re-fetching the same still-
+// unaudited rows (auditedAt not yet written) before the dangling one
+// finishes — duplicate Gemini calls on the same candidates. 5s, not 8s,
+// because ingest.ts's own budget comment allocates this slice 5s
+// specifically (split against eventGeocodeBackfill's own 5s) — moving
+// this number instead of that one keeps the ingest cycle's total
+// critical-path time unchanged from the translation-retry timeout fix
+// shipped the same day.
+const SLICE_DEADLINE_MS = 5_000;
 // The standalone route's budget — generous, but leaves real margin
 // inside its 55s maxDuration for the DB round-trips and response
 // serialization around it.
