@@ -6,9 +6,20 @@ import {
   evaluateRegressionBacktest,
   predict,
   DEFAULT_TRAIN_CONFIG,
-  type LinearRegressionModel,
 } from "@/lib/linearRegression";
+import {
+  trainGradientBoostedTrees,
+  evaluateGbmBacktest,
+  predictGbm,
+  DEFAULT_GBM_CONFIG,
+} from "@/lib/gradientBoostedTrees";
 import { weightToThreatLevel } from "@/lib/threat";
+
+// Project 4 (2026-09-09) — the two model types trainHorizon fits and
+// compares for every horizon, champion/challenger-style (see
+// riskModelRuns.modelType's own doc comment in schema.ts).
+type ModelType = "linear-regression" | "gradient-boosted-trees";
+const MODEL_TYPES: ModelType[] = ["linear-regression", "gradient-boosted-trees"];
 
 // Shadow-mode predictive risk model (2026-09-09, redesigned same day per
 // user request: predicts a country's actual future score over several
@@ -25,7 +36,11 @@ export const PREDICTION_HORIZONS_DAYS = [1, 2, 3, 5, 7, 10, 14];
 // the decayed-weight score still climbing from an artificial "no history
 // yet" cold start toward its real steady-state value, not a genuine
 // escalation. Every candidate before this is excluded outright.
-const TRAINING_DATA_START = new Date("2026-09-09T00:00:00Z");
+// Exported for countryStateMultivariateAnomaly.ts (Project 2) — same
+// reasoning applies there: the launch week's cold-start artifact is a data
+// problem, not something specific to score-forecasting, so both models
+// share the identical cutoff rather than each picking their own.
+export const TRAINING_DATA_START = new Date("2026-09-09T00:00:00Z");
 
 // On top of the hard cutoff above — the deeper root cause is more general
 // than "the app's first week was messy": ANY country's own first
@@ -49,7 +64,14 @@ const MATCH_TOLERANCE_MS = 6 * 60 * 60_000;
 
 const ANOMALY_WINDOW_DAYS = 7;
 
-const FEATURE_NAMES = [
+// Exported for src/lib/countryStateMultivariateAnomaly.ts (Project 2, added
+// 2026-09-09) — that module needs this exact feature vector (minus
+// threatLevel, which it deliberately drops — see its own comment on why:
+// threatLevel is a step function of score per threat.ts's own
+// weightToThreatLevel, near-collinear with it, which would make a
+// covariance matrix ill-conditioned) so the two models can never quietly
+// define "a country's feature vector" two different ways.
+export const FEATURE_NAMES = [
   "threatLevel",
   "score",
   "momentum",
@@ -67,7 +89,10 @@ const TEST_SPLIT_FRACTION = 0.2;
 const MIN_TRAINING_SAMPLE = 10;
 const PROMOTION_MIN_BACKTEST_SAMPLE = 30;
 
-interface Snapshot {
+// Exported for countryStateMultivariateAnomaly.ts — same "one shared
+// definition of a country's feature vector" reasoning as FEATURE_NAMES
+// above.
+export interface Snapshot {
   country: string;
   snapshotAt: Date;
   score: number;
@@ -77,12 +102,12 @@ interface Snapshot {
   eventCount: number;
 }
 
-interface AnomalyRow {
+export interface AnomalyRow {
   country: string;
   detectedAt: Date;
 }
 
-async function fetchSnapshotsSince(start: Date): Promise<Snapshot[]> {
+export async function fetchSnapshotsSince(start: Date): Promise<Snapshot[]> {
   const db = getDb();
   return db
     .select({
@@ -99,7 +124,7 @@ async function fetchSnapshotsSince(start: Date): Promise<Snapshot[]> {
     .orderBy(countryStateHistory.country, countryStateHistory.snapshotAt);
 }
 
-async function fetchAnomaliesSince(start: Date): Promise<AnomalyRow[]> {
+export async function fetchAnomaliesSince(start: Date): Promise<AnomalyRow[]> {
   const db = getDb();
   return db
     .select({ country: anomalyFindings.country, detectedAt: anomalyFindings.detectedAt })
@@ -122,7 +147,9 @@ function countAnomaliesInWindow(
   return count;
 }
 
-function featuresFor(s: Snapshot, anomalies: AnomalyRow[]): number[] {
+// Exported for countryStateMultivariateAnomaly.ts — see FEATURE_NAMES's own
+// comment for why sharing this one implementation matters.
+export function featuresFor(s: Snapshot, anomalies: AnomalyRow[]): number[] {
   const anomalyCount7d = countAnomaliesInWindow(
     anomalies,
     s.country,
@@ -163,22 +190,24 @@ export interface RegressionExample {
   targetScore: number;
 }
 
-// The part that has to be exactly right. For candidate S and horizon H:
-// find the same country's snapshot closest to S.snapshotAt + H days,
-// within MATCH_TOLERANCE_MS. No match (horizon not yet resolved, or a
-// genuine data gap) excludes the candidate for THIS horizon only — never
-// fabricated as "no change," which would invent a target that was never
-// actually observed.
-//
-// Burn-in is per-country, relative to that country's own earliest
-// snapshot at-or-after TRAINING_DATA_START — see the constant's own doc
+// Groups snapshots by country, sorted ascending, filtered to each
+// country's own snapshots at-or-after its OWN burn-in cutoff (that
+// country's earliest snapshot + BURN_IN_DAYS) — see BURN_IN_DAYS's own doc
 // comment for why this has to be per-country, not just a single global
-// cutoff.
-export function buildRegressionExamples(
-  allSnapshots: Snapshot[],
-  anomalies: AnomalyRow[],
-  horizonDays: number,
-): RegressionExample[] {
+// cutoff. Extracted 2026-09-09 (previously inline in buildRegressionExamples
+// below) so countryStateMultivariateAnomaly.ts (Project 2) can reuse the
+// EXACT SAME burn-in exclusion instead of a second, possibly-drifting copy
+// of it — a country's cold-start artifact is the same underlying data
+// problem for both models, not something each should decide separately.
+// Safe to search only the post-burn-in subset for findClosestSnapshot's
+// target lookups too (not just as the candidate pool): any valid horizon
+// target time is source_time + horizonMs where source_time is already
+// past burn-in, and horizonMs (>= 1 day) always exceeds MATCH_TOLERANCE_MS
+// (6h) by a wide margin, so a pre-burn-in snapshot could never actually be
+// the closest match to any such target anyway — filtering them out of the
+// search pool changes nothing observable, verified by this exact reasoning
+// before extracting, not just assumed.
+export function groupByCountryPastBurnIn(allSnapshots: Snapshot[]): Map<string, Snapshot[]> {
   const byCountry = new Map<string, Snapshot[]>();
   for (const s of allSnapshots) {
     const list = byCountry.get(s.country) ?? [];
@@ -186,17 +215,35 @@ export function buildRegressionExamples(
     byCountry.set(s.country, list);
   }
 
-  const horizonMs = horizonDays * 86_400_000;
   const burnInMs = BURN_IN_DAYS * 86_400_000;
-  const examples: RegressionExample[] = [];
-
-  for (const snapshots of byCountry.values()) {
+  const result = new Map<string, Snapshot[]>();
+  for (const [country, snapshots] of byCountry) {
     const sorted = [...snapshots].sort((a, b) => a.snapshotAt.getTime() - b.snapshotAt.getTime());
     const effectiveStartMs = sorted[0].snapshotAt.getTime();
     const burnInCutoffMs = effectiveStartMs + burnInMs;
+    const pastBurnIn = sorted.filter((s) => s.snapshotAt.getTime() >= burnInCutoffMs);
+    if (pastBurnIn.length > 0) result.set(country, pastBurnIn);
+  }
+  return result;
+}
 
+// The part that has to be exactly right. For candidate S and horizon H:
+// find the same country's snapshot closest to S.snapshotAt + H days,
+// within MATCH_TOLERANCE_MS. No match (horizon not yet resolved, or a
+// genuine data gap) excludes the candidate for THIS horizon only — never
+// fabricated as "no change," which would invent a target that was never
+// actually observed.
+export function buildRegressionExamples(
+  allSnapshots: Snapshot[],
+  anomalies: AnomalyRow[],
+  horizonDays: number,
+): RegressionExample[] {
+  const byCountry = groupByCountryPastBurnIn(allSnapshots);
+  const horizonMs = horizonDays * 86_400_000;
+  const examples: RegressionExample[] = [];
+
+  for (const sorted of byCountry.values()) {
     for (const s of sorted) {
-      if (s.snapshotAt.getTime() < burnInCutoffMs) continue;
       const target = findClosestSnapshot(sorted, s.snapshotAt.getTime() + horizonMs);
       if (!target) continue; // window unresolved, or a real data gap — excluded, not fabricated
 
@@ -214,6 +261,7 @@ export function buildRegressionExamples(
 
 export interface HorizonTrainResult {
   horizonDays: number;
+  modelType: ModelType;
   runId: number;
   sampleSize: number;
   trained: boolean;
@@ -222,57 +270,51 @@ export interface HorizonTrainResult {
   notes: string;
 }
 
-async function trainHorizon(
+// Fits ONE model type against an already-built, already-time-split
+// train/test set, backtests it, records the run, and generates shadow
+// predictions from it. Called once per entry in MODEL_TYPES for every
+// horizon — trainHorizon below builds the shared examples/split exactly
+// once and calls this twice, so both model types are always compared on
+// literally identical data, never a coincidentally-different sample.
+async function fitAndRecordModel(
+  modelType: ModelType,
   horizonDays: number,
+  trainSet: RegressionExample[],
+  testSet: RegressionExample[],
   allSnapshots: Snapshot[],
   anomalies: AnomalyRow[],
 ): Promise<HorizonTrainResult> {
   const db = getDb();
-  const examples = buildRegressionExamples(allSnapshots, anomalies, horizonDays);
+  const trainX = trainSet.map((e) => e.features);
+  const trainY = trainSet.map((e) => e.targetScore);
+  const testX = testSet.map((e) => e.features);
+  const testY = testSet.map((e) => e.targetScore);
+  const naivePredictions = testSet.map((e) => e.features[SCORE_FEATURE_INDEX]); // naive: "no change" from today's score
 
-  if (examples.length < MIN_TRAINING_SAMPLE) {
-    const notes = `insufficient data: ${examples.length} labeled example(s) available (need ${MIN_TRAINING_SAMPLE}+) for the ${horizonDays}-day horizon.`;
-    const [row] = await db
-      .insert(riskModelRuns)
-      .values({ horizonDays, sampleSize: examples.length, backtestSampleSize: 0, promoted: false, notes })
-      .returning({ id: riskModelRuns.id });
-    return {
-      horizonDays,
-      runId: row.id,
-      sampleSize: examples.length,
-      trained: false,
-      promoted: false,
-      predictionsGenerated: 0,
-      notes,
-    };
+  let modelParams: unknown;
+  let selectedL2: number | null = null;
+  let backtest: { sampleSize: number; mae: number; rmse: number; naiveMae: number };
+  let predictOne: (features: number[]) => number;
+  let hyperparamNote: string;
+
+  if (modelType === "linear-regression") {
+    const { model, selectedL2: l2 } = trainLinearRegression(trainX, trainY, DEFAULT_TRAIN_CONFIG);
+    modelParams = model;
+    selectedL2 = l2;
+    backtest = evaluateRegressionBacktest(model, testX, testY, naivePredictions);
+    predictOne = (features) => predict(model, features);
+    hyperparamNote = `L2=${l2}`;
+  } else {
+    const { model, selectedNEstimators, selectedMaxDepth } = trainGradientBoostedTrees(trainX, trainY, DEFAULT_GBM_CONFIG);
+    modelParams = model;
+    backtest = evaluateGbmBacktest(model, testX, testY, naivePredictions);
+    predictOne = (features) => predictGbm(model, features);
+    hyperparamNote = `nEstimators=${selectedNEstimators}, maxDepth=${selectedMaxDepth}`;
   }
 
-  // Time-based split, not random — a random split would leak future
-  // information into training, defeating the point of backtesting a
-  // forecasting task.
-  const sortedByTime = [...examples].sort((a, b) => a.snapshotAt.getTime() - b.snapshotAt.getTime());
-  const splitIndex = Math.floor(sortedByTime.length * (1 - TEST_SPLIT_FRACTION));
-  const trainSet = sortedByTime.slice(0, splitIndex);
-  const testSet = sortedByTime.slice(splitIndex);
+  const promoted = backtest.sampleSize >= PROMOTION_MIN_BACKTEST_SAMPLE && backtest.mae < backtest.naiveMae;
 
-  const { model, selectedL2 }: { model: LinearRegressionModel; selectedL2: number } =
-    trainLinearRegression(
-      trainSet.map((e) => e.features),
-      trainSet.map((e) => e.targetScore),
-      DEFAULT_TRAIN_CONFIG,
-    );
-
-  const backtest = evaluateRegressionBacktest(
-    model,
-    testSet.map((e) => e.features),
-    testSet.map((e) => e.targetScore),
-    testSet.map((e) => e.features[SCORE_FEATURE_INDEX]), // naive: "no change" from today's score
-  );
-
-  const promoted =
-    backtest.sampleSize >= PROMOTION_MIN_BACKTEST_SAMPLE && backtest.mae < backtest.naiveMae;
-
-  const notes = `trained on ${trainSet.length} examples, backtested on ${backtest.sampleSize} held-out examples (MAE ${backtest.mae.toFixed(2)} vs. naive-persistence MAE ${backtest.naiveMae.toFixed(2)}).${
+  const notes = `[${modelType}, ${hyperparamNote}] trained on ${trainSet.length} examples, backtested on ${backtest.sampleSize} held-out examples (MAE ${backtest.mae.toFixed(2)} vs. naive-persistence MAE ${backtest.naiveMae.toFixed(2)}).${
     promoted
       ? " Promoted: beats naive persistence baseline on held-out MAE."
       : " Not promoted: " +
@@ -284,10 +326,11 @@ async function trainHorizon(
   const [run] = await db
     .insert(riskModelRuns)
     .values({
+      modelType,
       horizonDays,
-      sampleSize: examples.length,
+      sampleSize: trainSet.length + testSet.length,
       features: JSON.stringify(FEATURE_NAMES),
-      modelParams: JSON.stringify(model),
+      modelParams: JSON.stringify(modelParams),
       selectedL2,
       backtestSampleSize: backtest.sampleSize,
       backtestMae: backtest.mae,
@@ -313,7 +356,7 @@ async function trainHorizon(
   const resolvesAt = new Date(generatedAt.getTime() + horizonDays * 86_400_000);
   const predictionRows = [...latestByCountry.values()].map((s) => {
     const features = featuresFor(s, anomalies);
-    const predictedScore = predict(model, features);
+    const predictedScore = predictOne(features);
     return {
       generatedAt,
       modelRunId: run.id,
@@ -334,7 +377,63 @@ async function trainHorizon(
     predictionsGenerated = inserted.length;
   }
 
-  return { horizonDays, runId: run.id, sampleSize: examples.length, trained: true, promoted, predictionsGenerated, notes };
+  return {
+    horizonDays,
+    modelType,
+    runId: run.id,
+    sampleSize: trainSet.length + testSet.length,
+    trained: true,
+    promoted,
+    predictionsGenerated,
+    notes,
+  };
+}
+
+async function trainHorizon(
+  horizonDays: number,
+  allSnapshots: Snapshot[],
+  anomalies: AnomalyRow[],
+): Promise<HorizonTrainResult[]> {
+  const db = getDb();
+  const examples = buildRegressionExamples(allSnapshots, anomalies, horizonDays);
+
+  if (examples.length < MIN_TRAINING_SAMPLE) {
+    const notes = `insufficient data: ${examples.length} labeled example(s) available (need ${MIN_TRAINING_SAMPLE}+) for the ${horizonDays}-day horizon.`;
+    const results: HorizonTrainResult[] = [];
+    for (const modelType of MODEL_TYPES) {
+      const [row] = await db
+        .insert(riskModelRuns)
+        .values({ modelType, horizonDays, sampleSize: examples.length, backtestSampleSize: 0, promoted: false, notes })
+        .returning({ id: riskModelRuns.id });
+      results.push({
+        horizonDays,
+        modelType,
+        runId: row.id,
+        sampleSize: examples.length,
+        trained: false,
+        promoted: false,
+        predictionsGenerated: 0,
+        notes,
+      });
+    }
+    return results;
+  }
+
+  // Time-based split, not random — a random split would leak future
+  // information into training, defeating the point of backtesting a
+  // forecasting task. Built ONCE and shared by both model types below —
+  // the whole point of a champion/challenger comparison is that neither
+  // side gets an easier or different split.
+  const sortedByTime = [...examples].sort((a, b) => a.snapshotAt.getTime() - b.snapshotAt.getTime());
+  const splitIndex = Math.floor(sortedByTime.length * (1 - TEST_SPLIT_FRACTION));
+  const trainSet = sortedByTime.slice(0, splitIndex);
+  const testSet = sortedByTime.slice(splitIndex);
+
+  const results: HorizonTrainResult[] = [];
+  for (const modelType of MODEL_TYPES) {
+    results.push(await fitAndRecordModel(modelType, horizonDays, trainSet, testSet, allSnapshots, anomalies));
+  }
+  return results;
 }
 
 export async function trainAndShadowPredict(): Promise<HorizonTrainResult[]> {
@@ -350,20 +449,44 @@ export async function trainAndShadowPredict(): Promise<HorizonTrainResult[]> {
 
   const results: HorizonTrainResult[] = [];
   for (const horizonDays of PREDICTION_HORIZONS_DAYS) {
-    results.push(await trainHorizon(horizonDays, allSnapshots, anomalies));
+    results.push(...(await trainHorizon(horizonDays, allSnapshots, anomalies)));
   }
   return results;
 }
 
+// Champion/challenger selection (Project 4, 2026-09-09): compares the
+// latest run of EACH model type for this horizon and serves whichever one
+// actually wins — a real, promoted model with the lower backtest MAE, not
+// either type hardcoded as "the" answer. If only one type is promoted,
+// that one wins by default; if neither is, returns the more recently
+// trained one (still useful to know it exists, just not to act on) rather
+// than null, so a caller can distinguish "no runs yet" from "runs exist,
+// neither has earned promotion."
 export async function getLatestModelRun(
   horizonDays: number,
-): Promise<{ id: number; promoted: boolean } | null> {
+): Promise<{ id: number; modelType: string; promoted: boolean; backtestMae: number | null } | null> {
   const db = getDb();
-  const [row] = await db
-    .select({ id: riskModelRuns.id, promoted: riskModelRuns.promoted })
-    .from(riskModelRuns)
-    .where(and(eq(riskModelRuns.horizonDays, horizonDays)))
-    .orderBy(desc(riskModelRuns.trainedAt))
-    .limit(1);
-  return row ?? null;
+  const latestPerType: { id: number; modelType: string; promoted: boolean; backtestMae: number | null }[] = [];
+
+  for (const modelType of MODEL_TYPES) {
+    const [row] = await db
+      .select({
+        id: riskModelRuns.id,
+        modelType: riskModelRuns.modelType,
+        promoted: riskModelRuns.promoted,
+        backtestMae: riskModelRuns.backtestMae,
+      })
+      .from(riskModelRuns)
+      .where(and(eq(riskModelRuns.horizonDays, horizonDays), eq(riskModelRuns.modelType, modelType)))
+      .orderBy(desc(riskModelRuns.trainedAt))
+      .limit(1);
+    if (row) latestPerType.push(row);
+  }
+
+  if (latestPerType.length === 0) return null;
+  const promotedRuns = latestPerType.filter((r) => r.promoted);
+  if (promotedRuns.length > 0) {
+    return promotedRuns.reduce((best, r) => ((r.backtestMae ?? Infinity) < (best.backtestMae ?? Infinity) ? r : best));
+  }
+  return latestPerType[0];
 }

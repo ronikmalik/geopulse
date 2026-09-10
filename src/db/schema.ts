@@ -228,6 +228,82 @@ export const gpsJammingHistory = pgTable(
 export type GpsJammingHistoryRow = typeof gpsJammingHistory.$inferSelect;
 export type NewGpsJammingHistoryRow = typeof gpsJammingHistory.$inferInsert;
 
+// Project 1 (2026-09-09, user request for "real ML" beyond linear
+// regression): unsupervised clustering over feed_archive's existing
+// embeddings (src/lib/narrativeClustering.ts's spherical k-means), read as
+// "the latest generation of clusters" the same way anomalyFindings is read
+// above — a weekly training run picks one `trainedAt` and every cluster
+// from that run shares it, so "the current cluster map" is always
+// `WHERE trainedAt = (SELECT MAX(trainedAt) FROM narrative_clusters)`, not
+// a time window (a fresh weekly re-fit fully replaces the map, it doesn't
+// merge with the previous one).
+export const narrativeClusters = pgTable(
+  "narrative_clusters",
+  {
+    id: serial("id").primaryKey(),
+    trainedAt: timestamp("trained_at", { withTimezone: true }).notNull(),
+    centroid: vector("centroid", { dimensions: 768 }).notNull(),
+    memberCount: integer("member_count").notNull(),
+    // The "still genuinely belongs to this cluster" boundary — the 95th
+    // percentile of this cluster's own member-to-centroid cosine distances
+    // at training time (see narrativeClustering.ts's chooseBestK/
+    // silhouetteScore for the clustering itself; this threshold is
+    // computed once per cluster right after fitting). A later item whose
+    // nearest-centroid distance exceeds ITS OWN nearest cluster's
+    // threshold reads as novel — a real development this app hasn't seen
+    // the shape of before, not just "somewhat different."
+    noveltyThreshold: doublePrecision("novelty_threshold").notNull(),
+  },
+  (table) => [index("narrative_clusters_trained_at_idx").on(table.trainedAt)],
+);
+
+export type NarrativeClusterRow = typeof narrativeClusters.$inferSelect;
+export type NewNarrativeClusterRow = typeof narrativeClusters.$inferInsert;
+
+// One row per feed_archive item ever scored against a cluster map — a
+// PERMANENT record (unique on feedArchiveId, never re-scored on a later
+// training run) of "was this novel relative to what this app had seen as
+// of the week it arrived," not a snapshot that changes meaning depending
+// on which week's cluster map you happen to check it against.
+export const narrativeNoveltyFindings = pgTable(
+  "narrative_novelty_findings",
+  {
+    id: serial("id").primaryKey(),
+    feedArchiveId: integer("feed_archive_id").notNull(),
+    detectedAt: timestamp("detected_at", { withTimezone: true }).notNull(),
+    outcome: text("outcome").notNull(), // "novel" | "matched-cluster"
+    nearestClusterId: integer("nearest_cluster_id"),
+    distance: doublePrecision("distance"),
+  },
+  (table) => [
+    index("narrative_novelty_findings_detected_at_idx").on(table.detectedAt),
+    unique("narrative_novelty_findings_feed_archive_id_key").on(table.feedArchiveId),
+  ],
+);
+
+export type NarrativeNoveltyFindingRow = typeof narrativeNoveltyFindings.$inferSelect;
+export type NewNarrativeNoveltyFindingRow = typeof narrativeNoveltyFindings.$inferInsert;
+
+// Project 3 (2026-09-09, "real ML" text classifier) — one row per weekly
+// training/backtest run (src/lib/textClassifierTraining.ts). Shadow-mode
+// only, same as riskModelRuns: `promoted` records whether this run's
+// k-NN classifier beat a coin flip on the doubly-vetted classifier_audit
+// correction set, never anything this app actually acts on yet.
+export const textClassifierRuns = pgTable("text_classifier_runs", {
+  id: serial("id").primaryKey(),
+  trainedAt: timestamp("trained_at", { withTimezone: true }).notNull(),
+  k: integer("k").notNull(),
+  sampleSize: integer("sample_size").notNull(),
+  cvAccuracy: doublePrecision("cv_accuracy").notNull(),
+  backtestSampleSize: integer("backtest_sample_size").notNull(),
+  backtestAgreementRate: doublePrecision("backtest_agreement_rate").notNull(),
+  promoted: boolean("promoted").notNull().default(false),
+  notes: text("notes"),
+});
+
+export type TextClassifierRunRow = typeof textClassifierRuns.$inferSelect;
+export type NewTextClassifierRunRow = typeof textClassifierRuns.$inferInsert;
+
 // Output of the daily anomaly scan (src/lib/anomalyScan.ts) — one table,
 // a `signalType` discriminator column, same idiom as classifierAudit's
 // `kind` column below rather than one table per signal.
@@ -253,12 +329,35 @@ export const anomalyFindings = pgTable(
     // country-level-only signal (aircraft, GPS jamming, all-category
     // event volume).
     category: text("category"),
-    observedValue: doublePrecision("observed_value").notNull(),
-    baselineMean: doublePrecision("baseline_mean").notNull(),
-    baselineStdDev: doublePrecision("baseline_std_dev").notNull(),
+    // Nullable since 2026-09-09 (Project 2, country-state-multivariate
+    // signal): observedValue/baselineMean/baselineStdDev are a SCALAR
+    // baseline, meaningful for every original z-score signal but not for a
+    // multivariate one (whose baseline is a mean VECTOR and covariance
+    // MATRIX, not a single number) — forcing a vector into a scalar column
+    // would corrupt what these columns mean for every reader, so the
+    // multivariate signal simply leaves them null and stores its own
+    // richer shape in `details` instead. zScore is NOT nullable and IS
+    // populated by both: for the multivariate signal it holds the
+    // Mahalanobis distance, which is genuinely the same conceptual role
+    // (how many standard-deviation-equivalents away from baseline) even
+    // though the underlying math differs.
+    observedValue: doublePrecision("observed_value"),
+    baselineMean: doublePrecision("baseline_mean"),
+    baselineStdDev: doublePrecision("baseline_std_dev"),
     sampleSize: integer("sample_size").notNull(),
-    jump: doublePrecision("jump").notNull(),
+    // Nullable for the same reason as observedValue above — "jump" (a
+    // signed scalar delta) has no single-number equivalent for a
+    // multivariate baseline; see `details` for the actual per-feature
+    // deltas instead.
+    jump: doublePrecision("jump"),
     zScore: doublePrecision("z_score").notNull(),
+    // JSON, only populated by the multivariate signal: {features: string[],
+    // observedVector: number[], meanVector: number[], perFeatureZScore:
+    // number[], shrinkageIntensity: number} — see
+    // src/lib/multivariateAnomaly.ts's MultivariateBaselineResult. Makes a
+    // multivariate finding interpretable (which features actually drove
+    // it) without forcing that shape into the scalar columns above.
+    details: text("details"),
   },
   (table) => [
     index("anomaly_findings_detected_at_idx").on(table.detectedAt),
@@ -324,6 +423,13 @@ export const classificationArchive = pgTable(
     // correctly declined to flag would get resubmitted for audit every
     // single day forever.
     auditedAt: timestamp("audited_at", { withTimezone: true }),
+    // Project 3 (2026-09-09, "real ML" text classifier) — same Gemini
+    // embedding model/column shape as feed_archive.embedding, but a
+    // SEPARATE backfill is needed: feed_archive only ever holds rows that
+    // were actually KEPT (inserted into events), so the ~2:1 majority of
+    // this table (kept=false, the negative-label pool a relevance
+    // classifier needs) has no embedding anywhere else to reuse.
+    embedding: vector("embedding", { dimensions: 768 }),
   },
   (table) => [
     index("classification_archive_kept_idx").on(table.kept),
@@ -613,6 +719,13 @@ export const classifierCalibration = pgTable(
 export const riskModelRuns = pgTable("risk_model_runs", {
   id: serial("id").primaryKey(),
   trainedAt: timestamp("trained_at", { withTimezone: true }).notNull().defaultNow(),
+  // Project 4 (2026-09-09, "real ML" challenger) — "linear-regression" |
+  // "gradient-boosted-trees". Both model types train against the EXACT
+  // SAME examples/split for a given horizon and get their own row here;
+  // getLatestModelRun compares their backtest MAE and serves whichever
+  // one actually wins, champion/challenger-style, rather than either
+  // model type being hardcoded as "the" model.
+  modelType: text("model_type").notNull().default("linear-regression"),
   horizonDays: integer("horizon_days").notNull(),
   sampleSize: integer("sample_size").notNull(),
   // Nullable — when sampleSize is too low to train at all (today's
@@ -621,8 +734,13 @@ export const riskModelRuns = pgTable("risk_model_runs", {
   // record. Null here means exactly that, not a fabricated model that
   // would silently predict something meaningless.
   features: text("features"), // JSON string[]
-  modelParams: text("model_params"), // JSON LinearRegressionModel
-  selectedL2: doublePrecision("selected_l2"), // the L2 strength nested validation picked
+  // JSON LinearRegressionModel or GbmModel, per `modelType` above.
+  modelParams: text("model_params"),
+  // Only ever set when modelType = "linear-regression" (the L2 strength
+  // nested validation picked); null for gradient-boosted-trees runs, which
+  // select (nEstimators, maxDepth) instead — see `notes` for those values,
+  // not worth two more nullable columns only one model type ever uses.
+  selectedL2: doublePrecision("selected_l2"),
   backtestSampleSize: integer("backtest_sample_size").notNull(),
   // Nullable, not a fabricated 0 — undefined when there was no backtest
   // split to evaluate at all.

@@ -144,6 +144,10 @@ const STATEMENTS = [
   sql`CREATE UNIQUE INDEX IF NOT EXISTS classifier_audit_archive_kind_unique ON classifier_audit (archive_id, kind)`,
   sql`ALTER TABLE classification_archive ADD COLUMN IF NOT EXISTS audited_at TIMESTAMPTZ`,
   sql`CREATE INDEX IF NOT EXISTS classification_archive_audited_at_idx ON classification_archive (audited_at)`,
+  // Project 3 (2026-09-09) — see classificationArchive.embedding's own doc
+  // comment in schema.ts for why this needs its own backfill, separate
+  // from feed_archive.embedding.
+  sql`ALTER TABLE classification_archive ADD COLUMN IF NOT EXISTS embedding vector(768)`,
   sql`CREATE TABLE IF NOT EXISTS classifier_calibration (
     id SERIAL PRIMARY KEY,
     pattern TEXT NOT NULL UNIQUE,
@@ -176,16 +180,29 @@ const STATEMENTS = [
     signal_type TEXT NOT NULL,
     country TEXT NOT NULL,
     category TEXT,
-    observed_value DOUBLE PRECISION NOT NULL,
-    baseline_mean DOUBLE PRECISION NOT NULL,
-    baseline_std_dev DOUBLE PRECISION NOT NULL,
+    observed_value DOUBLE PRECISION,
+    baseline_mean DOUBLE PRECISION,
+    baseline_std_dev DOUBLE PRECISION,
     sample_size INTEGER NOT NULL,
-    jump DOUBLE PRECISION NOT NULL,
-    z_score DOUBLE PRECISION NOT NULL
+    jump DOUBLE PRECISION,
+    z_score DOUBLE PRECISION NOT NULL,
+    details TEXT
   )`,
   sql`CREATE INDEX IF NOT EXISTS anomaly_findings_detected_at_idx ON anomaly_findings (detected_at)`,
   sql`CREATE INDEX IF NOT EXISTS anomaly_findings_country_idx ON anomaly_findings (country)`,
   sql`CREATE INDEX IF NOT EXISTS anomaly_findings_signal_type_idx ON anomaly_findings (signal_type)`,
+  // 2026-09-09, Project 2 (multivariate anomaly detection — see
+  // src/db/schema.ts's own comment on anomalyFindings for why these three
+  // become nullable and `details` is added): safe against the existing
+  // production table since every prior row (all 5 original signals)
+  // already has real values in observed_value/baseline_mean/baseline_std_
+  // dev/jump — DROP NOT NULL doesn't touch existing data, it only stops
+  // requiring a value going forward.
+  sql`ALTER TABLE anomaly_findings ALTER COLUMN observed_value DROP NOT NULL`,
+  sql`ALTER TABLE anomaly_findings ALTER COLUMN baseline_mean DROP NOT NULL`,
+  sql`ALTER TABLE anomaly_findings ALTER COLUMN baseline_std_dev DROP NOT NULL`,
+  sql`ALTER TABLE anomaly_findings ALTER COLUMN jump DROP NOT NULL`,
+  sql`ALTER TABLE anomaly_findings ADD COLUMN IF NOT EXISTS details TEXT`,
   // Redesigned 2026-09-09 (same day as first shipped): the shadow model
   // now predicts a country's actual future score over several horizons
   // (linear regression) instead of a binary escalation flag (logistic
@@ -200,6 +217,7 @@ const STATEMENTS = [
   sql`CREATE TABLE IF NOT EXISTS risk_model_runs (
     id SERIAL PRIMARY KEY,
     trained_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    model_type TEXT NOT NULL DEFAULT 'linear-regression',
     horizon_days INTEGER NOT NULL,
     sample_size INTEGER NOT NULL,
     features TEXT,
@@ -242,6 +260,58 @@ const STATEMENTS = [
       FOREIGN KEY (model_run_id) REFERENCES risk_model_runs(id);
   EXCEPTION WHEN duplicate_object THEN NULL;
   END $$`,
+  // Project 1 (2026-09-09) — narrative clustering over feed_archive's
+  // existing embeddings. See narrativeClusters/narrativeNoveltyFindings's
+  // own doc comments in schema.ts for the full design.
+  sql`CREATE TABLE IF NOT EXISTS narrative_clusters (
+    id SERIAL PRIMARY KEY,
+    trained_at TIMESTAMPTZ NOT NULL,
+    centroid vector(768) NOT NULL,
+    member_count INTEGER NOT NULL,
+    novelty_threshold DOUBLE PRECISION NOT NULL
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS narrative_clusters_trained_at_idx ON narrative_clusters (trained_at)`,
+  sql`CREATE TABLE IF NOT EXISTS narrative_novelty_findings (
+    id SERIAL PRIMARY KEY,
+    feed_archive_id INTEGER NOT NULL,
+    detected_at TIMESTAMPTZ NOT NULL,
+    outcome TEXT NOT NULL,
+    nearest_cluster_id INTEGER,
+    distance DOUBLE PRECISION
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS narrative_novelty_findings_detected_at_idx ON narrative_novelty_findings (detected_at)`,
+  sql`DO $$ BEGIN
+    ALTER TABLE narrative_novelty_findings ADD CONSTRAINT narrative_novelty_findings_feed_archive_id_key
+      UNIQUE (feed_archive_id);
+  EXCEPTION WHEN duplicate_object THEN NULL;
+  END $$`,
+  sql`DO $$ BEGIN
+    ALTER TABLE narrative_novelty_findings ADD CONSTRAINT narrative_novelty_findings_feed_archive_id_fkey
+      FOREIGN KEY (feed_archive_id) REFERENCES feed_archive(id);
+  EXCEPTION WHEN duplicate_object THEN NULL;
+  END $$`,
+  sql`DO $$ BEGIN
+    ALTER TABLE narrative_novelty_findings ADD CONSTRAINT narrative_novelty_findings_nearest_cluster_id_fkey
+      FOREIGN KEY (nearest_cluster_id) REFERENCES narrative_clusters(id);
+  EXCEPTION WHEN duplicate_object THEN NULL;
+  END $$`,
+  // Project 3 (2026-09-09) — k-NN text classifier training/backtest runs.
+  // See textClassifierRuns's own doc comment in schema.ts.
+  // Project 4 (2026-09-09) — see riskModelRuns.modelType's own doc comment
+  // in schema.ts. Existing rows (all pre-Project-4, all trained as linear
+  // regression) get the correct default automatically.
+  sql`ALTER TABLE risk_model_runs ADD COLUMN IF NOT EXISTS model_type TEXT NOT NULL DEFAULT 'linear-regression'`,
+  sql`CREATE TABLE IF NOT EXISTS text_classifier_runs (
+    id SERIAL PRIMARY KEY,
+    trained_at TIMESTAMPTZ NOT NULL,
+    k INTEGER NOT NULL,
+    sample_size INTEGER NOT NULL,
+    cv_accuracy DOUBLE PRECISION NOT NULL,
+    backtest_sample_size INTEGER NOT NULL,
+    backtest_agreement_rate DOUBLE PRECISION NOT NULL,
+    promoted BOOLEAN NOT NULL DEFAULT false,
+    notes TEXT
+  )`,
 ];
 
 export async function GET(req: NextRequest) {

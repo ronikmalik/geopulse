@@ -254,6 +254,27 @@ RNZ Pacific — see the Kept table above). These were checked and did not:
 | Jamaica Gleaner | Caribbean | Unrated by MBFC, AllSides, or Ad Fontes despite being Jamaica's paper of record. |
 | Folha de S.Paulo | Latin America (Brazil) | No MBFC bias/credibility rating locatable despite being a major outlet. |
 
+## Checked and rejected (2026-09-09, full-country-coverage audit)
+
+User asked for an in-depth pass on every country GeoPulse tracks (all
+~200). Burkina Faso was newly added to `countryCentroids.ts`/
+`countryNames.ts` the same day (real, current relevance — the Sahel/JNIM
+jihadist insurgency, one of the two significant additions in that pass)
+and had never been researched for a dedicated outlet before:
+
+| Source | Theater | Why not |
+|---|---|---|
+| Sidwaya | Burkina Faso | State-owned newspaper of record — a direct government mouthpiece, not an independent outlet with a disclosed-editorial-independence model (unlike BBC/DW/RFE/RL's statutory-independence public-broadcaster model already used elsewhere in this list). |
+| lefaso.net | Burkina Faso | Privately run, but under active, documented government pressure as of this research: RSF's Burkina Faso country page and 2026 reporting both confirm ongoing press-freedom violations since the 2022 Traoré coup, and lefaso.net specifically has been formally warned and required to delete articles/moderate its own coverage by the military government. No MBFC/AllSides/Ad Fontes rating found either. |
+
+Same pattern already established for Pakistan/Afghanistan (documented
+government/military censorship pressure) and Central Asia (state control or
+no free press at all) — a confirmed dead end for a dedicated Burkina Faso
+outlet, not an unexamined gap. Reach for Burkina Faso instead comes from
+`african-arguments`'s existing Sahel/JNIM coverage (RSS, pan-regional) plus
+`PRIORITY_GDELT_QUERIES`'s generic political-instability query
+(`categories.ts`).
+
 ## Non-editorial sources (not applicable)
 
 USGS, NASA EONET, GDACS, IODA, and CISA KEV are scientific/institutional

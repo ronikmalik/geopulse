@@ -6,6 +6,10 @@ import {
   getEventVolumeAnomalyOutcomes,
   getEventVolumeByCategoryAnomalyOutcomes,
 } from "@/lib/eventVolumeAnomaly";
+import {
+  getCountryStateMultivariateAnomalyOutcomes,
+  MULTIVARIATE_FEATURE_NAMES,
+} from "@/lib/countryStateMultivariateAnomaly";
 import type { AnomalyOutcome } from "@/lib/anomalyBaseline";
 
 // The daily anomaly scan — reads every signal's current outcomes (aircraft
@@ -35,6 +39,12 @@ export interface SignalTally {
   insufficientBaseline: number;
   stale: number;
   normal: number;
+  // Only ever nonzero for the country-state-multivariate signal (see
+  // src/lib/multivariateAnomaly.ts's MultivariateAnomalyOutcome) — kept on
+  // the shared tally shape rather than a signal-specific one so every
+  // signal's tally is still one uniform type, the same way `category` is
+  // only ever set by one signal but lives on the shared row shape too.
+  singularCovariance: number;
 }
 
 export interface AnomalyScanResult {
@@ -45,7 +55,7 @@ export interface AnomalyScanResult {
 }
 
 function emptyTally(): SignalTally {
-  return { anomalies: 0, insufficientBaseline: 0, stale: 0, normal: 0 };
+  return { anomalies: 0, insufficientBaseline: 0, stale: 0, normal: 0, singularCovariance: 0 };
 }
 
 function tallyOutcome(tally: SignalTally, outcome: AnomalyOutcome): void {
@@ -114,6 +124,52 @@ export async function runAnomalyScan(): Promise<AnomalyScanResult> {
       outcome: o.outcome,
     })),
   );
+
+  // Project 2 (2026-09-09) — kept separate from the shared runSignal
+  // helper above rather than forced through it: this signal's "anomaly"
+  // data shape (MultivariateBaselineResult — a vector/matrix baseline) is
+  // genuinely different from the other five signals' scalar
+  // BaselineResult, and it has one extra outcome status (singular-
+  // covariance) the others don't. Forcing both shapes through one generic
+  // function would cost more clarity than the ~15 lines of duplication
+  // it'd save.
+  {
+    const signalType = "country-state-multivariate";
+    const tally = emptyTally();
+    perSignal[signalType] = tally;
+    try {
+      const results = await getCountryStateMultivariateAnomalyOutcomes();
+      for (const { country, outcome } of results) {
+        if (outcome.status === "anomaly") {
+          tally.anomalies++;
+          rows.push({
+            detectedAt,
+            signalType,
+            country,
+            category: null,
+            observedValue: null,
+            baselineMean: null,
+            baselineStdDev: null,
+            jump: null,
+            sampleSize: outcome.data.sampleSize,
+            zScore: outcome.data.mahalanobisDistance,
+            details: JSON.stringify({
+              features: MULTIVARIATE_FEATURE_NAMES,
+              observedVector: outcome.data.observedVector,
+              meanVector: outcome.data.meanVector,
+              perFeatureZScore: outcome.data.perFeatureZScore,
+              shrinkageIntensity: outcome.data.shrinkageIntensity,
+            }),
+          });
+        } else if (outcome.status === "insufficient-baseline") tally.insufficientBaseline++;
+        else if (outcome.status === "stale") tally.stale++;
+        else if (outcome.status === "singular-covariance") tally.singularCovariance++;
+        else tally.normal++;
+      }
+    } catch (err) {
+      errors.push(`${signalType}: ${err}`);
+    }
+  }
 
   let findingsInserted = 0;
   if (rows.length > 0) {

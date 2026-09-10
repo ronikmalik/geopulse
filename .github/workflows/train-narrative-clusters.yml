@@ -1,0 +1,32 @@
+name: Train narrative clusters
+
+# Weekly, same reasoning as train-risk-model.yml's own comment — the
+# embedded corpus doesn't grow fast enough (12 rows/ingest-cycle backfill,
+# see embeddingBackfill.ts) to justify refitting more often, and a cluster
+# map doesn't need to update faster than the underlying corpus meaningfully
+# changes. Offset from train-risk-model.yml's own Sunday-noon slot so the
+# two don't compete for the same moment.
+on:
+  schedule:
+    - cron: "30 12 * * 0"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Call /api/admin/train-narrative-clusters
+        run: |
+          status=$(curl -sS -o /tmp/body.txt -w "%{http_code}" \
+            -X GET "https://geopulse-green.vercel.app/api/admin/train-narrative-clusters" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          echo "HTTP $status"
+          cat /tmp/body.txt
+          if [ "$status" -ge 300 ]; then
+            echo "Training request failed"
+            exit 1
+          fi

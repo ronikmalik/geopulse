@@ -1,0 +1,29 @@
+name: Train text classifier
+
+# Weekly, same reasoning as train-risk-model.yml/train-narrative-
+# clusters.yml. Offset from both so the three weekly training jobs don't
+# compete for the same moment.
+on:
+  schedule:
+    - cron: "0 13 * * 0"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Call /api/admin/train-text-classifier
+        run: |
+          status=$(curl -sS -o /tmp/body.txt -w "%{http_code}" \
+            -X GET "https://geopulse-green.vercel.app/api/admin/train-text-classifier" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          echo "HTTP $status"
+          cat /tmp/body.txt
+          if [ "$status" -ge 300 ]; then
+            echo "Training request failed"
+            exit 1
+          fi

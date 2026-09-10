@@ -361,6 +361,17 @@ now firing reliably and kept as a real backup, alongside:
   frequency at once/day, so this is a floor, not a primary mechanism. `vercel.ts` also
   schedules the four other daily admin jobs: `snapshot`, `snapshot-flights`,
   `generate-briefs`, and `audit-classifier` (all real cron entries, not just ingest).
+- **`.github/workflows/ingest-priority.yml`** (added 2026-09-09) — a second, separate
+  GitHub Actions trigger, every ~15 min, calling `/api/ingest?priority=1`. Exists
+  specifically to route around cron-job.org's 30s timeout: that constraint limits the
+  main rotation to one GDELT category per cycle, which was starving the two
+  region-agnostic categories (`political-instability`/`humanitarian` — the only GDELT
+  path into any country outside the 5 named flashpoints) to ~1-in-7 cycles (~105 min).
+  `runIngest`'s `priorityGdelt` option runs `PRIORITY_GDELT_QUERIES`
+  (`src/lib/categories.ts`) — those two plus several new targeted queries (South/
+  Central Asia, Bangladesh/Nepal/Sri Lanka, Guyana-Venezuela) — sequentially every
+  cycle instead, and skips every other source (RSS/USGS/etc. already run fine on the
+  main rotation's own cadence).
 
 Moving ingestion to a dedicated always-on worker (Railway/Fly.io/Render, per the
 brief) is still the cleaner long-term architecture and stays on the roadmap, but three

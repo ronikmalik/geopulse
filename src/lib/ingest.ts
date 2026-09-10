@@ -1,7 +1,7 @@
 import { getDb } from "@/db";
 import { events } from "@/db/schema";
 import { inArray } from "drizzle-orm";
-import { CATEGORY_QUERIES, type NewsCategory } from "./categories";
+import { CATEGORY_QUERIES, PRIORITY_GDELT_QUERIES, type NewsCategory } from "./categories";
 import { fetchGdelt, type RawItem } from "./sources/gdelt";
 import { fetchAllRssFeeds } from "./sources/rss";
 import { fetchUsgsEarthquakes } from "./sources/usgs";
@@ -21,12 +21,14 @@ import {
   isLikelyGeopolitical,
   assessIncidentSeverity,
 } from "./classify";
-import { trackFetch, recordSourceHealth } from "./sourceHealth";
+import { trackFetch, recordSourceHealth, type TrackedFetch } from "./sourceHealth";
 import { correlationGroupId } from "./correlation";
 import { archiveClassifications } from "./classificationArchive";
 import { archiveFeedItems } from "./feedArchive";
 import { fetchRecentPrimaries, findDuplicateOf, type PrimaryCandidate } from "./eventDedup";
 import { backfillFeedArchiveEmbeddings } from "./embeddingBackfill";
+import { backfillClassificationArchiveEmbeddings } from "./classificationArchiveEmbeddingBackfill";
+import { scoreNewNarrativeItems } from "./narrativeNoveltyScoring";
 import { runClassifierAuditSlice, reviewPendingEvents } from "./classifierAudit";
 import { backfillEventGeocodes } from "./geocodeBackfill";
 
@@ -49,6 +51,17 @@ function withDeadline<T>(promise: Promise<T>, ms: number, label: string): Promis
       setTimeout(() => reject(new Error(`${label}: deadline (${ms}ms) exceeded`)), ms),
     ),
   ]);
+}
+
+// Stand-in for trackFetch when a source is deliberately not attempted this
+// run (see runIngest's priorityGdelt option) — keeps the Promise.all
+// destructure ([gdelt, rss, usgs, ...]) and every downstream read of
+// .items/.error unchanged. The result is never actually passed to
+// recordSourceHealth (runIngest filters skipped sources out of that call
+// separately) specifically so a source that wasn't attempted this run
+// doesn't get its lastAttemptAt/lastSuccessAt overwritten as if it had been.
+function skippedFetch<T>(source: string): Promise<TrackedFetch<T>> {
+  return Promise.resolve({ source, items: [] as T[], latencyMs: 0, error: null });
 }
 
 function dedupeByUrl(items: RawItem[]): RawItem[] {
@@ -137,7 +150,23 @@ export async function insertDirectItems(
   }
 }
 
-export async function runIngest(): Promise<IngestResult> {
+// priorityGdelt: skips every source except GDELT, and runs
+// PRIORITY_GDELT_QUERIES (see categories.ts for why) instead of the normal
+// rotation — used by the dedicated GitHub Actions trigger in
+// .github/workflows/ingest-priority.yml, which isn't bound by cron-job.org's
+// 30s hard timeout the way the main /api/ingest schedule is, so it can
+// afford to run several GDELT queries sequentially every cycle instead of
+// just one. Re-fetching RSS/USGS/etc. here too would double their request
+// volume for no benefit (the main rotation already covers them every ~15
+// min) — skipped sources are stubbed as an already-successful empty fetch
+// (skippedFetch below) rather than omitted, so recordSourceHealth still
+// gets a well-typed array and the rest of this function's logic (which
+// reads gdelt/rss/usgs/etc. by destructured position) needs no other
+// change.
+export async function runIngest(
+  options?: { priorityGdelt?: boolean },
+): Promise<IngestResult> {
+  const priorityGdelt = options?.priorityGdelt === true;
   // All sources are independent of each other, so they all run
   // concurrently rather than in sequential stages — a slow or unreachable
   // source (each still retries once internally) can't stall the ones that
@@ -212,16 +241,27 @@ export async function runIngest(): Promise<IngestResult> {
 
   const [gdelt, rss, usgs, eonet, gdacs, ioda, firms, telegram] = await Promise.all([
     trackFetch("gdelt", async () => {
-      const allQueryEntries = Object.entries(CATEGORY_QUERIES) as [
-        NewsCategory,
-        string,
-      ][];
-      const chunkCount = Math.ceil(allQueryEntries.length / ROTATION_CHUNK_SIZE);
-      const chunkIndex = Math.floor(Date.now() / ROTATION_INTERVAL_MS) % chunkCount;
-      const queries = allQueryEntries.slice(
-        chunkIndex * ROTATION_CHUNK_SIZE,
-        chunkIndex * ROTATION_CHUNK_SIZE + ROTATION_CHUNK_SIZE,
-      );
+      // priorityGdelt runs a fixed extra query set (political-instability/
+      // humanitarian at full frequency, plus the South/Central Asia gap
+      // queries — see categories.ts) instead of picking one category by
+      // rotation. Safe to run all four sequentially here specifically
+      // because this only happens when priorityGdelt's caller (GitHub
+      // Actions, not cron-job.org) isn't bound by the 30s budget the
+      // rotation logic below is sized for.
+      const queries: [NewsCategory, string][] = priorityGdelt
+        ? PRIORITY_GDELT_QUERIES.map((q) => [q.category, q.query] as [NewsCategory, string])
+        : (() => {
+            const allQueryEntries = Object.entries(CATEGORY_QUERIES) as [
+              NewsCategory,
+              string,
+            ][];
+            const chunkCount = Math.ceil(allQueryEntries.length / ROTATION_CHUNK_SIZE);
+            const chunkIndex = Math.floor(Date.now() / ROTATION_INTERVAL_MS) % chunkCount;
+            return allQueryEntries.slice(
+              chunkIndex * ROTATION_CHUNK_SIZE,
+              chunkIndex * ROTATION_CHUNK_SIZE + ROTATION_CHUNK_SIZE,
+            );
+          })();
 
       const results: RawItem[][] = [];
       for (let i = 0; i < queries.length; i++) {
@@ -245,21 +285,21 @@ export async function runIngest(): Promise<IngestResult> {
       }
       return flat;
     }),
-    trackFetch("rss", fetchAllRssFeeds),
-    trackFetch("usgs", fetchUsgsEarthquakes),
-    trackFetch("eonet", fetchNasaEonet),
-    trackFetch("gdacs", fetchGdacsAlerts),
-    trackFetch("ioda", fetchIodaOutages),
+    priorityGdelt ? skippedFetch<RawItem>("rss") : trackFetch("rss", fetchAllRssFeeds),
+    priorityGdelt ? skippedFetch<DirectItem>("usgs") : trackFetch("usgs", fetchUsgsEarthquakes),
+    priorityGdelt ? skippedFetch<DirectItem>("eonet") : trackFetch("eonet", fetchNasaEonet),
+    priorityGdelt ? skippedFetch<DirectItem>("gdacs") : trackFetch("gdacs", fetchGdacsAlerts),
+    priorityGdelt ? skippedFetch<DirectItem>("ioda") : trackFetch("ioda", fetchIodaOutages),
     // No-key-configured is a soft no-op (empty array, no throw) inside
     // fetchFirmsThermalAnomalies itself, so this doesn't show up as a
     // "failing" source in source_health until FIRMS_MAP_KEY is actually set.
-    trackFetch("firms", fetchFirmsThermalAnomalies),
+    priorityGdelt ? skippedFetch<DirectItem>("firms") : trackFetch("firms", fetchFirmsThermalAnomalies),
     // Same rotation-instead-of-all-at-once reasoning as GDELT above, and
     // for an additional reason here: see docs/TELEGRAM_SOURCES.md — this
     // reads public Telegram channels in a way their own terms don't
     // clearly sanction, a deliberate risk the user accepted, so keeping
     // request volume light matters more than usual, not just for timing.
-    trackFetch("telegram", async () => {
+    priorityGdelt ? skippedFetch<DirectItem>("telegram") : trackFetch("telegram", async () => {
       // Drained first, independent of whichever channel chunk is up this
       // cycle — a post parked here (see src/lib/pendingTranslation.ts)
       // has been waiting since a prior cycle couldn't afford or complete
@@ -316,7 +356,13 @@ export async function runIngest(): Promise<IngestResult> {
   // either way. Same reasoning applies to telegramErrors.
   errors.push(...gdeltQueryErrors, ...telegramErrors);
 
-  await recordSourceHealth([gdelt, rss, usgs, eonet, gdacs, ioda, firms, telegram]);
+  // Skipped sources (priorityGdelt) are deliberately left out here, not
+  // just filtered by their null error — see skippedFetch's own comment for
+  // why recording them would misrepresent lastAttemptAt for a fetch that
+  // never actually ran this cycle.
+  await recordSourceHealth(
+    priorityGdelt ? [gdelt] : [gdelt, rss, usgs, eonet, gdacs, ioda, firms, telegram],
+  );
 
   // RSS "world news" feeds carry a rolling window that isn't necessarily
   // all breaking — a general feed can still list something from a couple
@@ -657,11 +703,47 @@ export async function runIngest(): Promise<IngestResult> {
     }
   }
 
-  const [embedResult] = await Promise.allSettled([
-    withDeadline(backfillFeedArchiveEmbeddings(), 8_000, "embeddingBackfill"),
-    runGeminiAuditChain(),
-  ]);
-  if (embedResult.status === "rejected") errors.push(`embeddingBackfill: ${embedResult.reason}`);
+  // Skipped for priorityGdelt runs — this pass is 429-sensitive (see the
+  // comment above) and already runs on its own cadence via the main
+  // rotation every ~15 min regardless of caller; doubling its frequency by
+  // also running it from the priority path would add real rate-limit risk
+  // for zero benefit, since it reviews whatever's pending across ALL
+  // sources, not just this call's own inserts.
+  // feed_archive's and classification_archive's embedding backfills share
+  // the exact same rate-limited Gemini embedding endpoint (see
+  // embeddings.ts's 100 RPM ceiling comment) — run sequentially, never
+  // concurrently, same "never more than one caller of a rate-limited API
+  // in flight at once" discipline already applied to the Gemini text-audit
+  // chain after real production 429s. Project 3's classification_archive
+  // backfill goes second, not first: feed_archive backs the live "similar
+  // events" feature, which is more immediately user-visible than
+  // classification_archive's own not-yet-shadow-scored classifier work.
+  async function runEmbeddingBackfillChain(): Promise<void> {
+    try {
+      await withDeadline(backfillFeedArchiveEmbeddings(), 8_000, "embeddingBackfill");
+    } catch (err) {
+      errors.push(`embeddingBackfill: ${err}`);
+    }
+    try {
+      await withDeadline(backfillClassificationArchiveEmbeddings(), 5_000, "classificationArchiveEmbeddingBackfill");
+    } catch (err) {
+      errors.push(`classificationArchiveEmbeddingBackfill: ${err}`);
+    }
+  }
+
+  if (!priorityGdelt) {
+    const [, noveltyResult] = await Promise.allSettled([
+      runEmbeddingBackfillChain(),
+      runGeminiAuditChain(),
+      // Project 1 (narrative clustering, 2026-09-09) — pure arithmetic
+      // (dot products against a handful of stored centroids), no external
+      // API call, so unlike the Gemini-based chains above it has no
+      // rate-limit reason to run sequentially after anything else; races
+      // alongside them in the same allSettled instead.
+      withDeadline(scoreNewNarrativeItems(), 5_000, "narrativeNoveltyScoring"),
+    ]);
+    if (noveltyResult.status === "rejected") errors.push(`narrativeNoveltyScoring: ${noveltyResult.reason}`);
+  }
 
   return {
     fetched: all.length + direct.length,

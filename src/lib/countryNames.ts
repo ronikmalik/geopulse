@@ -267,6 +267,10 @@ export const COUNTRY_NAME_TO_ALPHA2: Record<string, string> = {
   khartoum: "SD",
   mogadishu: "SO",
   caracas: "VE",
+  // Added 2026-09-09 alongside Burkina Faso's country-level entry above —
+  // real, current Sahel/JNIM conflict relevance justifies a capital-city
+  // fallback the other 31 newly-added countries in this pass don't have.
+  ouagadougou: "BF",
 
   // Heads of state/government for countries this app tracks closely — a
   // headline naming the leader ("Putin warns NATO...") but not the country
@@ -358,6 +362,119 @@ export const COUNTRY_NAME_TO_ALPHA2: Record<string, string> = {
   "syrian democratic forces": "SY",
   "isis-sinai": "EG",
   "sinai province": "EG",
+
+  // 2026-09-09: mechanical cross-check (full-country-coverage audit) found
+  // these named actors already gated classify.ts's topical KEYWORDS net
+  // (REGIONAL_ACTORS/IRAN_PROXY_ACTORS) but had zero country mapping here —
+  // an article naming one, with nothing else resolvable, silently failed
+  // country resolution despite clearing every other gate.
+  //
+  // JNIM (Jama'at Nasr al-Islam wal Muslimin) is the Sahel's largest active
+  // al-Qaeda-linked insurgency, spanning Mali/Burkina Faso/Niger — mapped
+  // to its founding country/primary base, the same "pick the single most-
+  // associated country" precedent already used above for iswap->NG despite
+  // ISWAP also spanning Chad/Niger/Cameroon.
+  jnim: "ML",
+  // MS-13 and Barrio 18 are two of the most-covered Central American gang
+  // stories in English-language wire coverage, especially El Salvador's
+  // Bukele-era mass-incarceration crackdown — both originated among
+  // Salvadoran communities and are most consistently tied to El Salvador
+  // specifically in real reporting.
+  "ms-13": "SV",
+  "barrio 18": "SV",
+  // Bare phrase alongside the existing irgc/quds force entries above — a
+  // headline can say "Iran's Revolutionary Guard" without ever saying
+  // "IRGC".
+  "revolutionary guard": "IR",
+
+  // 32 sovereign states/entities with zero prior entry here — see the
+  // matching 2026-09-09 addition to countryCentroids.ts for the full
+  // audit rationale (these had no centroid either, so were unconditionally
+  // dropped regardless of what any source reported). Demonyms added only
+  // where genuinely safe/unambiguous, matching this file's existing
+  // collision-avoidance caution; a few entries below carry an inline note
+  // where a real (if narrow) collision risk exists and was weighed
+  // deliberately rather than missed.
+  andorra: "AD",
+  andorran: "AD",
+  angola: "AO",
+  angolan: "AO",
+  "antigua and barbuda": "AG",
+  antiguan: "AG",
+  barbados: "BB",
+  barbadian: "BB",
+  // "Benin City" (Nigeria) is a real, known collision this left-boundary
+  // match doesn't disambiguate — accepted the same way this file already
+  // accepts "kenya" matching inside "Kenyan" as a structural tradeoff of
+  // the matching strategy, not something worth a bespoke carve-out for one
+  // city name.
+  benin: "BJ",
+  beninese: "BJ",
+  bhutan: "BT",
+  bhutanese: "BT",
+  brunei: "BN",
+  "burkina faso": "BF",
+  burkinabe: "BF",
+  comoros: "KM",
+  comorian: "KM",
+  // "Dominica" is a left-bounded prefix of "Dominican"/"Dominicana" — a
+  // bare demonym mention of Dominican Republic nationality (no country
+  // name in the same sentence) would misresolve here. Accepted: neither
+  // country currently has a "dominican" demonym entry at all (so this
+  // isn't a regression for any full "Dominican Republic" mention — that
+  // already resolves correctly via the longer, same-start-index phrase
+  // below, which wins per resolveCountryFromText's own dedup rule), and
+  // Dominica's real-world news footprint is negligible next to Dominican
+  // Republic's.
+  dominica: "DM",
+  "equatorial guinea": "GQ",
+  gambia: "GM",
+  gambian: "GM",
+  grenada: "GD",
+  grenadian: "GD",
+  // Hyphenated form matches real AP/Reuters style ("Guinea-Bissau"); a
+  // rarer unhyphenated "Guinea Bissau" would instead match bare "guinea"
+  // (Guinea, GN) above — a known, low-probability residual gap given how
+  // consistently wire style hyphenates this one.
+  "guinea-bissau": "GW",
+  guyana: "GY",
+  guyanese: "GY",
+  kiribati: "KI",
+  liechtenstein: "LI",
+  "marshall islands": "MH",
+  micronesia: "FM",
+  monaco: "MC",
+  nauru: "NR",
+  palau: "PW",
+  // Real wire style overwhelmingly uses "St." over "Saint" for these three
+  // — both forms mapped since the matcher does no punctuation
+  // normalization (lowercases only), so "St. Kitts" and "Saint Kitts"
+  // require separate literal keys to both resolve.
+  "saint kitts and nevis": "KN",
+  "st. kitts and nevis": "KN",
+  "st kitts and nevis": "KN",
+  "st. kitts": "KN",
+  "st kitts": "KN",
+  "saint lucia": "LC",
+  "st. lucia": "LC",
+  "st lucia": "LC",
+  "saint vincent and the grenadines": "VC",
+  "st. vincent and the grenadines": "VC",
+  "st vincent and the grenadines": "VC",
+  samoa: "WS",
+  samoan: "WS",
+  "san marino": "SM",
+  "sao tome and principe": "ST",
+  seychelles: "SC",
+  seychellois: "SC",
+  // "East Timor" is at least as common as "Timor-Leste" in English-
+  // language wire coverage — both mapped.
+  "timor-leste": "TL",
+  "east timor": "TL",
+  tuvalu: "TV",
+  "vatican city": "VA",
+  vatican: "VA",
+  "holy see": "VA",
 };
 
 const NAMES_BY_LENGTH_DESC = Object.keys(COUNTRY_NAME_TO_ALPHA2).sort(

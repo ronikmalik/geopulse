@@ -175,4 +175,48 @@ export const COUNTRY_CENTROIDS: Record<string, { name: string; lat: number; lon:
   CI: { name: "Ivory Coast", lat: 6.8276, lon: -5.2893 },
   CG: { name: "Republic of the Congo", lat: -4.2634, lon: 15.2429 },
   CV: { name: "Cape Verde", lat: 14.9315, lon: -23.5087 },
+
+  // 2026-09-09: full-country-coverage audit (user request — "in depth dive
+  // of every single country... all 200+"). Mechanical cross-check against
+  // the canonical UN-member (+ Vatican/Palestine/Kosovo/Taiwan) list found
+  // these 32 sovereign states/entities entirely absent from this file —
+  // meaning a perfect article about any of them was silently dropped
+  // regardless of source coverage (see classify.ts's `if (!centroid)
+  // return null`). Two are genuinely significant, not just completeness:
+  // Burkina Faso (active Sahel/JNIM jihadist insurgency — the exact
+  // conflict theater african-arguments in rss.ts was added to cover) and
+  // Guyana (the live Guyana-Venezuela Essequibo territorial dispute).
+  // Capital-city coordinates, same convention as the rest of this file.
+  AD: { name: "Andorra", lat: 42.5063, lon: 1.5218 },
+  AO: { name: "Angola", lat: -8.8383, lon: 13.2344 },
+  AG: { name: "Antigua and Barbuda", lat: 17.1274, lon: -61.8468 },
+  BB: { name: "Barbados", lat: 13.1132, lon: -59.5988 },
+  BJ: { name: "Benin", lat: 6.4969, lon: 2.6289 },
+  BT: { name: "Bhutan", lat: 27.4712, lon: 89.6339 },
+  BN: { name: "Brunei", lat: 4.9031, lon: 114.9398 },
+  BF: { name: "Burkina Faso", lat: 12.3714, lon: -1.5197 },
+  KM: { name: "Comoros", lat: -11.7172, lon: 43.2473 },
+  DM: { name: "Dominica", lat: 15.3092, lon: -61.379 },
+  GQ: { name: "Equatorial Guinea", lat: 3.75, lon: 8.7833 },
+  GM: { name: "Gambia", lat: 13.4549, lon: -16.579 },
+  GD: { name: "Grenada", lat: 12.0561, lon: -61.7488 },
+  GW: { name: "Guinea-Bissau", lat: 11.8636, lon: -15.5977 },
+  GY: { name: "Guyana", lat: 6.8013, lon: -58.1551 },
+  KI: { name: "Kiribati", lat: 1.3291, lon: 172.9791 },
+  LI: { name: "Liechtenstein", lat: 47.141, lon: 9.5209 },
+  MH: { name: "Marshall Islands", lat: 7.1164, lon: 171.1858 },
+  FM: { name: "Micronesia", lat: 6.9248, lon: 158.1611 },
+  MC: { name: "Monaco", lat: 43.7384, lon: 7.4246 },
+  NR: { name: "Nauru", lat: -0.5477, lon: 166.9209 },
+  PW: { name: "Palau", lat: 7.5006, lon: 134.6242 },
+  KN: { name: "Saint Kitts and Nevis", lat: 17.3026, lon: -62.7177 },
+  LC: { name: "Saint Lucia", lat: 14.0101, lon: -60.987 },
+  VC: { name: "Saint Vincent and the Grenadines", lat: 13.1587, lon: -61.2248 },
+  WS: { name: "Samoa", lat: -13.8506, lon: -171.7513 },
+  SM: { name: "San Marino", lat: 43.9424, lon: 12.4578 },
+  ST: { name: "Sao Tome and Principe", lat: 0.3365, lon: 6.7273 },
+  SC: { name: "Seychelles", lat: -4.6191, lon: 55.4513 },
+  TL: { name: "Timor-Leste", lat: -8.5569, lon: 125.5603 },
+  TV: { name: "Tuvalu", lat: -8.5211, lon: 179.1983 },
+  VA: { name: "Vatican City", lat: 41.9029, lon: 12.4534 },
 };
