@@ -16,6 +16,7 @@ import {
   expireStalePending,
 } from "../pendingTranslation";
 import { hasLikelyForeignIncidentLanguage } from "../foreignIncidentKeywords";
+import { byteLength } from "../translate";
 
 // Public-channel scraping via Telegram's own no-auth web preview
 // (t.me/s/<channel>) — no bot token, no login, never touches groups or
@@ -157,11 +158,46 @@ async function fetchChannelHtml(handle: string): Promise<string> {
 // A short excerpt, not the full post — this is a citation pointing at the
 // source, the same restraint applied to RSS (headline + link, no full-text
 // reproduction) in src/lib/sources/rss.ts.
-// 280 -> 200 (2026-09-10, translation-budget optimization): kept posts
+// 280 -> 200 chars (2026-09-10, translation-budget optimization): kept posts
 // averaged 230 chars, dropped posts averaged 158 — most real incident
 // reports fit comfortably under 200, this just trims the tail on the
 // (usually-dropped) longer end rather than losing real signal.
-const EXCERPT_MAX_CHARS = 200;
+//
+// Chars -> BYTES (2026-09-10, same day, follow-up): a character cap doesn't
+// actually cap what gets billed — Ukrainian/Russian/Farsi/Arabic (every
+// language this excerpt gets translated FROM) run ~2 bytes/char in UTF-8,
+// so the "200-char" cap above was really an unbounded-ish ~350-400 BYTE
+// cap depending on the exact text. 400 is chosen to match that real
+// existing cost for a typical 200-char non-Latin excerpt almost exactly —
+// this isn't a new content cut on top of the one above, it's making the
+// existing cap actually mean what it was already supposed to cost, and it
+// catches the outlier posts (denser multi-byte characters, combining
+// diacritics) that a char-only cap let slip past 400+ bytes uncapped.
+const EXCERPT_MAX_BYTES = 400;
+
+// Telegram posts routinely carry boilerplate that costs real translation
+// bytes but carries zero incident signal: a bare source URL, a hashtag
+// block, a channel self-mention (@handle). None of this is needed for
+// classification (the real source link lives in DirectItem.url, built
+// from the post's own t.me id, not from anything inside the text) or for
+// display (this excerpt is already framed with the channel's own label —
+// see toDirectItem below), so stripping it before translating spends the
+// byte budget on actual prose instead. Runs before truncation so a post
+// that opens with a hashtag block doesn't lose real trailing content to
+// it.
+const URL_PATTERN = /https?:\/\/\S+/g;
+const HASHTAG_PATTERN = /#\S+/g;
+const MENTION_PATTERN = /@\S+/g;
+
+function stripBoilerplate(text: string): string {
+  return text
+    .replace(URL_PATTERN, "")
+    .replace(HASHTAG_PATTERN, "")
+    .replace(MENTION_PATTERN, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{2,}/g, "\n")
+    .trim();
+}
 
 // A live run found `sanitizeForStorage`'s unpaired-surrogate stripping
 // getting undone right afterward: plain `.slice()` counts UTF-16 code
@@ -174,6 +210,25 @@ function truncateSafely(text: string, maxChars: number): string {
   return chars.length > maxChars ? chars.slice(0, maxChars).join("") : text;
 }
 
+// Same whole-codepoint safety as truncateSafely above, but bounded by
+// actual UTF-8 byte length rather than character count — see
+// EXCERPT_MAX_BYTES's own comment for why bytes are what actually matter
+// here. Walks codepoints (not UTF-16 code units) so a cut can't land
+// inside a multi-byte character or a surrogate pair.
+function truncateSafelyBytes(text: string, maxBytes: number): string {
+  const chars = Array.from(text);
+  let usedBytes = 0;
+  let cutIndex = chars.length;
+  for (let i = 0; i < chars.length; i++) {
+    usedBytes += byteLength(chars[i]);
+    if (usedBytes > maxBytes) {
+      cutIndex = i;
+      break;
+    }
+  }
+  return cutIndex < chars.length ? chars.slice(0, cutIndex).join("") : text;
+}
+
 const LANGUAGE_NAMES: Record<string, string> = {
   uk: "Ukrainian",
   ru: "Russian",
@@ -182,9 +237,10 @@ const LANGUAGE_NAMES: Record<string, string> = {
 };
 
 function excerptOf(text: string): string {
-  return text.length > EXCERPT_MAX_CHARS
-    ? `${truncateSafely(text, EXCERPT_MAX_CHARS)}…`
-    : text;
+  const cleaned = stripBoilerplate(text);
+  return byteLength(cleaned) > EXCERPT_MAX_BYTES
+    ? `${truncateSafelyBytes(cleaned, EXCERPT_MAX_BYTES)}…`
+    : cleaned;
 }
 
 function toDirectItem(

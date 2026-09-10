@@ -12,7 +12,11 @@ import { canAfford, recordUsage } from "./translationUsage";
 // ASCII, so a character-counting cap could meaningfully understate real
 // usage against Google's own meter for exactly the content this app
 // translates the most of.
-function byteLength(text: string): number {
+// Exported so telegram.ts can cap its excerpt at a real byte budget before
+// translating, rather than a character count that understates true cost
+// for exactly the non-Latin scripts this app translates most of (see this
+// function's own comment above).
+export function byteLength(text: string): number {
   return Buffer.byteLength(text, "utf8");
 }
 
