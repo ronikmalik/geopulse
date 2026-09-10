@@ -21,9 +21,18 @@ interface TranslateApiResponse {
 // same way the GDELT/Telegram rotation does. Returns null (not a partial
 // result) on any failure so callers fall back to the original text rather
 // than silently mixing translated and untranslated items from one batch.
+//
+// sourceLang "auto" (added 2026-09-10 for classifyTranslated.ts — see its
+// own doc comment) omits the `source` field entirely, which is Google's
+// own documented way to request language auto-detection: unlike Telegram
+// channels (each pre-tagged with a known language in telegram.ts's own
+// config), RSS/GDELT items arrive in unpredictable languages with no
+// prior tag to pass in. If the detected language is already English, the
+// "translation" comes back as the original text — a harmless no-op for
+// callers, not a special case they need to detect separately.
 export async function translateBatch(
   texts: string[],
-  sourceLang: string,
+  sourceLang: string | "auto",
 ): Promise<string[] | null> {
   const apiKey = process.env.GOOGLE_TRANSLATE_API_KEY;
   if (!apiKey || texts.length === 0) return null;
@@ -38,7 +47,7 @@ export async function translateBatch(
 
   const body = new URLSearchParams();
   for (const text of texts) body.append("q", text);
-  body.set("source", sourceLang);
+  if (sourceLang !== "auto") body.set("source", sourceLang);
   body.set("target", "en");
   body.set("format", "text");
 

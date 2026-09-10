@@ -20,7 +20,9 @@ import {
   classifyGdeltItem,
   isLikelyGeopolitical,
   assessIncidentSeverity,
+  type ClassifiedItem,
 } from "./classify";
+import { retryFailedClassificationsViaTranslation } from "./classifyTranslated";
 import { trackFetch, recordSourceHealth, type TrackedFetch } from "./sourceHealth";
 import { correlationGroupId } from "./correlation";
 import { archiveClassifications } from "./classificationArchive";
@@ -483,7 +485,34 @@ export async function runIngest(
         publishedAt: item.publishedAt,
       };
     });
+    const archiveIndexByUrl = new Map(fresh.map((item, i) => [item.url, i]));
 
+    function buildRow(item: RawItem, c: ClassifiedItem) {
+      const country = c.country.toUpperCase();
+      return {
+        source: item.source,
+        url: item.url,
+        title: item.title,
+        summary: c.summary,
+        category: c.category,
+        location: c.location,
+        country,
+        lat: c.lat,
+        lon: c.lon,
+        severity: c.severity,
+        publishedAt: item.publishedAt,
+        correlationGroupId: correlationGroupId(country, c.category, item.publishedAt),
+        // Gates the live feed pre-publish (2026-09-08 user request) —
+        // invisible to every public read path until
+        // reviewPendingEvents (classifierAudit.ts) promotes it,
+        // usually within this or the next ingest cycle. Applies to
+        // every classified source (RSS/GDELT/Telegram) — the direct-
+        // source block below skips this entirely.
+        reviewStatus: "pending" as const,
+      };
+    }
+
+    const failedItems: RawItem[] = [];
     const rows = fresh
       .map((item, i) => {
         // GDELT queries are already scoped to a specific flashpoint topic
@@ -496,34 +525,52 @@ export async function runIngest(
         // "is this actually new info" checks (not a retrospective, not a
         // rhetorical/opinion piece, not a pure explainer headline).
         const c = item.source === "gdelt" ? classifyGdeltItem(item) : classifyByKeywords(item);
-        if (!c) return null;
+        if (!c) {
+          failedItems.push(item);
+          return null;
+        }
         archiveOutcomes[i].kept = true;
         archiveOutcomes[i].severity = c.severity;
         archiveOutcomes[i].category = c.category;
-        const country = c.country.toUpperCase();
-        return {
-          source: item.source,
-          url: item.url,
-          title: item.title,
-          summary: c.summary,
-          category: c.category,
-          location: c.location,
-          country,
-          lat: c.lat,
-          lon: c.lon,
-          severity: c.severity,
-          publishedAt: item.publishedAt,
-          correlationGroupId: correlationGroupId(country, c.category, item.publishedAt),
-          // Gates the live feed pre-publish (2026-09-08 user request) —
-          // invisible to every public read path until
-          // reviewPendingEvents (classifierAudit.ts) promotes it,
-          // usually within this or the next ingest cycle. Applies to
-          // every classified source (RSS/GDELT/Telegram) — the direct-
-          // source block below skips this entirely.
-          reviewStatus: "pending" as const,
-        };
+        return buildRow(item, c);
       })
       .filter((r): r is NonNullable<typeof r> => r !== null);
+
+    // Translation-fallback retry (2026-09-10) — see classifyTranslated.ts's
+    // own doc comment for the full reasoning: a real, severe story
+    // reported in a non-English language fails classify.ts's English-only
+    // severity regex on the first pass above, purely because of language,
+    // not because it isn't real news. Bounded to items that already
+    // resolved a country in their original text (see that module), so
+    // this doesn't attempt to translate the full RSS/GDELT firehose —
+    // only genuinely promising candidates. Own deadline, same pattern as
+    // every other enrichment step in this file — a slow/unavailable
+    // translation call degrades this one step, not the whole cycle.
+    try {
+      const retryResult = await withDeadline(
+        retryFailedClassificationsViaTranslation(failedItems, (item) => item.source === "gdelt"),
+        8_000,
+        "translationRetry",
+      );
+      for (let j = 0; j < retryResult.recovered.length; j++) {
+        const c = retryResult.recovered[j];
+        const translatedItem = retryResult.recoveredItems[j];
+        const archiveIdx = archiveIndexByUrl.get(translatedItem.url);
+        if (archiveIdx !== undefined) {
+          archiveOutcomes[archiveIdx].kept = true;
+          archiveOutcomes[archiveIdx].severity = c.severity;
+          archiveOutcomes[archiveIdx].category = c.category;
+          // The archive keeps a readable record of what actually got
+          // published, not the untranslated original — same reasoning as
+          // storing the translated title/summary on the row itself below.
+          archiveOutcomes[archiveIdx].title = translatedItem.title;
+          archiveOutcomes[archiveIdx].snippet = translatedItem.snippet;
+        }
+        rows.push(buildRow(translatedItem, c));
+      }
+    } catch (err) {
+      errors.push(`translationRetry: ${err}`);
+    }
 
     // Cross-outlet duplicate detection (see src/lib/eventDedup.ts) — grouped
     // by (country, category) since that's the dedup scope, one DB query per
