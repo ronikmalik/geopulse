@@ -788,6 +788,17 @@ export async function runIngest(
   // proven in production; if it ever misbehaves and eats its whole
   // deadline, that should degrade its own coverage, not steal budget from
   // the two established passes ahead of it.
+  //
+  // classifierAuditSlice's own 5s->8s (2026-09-10, verified live): this
+  // MUST match SLICE_DEADLINE_MS in classifierAudit.ts exactly — see that
+  // constant's own comment for why 5s was never actually enough (one
+  // round of real concurrent Gemini calls, not a tunable loop budget) and
+  // why 8s, not more, was chosen (matches embeddingBackfill's own proven-
+  // reliable 8s for the same class of external API round-trip). This
+  // grows the chain's nominal total from 18s to 21s, eating back some of
+  // the headroom the translation-retry timeout fix bought the same day —
+  // check cron-job.org's dashboard after this deploys for a recurrence of
+  // that exact 30s-ceiling failure mode before assuming this is settled.
   async function runGeminiAuditChain(): Promise<void> {
     try {
       await withDeadline(reviewPendingEvents(), 8_000, "pendingEventReview");
@@ -795,7 +806,7 @@ export async function runIngest(
       errors.push(`pendingEventReview: ${err}`);
     }
     try {
-      await withDeadline(runClassifierAuditSlice(), 5_000, "classifierAuditSlice");
+      await withDeadline(runClassifierAuditSlice(), 8_000, "classifierAuditSlice");
     } catch (err) {
       errors.push(`classifierAuditSlice: ${err}`);
     }

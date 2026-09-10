@@ -168,24 +168,24 @@ const AUDIT_WINDOW_HOURS = 24;
 const KEPT_AUDIT_WINDOW_DAYS = 30;
 // The ingest-embedded slice's own time budget. MUST match the outer
 // withDeadline(runClassifierAuditSlice(), ..., "classifierAuditSlice")
-// wrapper in ingest.ts exactly — found live 2026-09-10, mismatched at
-// 8s here vs. 5s there: withDeadline doesn't cancel the wrapped promise
-// (see its own comment in ingest.ts), it only stops the CALLER from
-// awaiting it, so a self-imposed deadline longer than the caller's own
-// timeout accomplishes nothing but guaranteeing the caller reports
-// "timeout" on every round that does real work — runAudit's while loop
-// below was, by design, still trying to squeeze in a 6th or 7th second
-// of extra batches the outer wrapper was never going to wait for. Worse,
-// the abandoned call keeps running as a dangling promise, risking the
-// NEXT ingest cycle's fresh slice call re-fetching the same still-
-// unaudited rows (auditedAt not yet written) before the dangling one
-// finishes — duplicate Gemini calls on the same candidates. 5s, not 8s,
-// because ingest.ts's own budget comment allocates this slice 5s
-// specifically (split against eventGeocodeBackfill's own 5s) — moving
-// this number instead of that one keeps the ingest cycle's total
-// critical-path time unchanged from the translation-retry timeout fix
-// shipped the same day.
-const SLICE_DEADLINE_MS = 5_000;
+// wrapper in ingest.ts exactly — verified live 2026-09-10 they'd drifted
+// out of sync (8s here vs. 5s there), then verified AGAIN live that 5s
+// alone was never the real fix: ROUND_SPACING_MS's mandatory 10s
+// inter-round sleep means this slice structurally only ever completes
+// ONE round (up to CONCURRENCY real concurrent Gemini calls, for kept
+// AND dropped candidates each) before its own deadline check forces it
+// to stop — so this budget isn't really "how much looping to allow," it
+// IS "how long one real round of Gemini calls is allowed to take," full
+// stop, no slack from the loop structure to hide behind. Confirmed via
+// direct comparison against embeddingBackfill's own 8s budget (same
+// order of magnitude, same kind of external API round-trip), which does
+// NOT show up timing out in the same production error samples that
+// caught this — 5s was simply never enough for a real round, 8s is. Both
+// this constant and ingest.ts's outer wrapper must move together; if
+// this ever needs to change again, check cron-job.org's dashboard
+// afterward for the same 30s-ceiling regression translationRetry caused
+// the same day, since raising this shrinks that headroom back down.
+const SLICE_DEADLINE_MS = 8_000;
 // The standalone route's budget — generous, but leaves real margin
 // inside its 55s maxDuration for the DB round-trips and response
 // serialization around it.
