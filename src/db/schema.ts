@@ -477,6 +477,39 @@ export const pendingTranslation = pgTable(
 );
 
 export type PendingTranslationRow = typeof pendingTranslation.$inferSelect;
+
+// 2026-09-10 (user-caught bug): GDELT bulk items were being displayed with
+// a title synthesized from GDELT's own structured CAMEO fields (actor names
+// + a templated action verb), NOT the real headline of the article at
+// `url` — so clicking through to the source showed a completely different,
+// real story than what the card claimed. Same "queue now, do the real work
+// on a later cycle" shape as pendingTranslation above (see
+// src/lib/pendingGdeltTitle.ts and gdeltBulk.ts's drainPendingGdeltTitles):
+// a candidate that clears GDELT's own structural filters (real actor
+// affiliation, resolved country) gets queued here rather than published
+// immediately, and only becomes a real feed candidate once a real title
+// has actually been fetched from its own source page — never a synthesized
+// guess. `resolvedCountry` and `publishedAt` are the only fields carried
+// over from the CAMEO row; the actor/root-code/goldstein details that used
+// to drive the synthesized description are deliberately NOT stored here —
+// nothing downstream needs them once the real title takes over both
+// display and classification.
+export const pendingGdeltTitle = pgTable(
+  "pending_gdelt_title",
+  {
+    id: serial("id").primaryKey(),
+    url: text("url").notNull().unique(),
+    resolvedCountry: text("resolved_country").notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true }).notNull(),
+    discoveredAt: timestamp("discovered_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("pending_gdelt_title_discovered_at_idx").on(table.discoveredAt)],
+);
+
+export type PendingGdeltTitleRow = typeof pendingGdeltTitle.$inferSelect;
+export type NewPendingGdeltTitleRow = typeof pendingGdeltTitle.$inferInsert;
 export type NewPendingTranslationRow = typeof pendingTranslation.$inferInsert;
 
 // Durable copy of every item that ever actually made it into `events` —

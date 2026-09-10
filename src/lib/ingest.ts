@@ -2,7 +2,7 @@ import { getDb } from "@/db";
 import { events } from "@/db/schema";
 import { inArray } from "drizzle-orm";
 import type { RawItem } from "./sources/gdelt";
-import { fetchGdeltBulkEvents } from "./sources/gdeltBulk";
+import { discoverGdeltCandidates, drainPendingGdeltTitles } from "./sources/gdeltBulk";
 import { fetchAllRssFeeds } from "./sources/rss";
 import { fetchUsgsEarthquakes } from "./sources/usgs";
 import { fetchNasaEonet } from "./sources/eonet";
@@ -245,15 +245,40 @@ export async function runIngest(
     // 429-rate-limited on Vercel's shared outbound IP the vast majority of
     // the time, both here and in the priority workflow, regardless of how
     // conservatively this app paced its own requests — see gdelt.ts's own
-    // header comment for the full investigation. fetchGdeltBulkEvents
-    // (src/lib/sources/gdeltBulk.ts) fetches GDELT's own bulk 15-minute
-    // Event Database file instead — a completely different, unthrottled
-    // host, one small file covering every country and category GDELT
-    // recorded in this window, no per-query search net required. Runs
-    // identically regardless of priorityGdelt now: there's no longer a
-    // "which queries fit in this cycle's budget" problem to split across
-    // two trigger paths.
-    trackFetch("gdelt", () => withDeadline(fetchGdeltBulkEvents(), GDELT_BULK_TIMEOUT_MS, "gdelt-bulk")),
+    // header comment for the full investigation. gdeltBulk.ts fetches
+    // GDELT's own bulk 15-minute Event Database file instead — a
+    // completely different, unthrottled host, one small file covering
+    // every country and category GDELT recorded in this window, no
+    // per-query search net required.
+    //
+    // Two-stage, same shape as the Telegram translation drain below (see
+    // its own comment): a real headline can't be read out of the bulk
+    // file itself (see gdeltBulk.ts's header comment for the user-caught
+    // bug this fixes — a synthesized guess is never displayed again), so
+    // discoverGdeltCandidates only enqueues candidates that clear GDELT's
+    // structural filters, and drainPendingGdeltTitles fetches each one's
+    // REAL title from its own page before it can become a real item.
+    // Drained first for the same "oldest-waiting gets first claim on this
+    // cycle's budget" reason as Telegram's drain.
+    trackFetch("gdelt", async () => {
+      const drained = await drainPendingGdeltTitles().catch((err) => {
+        gdeltQueryErrors.push(`gdelt(title-drain): ${err}`);
+        return [];
+      });
+      // discoverGdeltCandidates never returns display items itself (see its
+      // own doc comment) — only awaited for its enqueue side effect and to
+      // catch its own errors, same "empty result is normal, an error isn't"
+      // distinction the throw below relies on.
+      try {
+        await withDeadline(discoverGdeltCandidates(), GDELT_BULK_TIMEOUT_MS, "gdelt-bulk-discover");
+      } catch (err) {
+        gdeltQueryErrors.push(`gdelt(discover): ${err}`);
+      }
+      if (drained.length === 0 && gdeltQueryErrors.length > 0) {
+        throw new Error(gdeltQueryErrors.join("; "));
+      }
+      return drained;
+    }),
     priorityGdelt ? skippedFetch<RawItem>("rss") : trackFetch("rss", fetchAllRssFeeds),
     priorityGdelt ? skippedFetch<DirectItem>("usgs") : trackFetch("usgs", fetchUsgsEarthquakes),
     priorityGdelt ? skippedFetch<DirectItem>("eonet") : trackFetch("eonet", fetchNasaEonet),

@@ -341,6 +341,16 @@ const STATEMENTS = [
   EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
   END $$`,
   sql`CREATE INDEX IF NOT EXISTS classifier_calibration_evidence_pattern_idx ON classifier_calibration_evidence (pattern)`,
+  // Real-title backfill queue for GDELT bulk items (2026-09-10) — see
+  // pendingGdeltTitle's own doc comment in schema.ts.
+  sql`CREATE TABLE IF NOT EXISTS pending_gdelt_title (
+    id SERIAL PRIMARY KEY,
+    url TEXT NOT NULL UNIQUE,
+    resolved_country TEXT NOT NULL,
+    published_at TIMESTAMPTZ NOT NULL,
+    discovered_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS pending_gdelt_title_discovered_at_idx ON pending_gdelt_title (discovered_at)`,
 ];
 
 export async function GET(req: NextRequest) {

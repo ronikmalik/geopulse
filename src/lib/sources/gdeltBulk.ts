@@ -1,7 +1,14 @@
 import { unzipSync } from "fflate";
 import type { RawItem } from "./gdelt";
 import { fipsToIso2 } from "../fipsCountryCodes";
-import { buildEventDescription } from "../cameoEventCodes";
+import { isWorthFetchingRealTitle } from "../cameoEventCodes";
+import { fetchRealArticleTitle } from "../articleTitleFetch";
+import {
+  enqueuePendingGdeltTitles,
+  getPendingGdeltTitleBatch,
+  deletePendingGdeltTitles,
+  expireStalePendingGdeltTitles,
+} from "../pendingGdeltTitle";
 
 // Replaces this app's original GDELT ingestion path (the DOC 2.0 full-text
 // search API, api.gdeltproject.org, still implemented in gdelt.ts) for the
@@ -24,28 +31,38 @@ import { buildEventDescription } from "../cameoEventCodes";
 // hand-written boolean query per country" scaling problem (see categories.
 // ts's PRIORITY_GDELT_ROTATION, now unused — see that file's own note).
 //
+// REWRITTEN 2026-09-10 (user-caught bug): this used to synthesize a title
+// directly from GDELT's structured CAMEO fields (see cameoEventCodes.ts's
+// own doc comment) and publish it immediately. That meant every card's
+// displayed title was a guessed sentence, never the real headline of the
+// article at its own URL — clicking through showed a different, real
+// story. Fixed by splitting into two stages, the same "queue now, do the
+// real work on a later cycle" shape already used for embeddings/geocoding/
+// Telegram translation: discoverGdeltCandidates below only enqueues
+// (src/lib/pendingGdeltTitle.ts) candidates that clear GDELT's structural
+// filters; drainPendingGdeltTitles fetches each one's REAL title directly
+// from its own page (src/lib/articleTitleFetch.ts) and only THEN does it
+// become a real RawItem, with the real title/snippet driving classify.ts's
+// normal severity/category logic exactly like any other source. A
+// candidate whose real title can't be fetched stays queued for retry
+// (up to PENDING_GDELT_TITLE_MAX_AGE_MS) — never falls back to a guess.
+//
 // Only the Event table (export.CSV.zip) is fetched — the Mentions table
-// (mentions.CSV.zip) is NOT needed for this app's purposes: the Event
-// table's own SOURCEURL field already carries a real article URL per event,
+// isn't needed: the Event table's own SOURCEURL field already carries a
+// real article URL per event.
 const LAST_UPDATE_URL = "http://data.gdeltproject.org/gdeltv2/lastupdate.txt";
 const REQUEST_TIMEOUT_MS = 20_000;
 
-// NumSources/NumMentions were tried as a quality gate (require >=2
-// independent sources before trusting an event) and live-tested against a
-// real production file (2026-09-10): they DON'T work as one — NumSources is
-// frozen at the value from the 15-minute window an event was FIRST seen, so
-// almost every event reads as NumSources=1 the moment it enters the file by
-// construction (only 25 of 1,148 real events in a live test window had
-// NumSources>=2). Worse, requiring multi-source pickup within the same
-// 15-minute window would selectively reject exactly the smaller/less-
-// prominent-country stories this whole rewrite exists to surface, since a
-// major-country story is far more likely to get picked up by several
-// outlets within 15 minutes than an obscure one is. No pre-filter on
-// source count is applied here — classify.ts's own downstream gates
-// (severity floor, NON_EVENT/EDITORIAL/RHETORICAL pattern checks,
-// isLikelyGeopolitical) plus eventDedup.ts's cross-outlet merging are what
-// actually manage quality/corroboration, the same as for every other
-// source this app ingests.
+// How many queued candidates get a real-title-fetch attempt per ingest
+// cycle. Each fetch is a real, potentially-slow external page load (up to
+// articleTitleFetch.ts's own 8s timeout) — bounded concurrency and an
+// overall deadline (see drainPendingGdeltTitles's caller in ingest.ts) keep
+// this from eating the shared ingest time budget RSS/Telegram/etc. also
+// need. At ~96 ingest cycles/day this still allows well over 1,000 title
+// fetch attempts/day, comfortably ahead of realistic conflict-tier CAMEO
+// candidate volume.
+const DRAIN_BATCH_SIZE = 12;
+const DRAIN_CONCURRENCY = 4;
 
 async function fetchText(url: string): Promise<string> {
   const res = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
@@ -85,27 +102,16 @@ function parseDateAdded(dateAdded: string): Date | null {
   return new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s)));
 }
 
-function parseFloatSafe(v: string): number {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-}
-
 // Field positions verified 2026-09-10 against GDELT's own column-labels
 // reference (linwoodc3/gdelt2HeaderRows) cross-checked against the primary
 // GDELT 2.0 Event Codebook's field descriptions — 61 columns, 0-indexed
 // here since that's how the split array is addressed.
 const COL = {
-  actor1Name: 6,
   actor1CountryCode: 7,
   actor1KnownGroupCode: 8,
-  actor2Name: 16,
   actor2CountryCode: 17,
   actor2KnownGroupCode: 18,
   eventRootCode: 28,
-  goldsteinScale: 30,
-  numSources: 32,
-  actionGeoType: 51,
-  actionGeoFullName: 52,
   actionGeoCountryCode: 53,
   actor1GeoCountryCode: 37,
   actor2GeoCountryCode: 45,
@@ -113,11 +119,15 @@ const COL = {
   sourceUrl: 60,
 };
 
-export async function fetchGdeltBulkEvents(): Promise<RawItem[]> {
+// Discovers candidates from the latest bulk file and enqueues the ones
+// worth pursuing — does NOT publish anything directly (see this file's
+// header comment). Always returns [] to the caller; the real items come
+// from drainPendingGdeltTitles below, once a real title exists.
+export async function discoverGdeltCandidates(): Promise<RawItem[]> {
   const exportUrl = await getLatestExportCsvUrl();
   const csv = await fetchAndUnzipCsv(exportUrl);
 
-  const items: RawItem[] = [];
+  const candidates: { url: string; resolvedCountry: string; publishedAt: Date }[] = [];
   const seenUrls = new Set<string>();
 
   for (const line of csv.split(/\r?\n/)) {
@@ -128,6 +138,8 @@ export async function fetchGdeltBulkEvents(): Promise<RawItem[]> {
     const sourceUrl = f[COL.sourceUrl]?.trim();
     if (!sourceUrl || !/^https?:\/\//.test(sourceUrl) || seenUrls.has(sourceUrl)) continue;
 
+    if (!isWorthFetchingRealTitle(f[COL.eventRootCode]?.trim() ?? "")) continue;
+
     // Requires at least one actor to be a real state/political/organizational
     // entity — a populated Actor_CountryCode (the actor's CAMEO political
     // affiliation, NOT the geographic location field below) or a
@@ -137,11 +149,10 @@ export async function fetchGdeltBulkEvents(): Promise<RawItem[]> {
     // like "Criminal", "Serial Killer", "Firefighter", "Illegal Immigrant"
     // (used when GDELT can't identify a specific named entity) were getting
     // CAMEO-coded as ASSAULT/FIGHT root events from ordinary local
-    // crime/human-interest content with zero geopolitical relevance —
-    // "Criminal is fighting in Flensburg, Germany" is not a security event,
-    // it's a police-blotter item mis-extracted. A real government, military,
-    // named country, or organized political/armed group will have one of
-    // these two fields populated; a generic role match won't.
+    // crime/human-interest content with zero geopolitical relevance. A real
+    // government, military, named country, or organized political/armed
+    // group will have one of these two fields populated; a generic role
+    // match won't.
     const hasRealActor =
       Boolean(f[COL.actor1CountryCode]?.trim()) ||
       Boolean(f[COL.actor1KnownGroupCode]?.trim()) ||
@@ -165,25 +176,55 @@ export async function fetchGdeltBulkEvents(): Promise<RawItem[]> {
     const publishedAt = parseDateAdded(f[COL.dateAdded]);
     if (!publishedAt) continue;
 
-    const description = buildEventDescription({
-      actor1Name: f[COL.actor1Name]?.trim() || null,
-      actor2Name: f[COL.actor2Name]?.trim() || null,
-      eventRootCode: f[COL.eventRootCode]?.trim() ?? "",
-      goldsteinScale: parseFloatSafe(f[COL.goldsteinScale]),
-      actionLocationName: f[COL.actionGeoFullName]?.trim() || null,
-    });
-    if (!description) continue;
-
     seenUrls.add(sourceUrl);
-    items.push({
-      source: "gdelt",
-      url: sourceUrl,
-      title: description.title,
-      snippet: description.snippet,
-      publishedAt,
-      resolvedCountry: country,
-    });
+    candidates.push({ url: sourceUrl, resolvedCountry: country, publishedAt });
   }
+
+  await enqueuePendingGdeltTitles(candidates).catch((err) => {
+    console.error(`enqueuePendingGdeltTitles failed: ${err}`);
+  });
+
+  return [];
+}
+
+// Fetches real titles for a batch of previously-discovered candidates,
+// turning each success into a real RawItem — this is the ONLY place a
+// gdelt-sourced RawItem gets created now (see this file's header comment).
+// A candidate whose fetch fails simply stays queued; nothing here ever
+// falls back to a synthesized guess.
+export async function drainPendingGdeltTitles(): Promise<RawItem[]> {
+  await expireStalePendingGdeltTitles().catch((err) =>
+    console.error(`expireStalePendingGdeltTitles failed: ${err}`),
+  );
+
+  const pending = await getPendingGdeltTitleBatch(DRAIN_BATCH_SIZE).catch(() => []);
+  if (pending.length === 0) return [];
+
+  const items: RawItem[] = [];
+  const resolvedUrls: string[] = [];
+
+  for (let start = 0; start < pending.length; start += DRAIN_CONCURRENCY) {
+    const chunk = pending.slice(start, start + DRAIN_CONCURRENCY);
+    const results = await Promise.all(
+      chunk.map(async (row) => ({ row, article: await fetchRealArticleTitle(row.url).catch(() => null) })),
+    );
+    for (const { row, article } of results) {
+      if (!article) continue; // leave queued for retry next cycle
+      resolvedUrls.push(row.url);
+      items.push({
+        source: "gdelt",
+        url: row.url,
+        title: article.title,
+        snippet: article.snippet,
+        publishedAt: row.publishedAt,
+        resolvedCountry: row.resolvedCountry,
+      });
+    }
+  }
+
+  await deletePendingGdeltTitles(resolvedUrls).catch((err) =>
+    console.error(`deletePendingGdeltTitles failed: ${err}`),
+  );
 
   return items;
 }
