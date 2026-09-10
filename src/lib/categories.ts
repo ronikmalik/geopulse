@@ -381,6 +381,47 @@ export const PRIORITY_GDELT_ROTATION: { category: NewsCategory; query: string }[
   // Zambia: Aug 2026 election marred by a suspended vote count, fraud
   // accusations, court closures, opposition arrests.
   { category: "political-instability", query: 'Zambia AND (Hichilema OR election OR Mundubile OR fraud OR dispute OR arrest)' },
+
+  // --- Western Europe (added after explicitly checking whether "stable
+  // democracy" was masking real instability rather than assuming it —
+  // most of Western Europe genuinely doesn't need a dedicated query
+  // given how much RSS/global-wire coverage it already gets, but these
+  // specific countries had real, current, verifiable crises the generic
+  // coverage could plausibly still miss under a non-"political-
+  // instability"-tagged headline) ---
+  // France: chronic, current crisis — Bayrou ousted Sept 2025, Lecornu
+  // resigned and was reappointed within days (Oct 2025), 5th PM in ~2
+  // years, ongoing budget standoff.
+  { category: "political-instability", query: '(France OR Macron OR Lecornu) AND ("no confidence" OR censure OR "govt collapse" OR "budget crisis")' },
+  // Germany: AfD landslide in Saxony-Anhalt (43.8%, Sept 6 2026); CDU
+  // insiders calling it the party's "deepest crisis" in 81 years.
+  { category: "political-instability", query: '(Germany OR Merz OR AfD) AND (coalition OR crisis OR "no confidence" OR collapse OR chancellor)' },
+  // UK: Starmer resigned, Andy Burnham became PM (July 2026); pro-
+  // independence parties simultaneously control Scotland/Wales/NI's
+  // devolved governments; SNP floating a unilateral referendum.
+  { category: "political-instability", query: '(UK OR Britain OR Scotland OR Burnham OR SNP) AND ("independence referendum" OR "constitutional crisis" OR unrest)' },
+  // Greenland/Denmark: very much live — EU pledged $232M to Greenland
+  // (Sept 8 2026) specifically to counter ongoing Trump annexation
+  // threats; 2026 already included military posturing and the largest
+  // protests in Greenland's history.
+  { category: "political-instability", query: '(Greenland OR Denmark) AND (Trump OR annex OR annexation OR sovereignty OR protest OR military)' },
+  // Spain: Sanchez in what analysts call his "deepest crisis yet" —
+  // stacking corruption scandals; parliament passed a non-binding
+  // resolution urging his resignation (177-171).
+  { category: "political-instability", query: '(Spain OR Sanchez) AND (corruption OR scandal OR "no confidence" OR resign OR crisis)' },
+  // Slovakia: sustained 2024-2026 protest movement against Fico's pro-
+  // Russia/anti-Ukraine stance, continuing into 2026 with Fico himself
+  // warning of confrontation moving "onto the streets."
+  { category: "political-instability", query: '(Slovakia OR Fico) AND (protest OR unrest OR crisis OR "pro-Russia" OR resign)' },
+  // Hungary: Fidesz/Orban reportedly lost the 2026 election to Magyar's
+  // Tisza after a "deepening rule of law crisis" per EU Parliament —
+  // genuinely unusual, not routine democratic politics. Based on a
+  // slightly older search pass than the others in this batch (research
+  // agent's web-search quota was exhausted before a final confirmation
+  // pass) — worth a spot-check if this query's real-world relevance ever
+  // looks off, but the underlying signal (a major election upset with
+  // rule-of-law tension) is solid enough to include now.
+  { category: "political-instability", query: '(Hungary OR Orban OR Magyar OR Tisza) AND (election OR transition OR "constitutional crisis" OR unrest)' },
 ];
 
 // Kept for any external reference to the old combined shape — always
