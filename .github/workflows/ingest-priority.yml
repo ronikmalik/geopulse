@@ -17,12 +17,23 @@ name: Ingest priority GDELT categories
 # rotation and skips every other source (see runIngest's priorityGdelt
 # option) — safe to run several GDELT queries sequentially here
 # specifically because GitHub Actions has no 30s constraint, only this
-# job's own 6-minute timeout below. Offset by 7 minutes from ingest.yml's
-# schedule (4,19,34,49) so the two don't compete for GDELT's own rate limit
-# at the same moment.
+# job's own 6-minute timeout below. Offset from ingest.yml's own schedule
+# (4,19,34,49) so the two don't compete for GDELT's own rate limit at the
+# same moment.
+#
+# 2026-09-10: confirmed live (gh workflow list / gh run list) that this
+# schedule registered as "active" but never fired a single scheduled run
+# in the hours since it was created — the EXACT same failure mode
+# ingest.yml's own header comment already documents happening to it
+# (silently not firing for over a week despite showing active). Same
+# fix applied: change the cron expression to force GitHub to re-register
+# the schedule. A manual workflow_dispatch run in the meantime confirmed
+# the underlying route/logic itself works fine (real GDELT queries,
+# real — if GDELT-rate-limited — results) — this was purely a dead
+# schedule registration, not a code bug.
 on:
   schedule:
-    - cron: "11,26,41,56 * * * *"
+    - cron: "9,24,39,54 * * * *"
   workflow_dispatch: {}
 
 permissions:
