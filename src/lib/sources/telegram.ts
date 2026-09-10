@@ -63,11 +63,15 @@ export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
   { handle: "Joint_Forces_Task_Force", label: "Ukrainian Joint Forces (official military)", country: "UA", category: "russia-ukraine", language: "uk" },
   { handle: "V_Zelenskiy_official", label: "Volodymyr Zelensky (official)", country: "UA", category: "russia-ukraine", language: "uk" },
   { handle: "medvedev_telegram", label: "Dmitry Medvedev — Deputy Chair, Russian Security Council (official)", country: "RU", category: "russia-ukraine", language: "ru" },
-  { handle: "defapress_ir", label: "Defa Press — Iranian Defense Ministry press organ (official)", country: "IR", category: "us-iran", language: "fa" },
-  { handle: "sepah_pasdaran", label: "IRGC (official)", country: "IR", category: "us-iran", language: "fa" },
-  { handle: "TasnimNewsAgency", label: "Tasnim News (IRGC-affiliated wire)", country: "IR", category: "us-iran", language: "fa" },
-  { handle: "mehrnews", label: "Mehr News Agency (Iran semi-official state media)", country: "IR", category: "us-iran", language: "fa" },
-  { handle: "Nournews_ir", label: "Nour News (Iran Supreme National Security Council-linked)", country: "IR", category: "us-iran", language: "fa" },
+  // defapress_ir, sepah_pasdaran, TasnimNewsAgency, mehrnews, Nournews_ir
+  // removed (2026-09-10, user request) — the five worst-yielding Farsi
+  // channels by real all-time data: TasnimNewsAgency 0/20 kept (0%, ever),
+  // sepah_pasdaran 5/155 (3.2%), mehrnews 7/307 (2.3%), Nournews_ir 8/392
+  // (2.1%), defapress_ir 4/100 (4%) — together 44% of the current
+  // translation-pending backlog (180/409) and ~42% of all-time translated-
+  // candidate volume, for a combined ~2.7% keep rate. iribnews (5.3%,
+  // above) and farsna (5.4%, above) stay — meaningfully better yield, not
+  // flagged.
   { handle: "army21ye", label: "Houthi Armed Forces spokesperson (official, unverified claims)", country: "YE", category: "us-iran", language: "ar" },
 ];
 
