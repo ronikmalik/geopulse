@@ -227,6 +227,18 @@ export async function runIngest(
   const ROTATION_CHUNK_SIZE = 1;
   const ROTATION_INTERVAL_MS = 15 * 60_000;
   const GDELT_QUERY_SPACING_MS = 1500;
+  // 2026-09-10: live production logs from priorityGdelt runs (after
+  // PRIORITY_GDELT_ROTATION grew to 76 entries and chunk size went to 10)
+  // showed almost every query in almost every run getting 429'd — not a
+  // handful of failures, nearly ALL of them, typically everything after
+  // the first 1-2 queries in a given run. This matches gdelt.ts's own
+  // documented finding that a single 429 triggers a "materially longer,
+  // sticky cooldown," not just simple per-second throttling — 1.5s
+  // spacing (fine for the main rotation's own single query per cycle,
+  // never previously stress-tested against a multi-query burst) is far
+  // too tight once a run fires several queries in sequence. 4s is closer
+  // to GDELT's own stated "one request every 5 seconds" policy.
+  const PRIORITY_GDELT_QUERY_SPACING_MS = 4_000;
   const GDELT_QUERY_TIMEOUT_MS = 22_000;
   const gdeltQueryErrors: string[] = [];
 
@@ -252,7 +264,15 @@ export async function runIngest(
       // 6-minute job timeout still caps how many fit per cycle, hence
       // PRIORITY_GDELT_ROTATION_CHUNK_SIZE rather than running the whole
       // (unboundedly growing) rotation list every time.
-      const PRIORITY_GDELT_ROTATION_CHUNK_SIZE = 10;
+      // Dropped from 10 to 5 for the same 429-storm reason as
+      // PRIORITY_GDELT_QUERY_SPACING_MS above — a smaller burst per run
+      // (7 total with the 2 ALWAYS queries) plus wider spacing between
+      // them is what actually gets queries through GDELT's rate limiter,
+      // not GitHub Actions' own 6-minute budget (which was never the
+      // real constraint here). Full rotation cadence slows from ~2h to
+      // ~4h across the (now 76-entry) rotation list, worth it if it means
+      // queries actually run instead of being wasted to 429s.
+      const PRIORITY_GDELT_ROTATION_CHUNK_SIZE = 5;
       const queries: [NewsCategory, string][] = priorityGdelt
         ? [
             ...PRIORITY_GDELT_ALWAYS.map((q) => [q.category, q.query] as [NewsCategory, string]),
@@ -283,7 +303,7 @@ export async function runIngest(
 
       const results: RawItem[][] = [];
       for (let i = 0; i < queries.length; i++) {
-        if (i > 0) await sleep(GDELT_QUERY_SPACING_MS);
+        if (i > 0) await sleep(priorityGdelt ? PRIORITY_GDELT_QUERY_SPACING_MS : GDELT_QUERY_SPACING_MS);
         const [category, query] = queries[i];
         try {
           const items = await withDeadline(
