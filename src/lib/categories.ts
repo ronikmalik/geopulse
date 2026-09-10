@@ -95,17 +95,34 @@ export const CATEGORY_QUERIES: Record<NewsCategory, string> = {
 // (Eurasianet, the one high-credibility specialist, is Cloudflare-blocked)
 // — a confirmed dead end re-checked the day before this fix, not an
 // unexamined gap.
-export const PRIORITY_GDELT_QUERIES: { category: NewsCategory; query: string }[] = [
+// ALWAYS run every priorityGdelt cycle — the two broad catch-alls, kept
+// maximally fresh since they're this app's most general-purpose reach into
+// any country outside the 5 named flashpoints.
+export const PRIORITY_GDELT_ALWAYS: { category: NewsCategory; query: string }[] = [
   { category: "political-instability", query: CATEGORY_QUERIES["political-instability"] },
   { category: "humanitarian", query: CATEGORY_QUERIES["humanitarian"] },
+];
+
+// 2026-09-10 (user request: "build dedicated queries for all 200+
+// countries... keep building more and more"): this list is designed to
+// grow indefinitely without needing any other code change — see
+// PRIORITY_GDELT_ROTATION_CHUNK_SIZE in ingest.ts, which rotates through
+// this list in chunks each cycle (the same rotation-not-run-everything
+// idiom the main /api/ingest route already uses for its 5 named
+// flashpoints) rather than running the whole list every time — GDELT
+// rate limits and GitHub Actions' 6-minute job timeout both cap how many
+// queries can run in one cycle, so this scales by rotating through more
+// entries over a longer full-cycle time, not by running more per cycle.
+// Each entry should be a real, researched query for a specific country or
+// tight regional cluster's actual current conflict/instability/
+// humanitarian-crisis vocabulary (named actors, specific disputes) — not
+// a generic term already covered by PRIORITY_GDELT_ALWAYS above.
+export const PRIORITY_GDELT_ROTATION: { category: NewsCategory; query: string }[] = [
   {
     category: "political-instability",
-    // Extended 2026-09-09 (full-country-coverage audit) with Afghanistan/
-    // Taliban/Baluchistan — Afghanistan itself (bare "Taliban"/"ISIS-K"/
-    // "Khorasan Province", already mapped to AF in countryNames.ts) had no
-    // GDELT reach at all before this: the original query here only covered
-    // Pakistan-side actors (Tehrik-i-Taliban etc.) and India/Kashmir, and
-    // docs/SOURCE_CREDIBILITY.md explicitly names "Pakistan and
+    // Afghanistan (bare "Taliban"/"ISIS-K"/"Khorasan Province", already
+    // mapped to AF in countryNames.ts) had no GDELT reach at all before
+    // this: docs/SOURCE_CREDIBILITY.md explicitly names "Pakistan and
     // Afghanistan... South Asia's actual terrorism theater" as a real,
     // still-open gap.
     query:
@@ -116,37 +133,40 @@ export const PRIORITY_GDELT_QUERIES: { category: NewsCategory; query: string }[]
     query:
       "(Kazakhstan OR Uzbekistan OR Kyrgyzstan OR Tajikistan OR Turkmenistan) AND (unrest OR protest OR clash OR border OR crackdown OR coup)",
   },
-  // Added 2026-09-09, full-country-coverage audit: Bangladesh/Nepal/Sri
-  // Lanka is docs/SOURCE_CREDIBILITY.md's own named remaining gap ("no
-  // dedicated outlet clears the bar; the best editorial fits... are simply
-  // unrated by any tracker") — these three countries had zero GDELT reach
-  // and no RSS/regional-umbrella coverage at all before this.
+  // Bangladesh/Nepal/Sri Lanka is docs/SOURCE_CREDIBILITY.md's own named
+  // remaining gap ("no dedicated outlet clears the bar... simply unrated
+  // by any tracker") — zero GDELT reach and no RSS/regional-umbrella
+  // coverage before this.
   {
     category: "political-instability",
     query:
       '(Bangladesh OR Nepal OR "Sri Lanka") AND (protest OR unrest OR crackdown OR coup OR "state of emergency" OR clash OR strike)',
   },
-  // Added 2026-09-09, full-country-coverage audit: Guyana was one of 32
-  // countries with literally zero coverage capability (see
-  // countryCentroids.ts/countryNames.ts additions the same day) — added for
-  // a real, current story: the Guyana-Venezuela Essequibo territorial
+  // Guyana was one of 32 countries with literally zero coverage
+  // capability (see countryCentroids.ts/countryNames.ts) — added for a
+  // real, current story: the Guyana-Venezuela Essequibo territorial
   // dispute, not just completeness.
   {
     category: "political-instability",
     query: "Guyana AND Venezuela AND (Essequibo OR border OR territorial OR troops)",
   },
-  // Added 2026-09-09, found during the same audit: countryNames.ts already
-  // maps several real, active Latin American armed actors (FARC, Sendero
-  // Luminoso, Sinaloa/Jalisco cartels, MS-13, Barrio 18) — enough that this
-  // app already treats cartel/gang conflict as a tracked signal — but no
-  // GDELT query anywhere ever searched for this vocabulary. Same class of
-  // gap as the original South/Central Asia one this whole priority-query
-  // mechanism was built for.
+  // countryNames.ts already maps several real, active Latin American
+  // armed actors (FARC, Sendero Luminoso, Sinaloa/Jalisco cartels, MS-13,
+  // Barrio 18) — enough that this app already treats cartel/gang conflict
+  // as a tracked signal — but no GDELT query searched for this
+  // vocabulary before this.
   {
     category: "political-instability",
     query:
       '"cartel violence" OR "gang violence" OR "Sendero Luminoso" OR FARC OR (Haiti AND gang) OR (Mexico AND cartel) OR (Ecuador AND (gang OR cartel))',
   },
+];
+
+// Kept for any external reference to the old combined shape — always
+// ALWAYS-queries first, matching the priority order they used to run in.
+export const PRIORITY_GDELT_QUERIES: { category: NewsCategory; query: string }[] = [
+  ...PRIORITY_GDELT_ALWAYS,
+  ...PRIORITY_GDELT_ROTATION,
 ];
 
 // CORE categories are on by default and shown as the always-visible top-bar

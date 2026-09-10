@@ -1,7 +1,7 @@
 import { getDb } from "@/db";
 import { events } from "@/db/schema";
 import { inArray } from "drizzle-orm";
-import { CATEGORY_QUERIES, PRIORITY_GDELT_QUERIES, type NewsCategory } from "./categories";
+import { CATEGORY_QUERIES, PRIORITY_GDELT_ALWAYS, PRIORITY_GDELT_ROTATION, type NewsCategory } from "./categories";
 import { fetchGdelt, type RawItem } from "./sources/gdelt";
 import { fetchAllRssFeeds } from "./sources/rss";
 import { fetchUsgsEarthquakes } from "./sources/usgs";
@@ -241,15 +241,33 @@ export async function runIngest(
 
   const [gdelt, rss, usgs, eonet, gdacs, ioda, firms, telegram] = await Promise.all([
     trackFetch("gdelt", async () => {
-      // priorityGdelt runs a fixed extra query set (political-instability/
-      // humanitarian at full frequency, plus the South/Central Asia gap
-      // queries — see categories.ts) instead of picking one category by
-      // rotation. Safe to run all four sequentially here specifically
-      // because this only happens when priorityGdelt's caller (GitHub
-      // Actions, not cron-job.org) isn't bound by the 30s budget the
-      // rotation logic below is sized for.
+      // priorityGdelt runs PRIORITY_GDELT_ALWAYS (political-instability/
+      // humanitarian) every cycle PLUS a rotating chunk of
+      // PRIORITY_GDELT_ROTATION (see categories.ts — designed to grow to
+      // dozens of country/region-specific queries over time without
+      // needing further code changes here). Safe to run several queries
+      // sequentially here specifically because priorityGdelt's caller
+      // (GitHub Actions, not cron-job.org) isn't bound by the 30s budget
+      // the rotation logic below is sized for — but GitHub Actions' own
+      // 6-minute job timeout still caps how many fit per cycle, hence
+      // PRIORITY_GDELT_ROTATION_CHUNK_SIZE rather than running the whole
+      // (unboundedly growing) rotation list every time.
+      const PRIORITY_GDELT_ROTATION_CHUNK_SIZE = 10;
       const queries: [NewsCategory, string][] = priorityGdelt
-        ? PRIORITY_GDELT_QUERIES.map((q) => [q.category, q.query] as [NewsCategory, string])
+        ? [
+            ...PRIORITY_GDELT_ALWAYS.map((q) => [q.category, q.query] as [NewsCategory, string]),
+            ...(() => {
+              const chunkCount = Math.max(
+                1,
+                Math.ceil(PRIORITY_GDELT_ROTATION.length / PRIORITY_GDELT_ROTATION_CHUNK_SIZE),
+              );
+              const chunkIndex = Math.floor(Date.now() / ROTATION_INTERVAL_MS) % chunkCount;
+              return PRIORITY_GDELT_ROTATION.slice(
+                chunkIndex * PRIORITY_GDELT_ROTATION_CHUNK_SIZE,
+                chunkIndex * PRIORITY_GDELT_ROTATION_CHUNK_SIZE + PRIORITY_GDELT_ROTATION_CHUNK_SIZE,
+              ).map((q) => [q.category, q.query] as [NewsCategory, string]);
+            })(),
+          ]
         : (() => {
             const allQueryEntries = Object.entries(CATEGORY_QUERIES) as [
               NewsCategory,
