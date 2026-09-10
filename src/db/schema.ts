@@ -438,17 +438,6 @@ export const classificationArchive = pgTable(
     // this table (kept=false, the negative-label pool a relevance
     // classifier needs) has no embedding anywhere else to reuse.
     embedding: vector("embedding", { dimensions: 768 }),
-    // Shadow-mode native-language classifier (2026-09-10, see
-    // src/lib/nativeIncidentClassifier.ts) — only ever populated for
-    // Telegram rows in a non-English channel where a REAL (translated)
-    // kept/severity decision was also made this same row, so the two can
-    // be compared. Both null means "no shadow opinion was run" (English
-    // channel, or the language has no pattern set) — never treat null as
-    // "shadow classifier said drop." This intentionally never feeds back
-    // into `kept`/`severity` above; see that file's own doc comment for
-    // why a straight cutover isn't safe yet.
-    nativeKept: boolean("native_kept"),
-    nativeSeverity: integer("native_severity"),
   },
   (table) => [
     index("classification_archive_kept_idx").on(table.kept),

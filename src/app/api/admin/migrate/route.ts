@@ -351,11 +351,6 @@ const STATEMENTS = [
     discovered_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
   sql`CREATE INDEX IF NOT EXISTS pending_gdelt_title_discovered_at_idx ON pending_gdelt_title (discovered_at)`,
-  // Shadow-mode native-language classifier (2026-09-10) — see
-  // classificationArchive.nativeKept/nativeSeverity's own doc comment in
-  // schema.ts and src/lib/nativeIncidentClassifier.ts.
-  sql`ALTER TABLE classification_archive ADD COLUMN IF NOT EXISTS native_kept BOOLEAN`,
-  sql`ALTER TABLE classification_archive ADD COLUMN IF NOT EXISTS native_severity INTEGER`,
 ];
 
 export async function GET(req: NextRequest) {

@@ -11,14 +11,6 @@ export interface ClassificationOutcome {
   severity: number;
   category: string | null;
   publishedAt: Date;
-  // Shadow-mode native-language classifier's opinion (see
-  // src/lib/nativeIncidentClassifier.ts) — only ever set by
-  // src/lib/sources/telegram.ts for a non-English row where a real
-  // (translated) decision was also made this same row. Omitted entirely
-  // (not just false/null) by every other caller (GDELT/RSS), which has no
-  // native-language shadow classifier to run.
-  nativeKept?: boolean | null;
-  nativeSeverity?: number | null;
 }
 
 // Best-effort, fire-and-forget from the caller's perspective — archiving

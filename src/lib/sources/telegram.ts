@@ -16,7 +16,6 @@ import {
   expireStalePending,
 } from "../pendingTranslation";
 import { hasLikelyForeignIncidentLanguage } from "../foreignIncidentKeywords";
-import { classifyNative } from "../nativeIncidentClassifier";
 import { byteLength } from "../translate";
 
 // Public-channel scraping via Telegram's own no-auth web preview
@@ -515,13 +514,6 @@ export async function fetchTelegramChannel(
     .map((p, i) => {
       const severity = assessIncidentSeverity(finalExcerpts[i]);
       const kept = isKeptConflictPost(finalExcerpts[i], severity, config.handle);
-      // Shadow-mode only (see src/lib/nativeIncidentClassifier.ts) — run
-      // against the ORIGINAL, pre-translation excerpt so this is a real
-      // test of "could we have decided this without translating," not a
-      // re-check of the same English text isKeptConflictPost just used.
-      // Null for English channels (presstv) or an unrecognized language —
-      // no shadow opinion, never logged as a disagreement.
-      const native = classifyNative(candidateExcerpts[i], config.language);
       archiveOutcomes.push({
         source: `telegram:${config.handle}`,
         url: `https://t.me/${p.id}`,
@@ -531,8 +523,6 @@ export async function fetchTelegramChannel(
         severity: severity ?? 1,
         category: kept ? config.category : null,
         publishedAt: p.publishedAt,
-        nativeKept: native?.kept ?? null,
-        nativeSeverity: native?.severity ?? null,
       });
       if (!kept) return null;
       return toDirectItem(p, finalExcerpts[i], translated, config, severity as number);
@@ -605,9 +595,6 @@ export async function drainPendingTelegramTranslations(): Promise<DirectItem[]> 
     const translatedExcerpt = sanitizeForStorage(result[0]) || row.excerpt;
     const severity = assessIncidentSeverity(translatedExcerpt);
     const kept = isKeptConflictPost(translatedExcerpt, severity, config.handle);
-    // Shadow-mode only — see the live-fetch path above for why this runs
-    // against row.excerpt (original language), not translatedExcerpt.
-    const native = classifyNative(row.excerpt, config.language);
 
     archiveOutcomes.push({
       source: `telegram:${config.handle}`,
@@ -618,8 +605,6 @@ export async function drainPendingTelegramTranslations(): Promise<DirectItem[]> 
       severity: severity ?? 1,
       category: kept ? config.category : null,
       publishedAt: row.publishedAt,
-      nativeKept: native?.kept ?? null,
-      nativeSeverity: native?.severity ?? null,
     });
 
     if (kept) {
