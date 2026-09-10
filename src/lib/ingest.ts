@@ -30,7 +30,6 @@ import { fetchRecentPrimaries, findDuplicateOf, type PrimaryCandidate } from "./
 import { backfillFeedArchiveEmbeddings } from "./embeddingBackfill";
 import { backfillClassificationArchiveEmbeddings } from "./classificationArchiveEmbeddingBackfill";
 import { scoreNewNarrativeItems } from "./narrativeNoveltyScoring";
-import { runClassifierAuditSlice, reviewPendingEvents } from "./classifierAudit";
 import { backfillEventGeocodes } from "./geocodeBackfill";
 
 function sleep(ms: number): Promise<void> {
@@ -704,49 +703,22 @@ export async function runIngest(
   // is raced against its own short deadline the same way withDeadline
   // already guards the GDELT fetch.
   //
-  // embeddingBackfill runs fully in parallel with the other three — it's
-  // a different Gemini model (gemini-embedding, its own separate RPM
-  // quota) so it can't contend with them for rate limit headroom.
-  // reviewPendingEvents, runClassifierAuditSlice, and
-  // backfillEventGeocodes all call the SAME model (gemini-3.5-flash-lite)
-  // though, and real production 429s (2026-09-08, found while answering
-  // the user's "are we within Gemini's capacity" question) showed exactly
-  // this: two independent callers, each individually paced internally,
-  // still stacking enough concurrent requests between them to burst past
-  // the 15 RPM ceiling. Running them sequentially instead — never more
-  // than one in flight at once — closes that gap by construction rather
-  // than hoping their internal pacing happens not to overlap.
-  // reviewPendingEvents goes first since it's the one gating publish
-  // latency; runClassifierAuditSlice and backfillEventGeocodes (both pure
-  // backlog cleanup, neither gating anything user-visible) split the
-  // remaining slice of the same cron-job.org 30s ingest budget.
-  // backfillEventGeocodes goes last, not first, deliberately — it's the
-  // newest of the three (2026-09-09, see geocodeEvents.ts) and least
-  // proven in production; if it ever misbehaves and eats its whole
-  // deadline, that should degrade its own coverage, not steal budget from
-  // the two established passes ahead of it.
-  //
-  // classifierAuditSlice's own 5s->8s (2026-09-10, verified live): this
-  // MUST match SLICE_DEADLINE_MS in classifierAudit.ts exactly — see that
-  // constant's own comment for why 5s was never actually enough (one
-  // round of real concurrent Gemini calls, not a tunable loop budget) and
-  // why 8s, not more, was chosen (matches embeddingBackfill's own proven-
-  // reliable 8s for the same class of external API round-trip). This
-  // grows the chain's nominal total from 18s to 21s, eating back some of
-  // the headroom the translation-retry timeout fix bought the same day —
-  // check cron-job.org's dashboard after this deploys for a recurrence of
-  // that exact 30s-ceiling failure mode before assuming this is settled.
+  // reviewPendingEvents and runClassifierAuditSlice used to run here too
+  // (both call gemini-3.5-flash-lite, same model as backfillEventGeocodes
+  // below) — removed 2026-09-10 on explicit user instruction: real AI
+  // Studio dashboard data showed that model peaking at 490/500 RPD and
+  // 18/15 RPM, so three independent callers all competing for the same
+  // cramped 30s cron-job.org window and the same near-maxed daily budget
+  // was making the one that actually gates credibility (reviewPending
+  // Events) unreliable. Both now have their own dedicated, decoupled
+  // cadence instead — GET /api/admin/review-pending (~every 15min via
+  // GitHub Actions, no 30s ceiling to fight) and the once-daily
+  // /api/admin/audit-classifier floor (severely deprioritized backlog
+  // sweep, see classifierAudit.ts's own comment on runClassifierAudit).
+  // backfillEventGeocodes is left running here unchanged — not in scope
+  // of this rebalance, still the newest/least-proven of the three and
+  // still fine to degrade its own coverage if it eats its own deadline.
   async function runGeminiAuditChain(): Promise<void> {
-    try {
-      await withDeadline(reviewPendingEvents(), 8_000, "pendingEventReview");
-    } catch (err) {
-      errors.push(`pendingEventReview: ${err}`);
-    }
-    try {
-      await withDeadline(runClassifierAuditSlice(), 8_000, "classifierAuditSlice");
-    } catch (err) {
-      errors.push(`classifierAuditSlice: ${err}`);
-    }
     try {
       await withDeadline(backfillEventGeocodes(), 5_000, "eventGeocodeBackfill");
     } catch (err) {

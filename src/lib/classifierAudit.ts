@@ -32,15 +32,18 @@ import { resolveCountryFromText } from "./countryNames";
 // counting words.
 //
 // Coverage is time-budgeted, not count-limited (2026-09-08 user request:
-// "not just a sample, but everything") — runClassifierAuditSlice below
-// pulls and processes batches until either its deadline or the unaudited
-// backlog is exhausted, called from two places: a small slice embedded
-// in every ~15min runIngest cycle (see ingest.ts) for high frequency
-// without needing a more-than-daily Vercel cron (Hobby plan caps custom
-// cron at once/day — the same reason /api/ingest itself rides an
-// external trigger instead of Vercel's own cron), and the standalone
-// GET /api/admin/audit-classifier route (larger budget, for catch-up/
-// on-demand full sweeps) still on its own daily cron as a floor.
+// "not just a sample, but everything") — runAudit below pulls and
+// processes batches until either its deadline or the unaudited backlog
+// is exhausted. This backlog sweep (runClassifierAudit) runs ONLY via
+// GET /api/admin/audit-classifier's own once-daily Vercel cron floor as
+// of 2026-09-10 — it used to also run as a small slice embedded in every
+// ~15min runIngest cycle, but that was removed (severely deprioritized,
+// explicit user instruction) once real AI Studio dashboard data showed
+// the audit model peaking at 490/500 RPD, competing with the actually-
+// credibility-gating reviewPendingEvents for both budget and ingest's
+// cramped 30s window. reviewPendingEvents now has its own dedicated
+// cadence instead — see GET /api/admin/review-pending and
+// .github/workflows/review-pending.yml.
 //
 // This still NEVER writes to classify.ts directly — see the classifier_
 // audit table's own doc comment in schema.ts for the manipulation-surface
@@ -183,26 +186,6 @@ const AUDIT_WINDOW_HOURS = 24;
 // gradually across many ingest cycles rather than needing to finish in
 // one pass, exactly the "over time" pace the user asked for.
 const KEPT_AUDIT_WINDOW_DAYS = 30;
-// The ingest-embedded slice's own time budget. MUST match the outer
-// withDeadline(runClassifierAuditSlice(), ..., "classifierAuditSlice")
-// wrapper in ingest.ts exactly — verified live 2026-09-10 they'd drifted
-// out of sync (8s here vs. 5s there), then verified AGAIN live that 5s
-// alone was never the real fix: ROUND_SPACING_MS's mandatory 10s
-// inter-round sleep means this slice structurally only ever completes
-// ONE round (up to CONCURRENCY real concurrent Gemini calls, for kept
-// AND dropped candidates each) before its own deadline check forces it
-// to stop — so this budget isn't really "how much looping to allow," it
-// IS "how long one real round of Gemini calls is allowed to take," full
-// stop, no slack from the loop structure to hide behind. Confirmed via
-// direct comparison against embeddingBackfill's own 8s budget (same
-// order of magnitude, same kind of external API round-trip), which does
-// NOT show up timing out in the same production error samples that
-// caught this — 5s was simply never enough for a real round, 8s is. Both
-// this constant and ingest.ts's outer wrapper must move together; if
-// this ever needs to change again, check cron-job.org's dashboard
-// afterward for the same 30s-ceiling regression translationRetry caused
-// the same day, since raising this shrinks that headroom back down.
-const SLICE_DEADLINE_MS = 8_000;
 // The standalone route's budget — generous, but leaves real margin
 // inside its 55s maxDuration for the DB round-trips and response
 // serialization around it.
@@ -1095,16 +1078,20 @@ async function runAudit(deadlineAt: number): Promise<ClassifierAuditResult> {
 }
 
 // On-demand / daily-cron full sweep — see GET /api/admin/audit-classifier.
+// 2026-09-10: this backlog QA pass (corrections to already-PUBLISHED
+// items) is deliberately the audit model's lowest-priority consumer,
+// per explicit user instruction — "severely deprioritize the backlog
+// sweep." It used to also run as an 8s slice embedded in every runIngest
+// cycle (runClassifierAuditSlice, now removed) competing with
+// reviewPendingEvents — the pre-publish gate that actually decides
+// what's credible — for the same cramped 30s cron-job.org window AND the
+// same ~500 RPD budget. Real dashboard data (checked live 2026-09-10)
+// showed the audit model peaking at 490/500 RPD and 18/15 RPM — there
+// was no free headroom to give reviewPendingEvents more room without
+// taking it from somewhere, so this is where it comes from: once-daily
+// only now (see vercel.ts), no ingest-embedded slice at all.
 export async function runClassifierAudit(): Promise<ClassifierAuditResult> {
   return runAudit(Date.now() + FULL_AUDIT_DEADLINE_MS);
-}
-
-// Embedded in every runIngest cycle (see ingest.ts) — this, not the daily
-// cron, is what makes the audit run "as frequently as possible" (2026-
-// 09-08 user request): riding ingest's own ~15min external-trigger
-// cadence rather than needing a more-than-daily Vercel cron.
-export async function runClassifierAuditSlice(): Promise<ClassifierAuditResult> {
-  return runAudit(Date.now() + SLICE_DEADLINE_MS);
 }
 
 // The pre-publish gate itself (2026-09-08 user request) — reuses the
@@ -1134,12 +1121,18 @@ interface PendingEventCandidate {
   category: string;
 }
 
-// Own slice budget, separate from and concurrent with (see ingest.ts)
-// the backlog-audit slice — publish latency is more time-sensitive than
-// backlog cleanup, but both share the same order-of-magnitude budget as
-// embeddingBackfill for the same reason (ingest's overall 30s hard
-// external-trigger limit).
-const PENDING_REVIEW_DEADLINE_MS = 8_000;
+// 8s -> 15s (2026-09-10) — this no longer runs embedded in ingest's own
+// cramped 30s cron-job.org budget (see GET /api/admin/review-pending and
+// .github/workflows/review-pending.yml), so it's no longer racing
+// ingest's other steps for the same window. 15s isn't "as big as
+// possible" — it's sized to reliably fit ~2 full rounds (ROUND_SPACING_MS
+// spacing) per invocation at a conservative ~every-15-min cadence,
+// chosen to stay well under the audit model's own ~500 RPD ceiling
+// (peaked at 490/500 checked live 2026-09-10) rather than push against
+// it the way the embedding model's RPD exhaustion did. Re-tune based on
+// real AI Studio dashboard data if this turns out too conservative or
+// too aggressive — don't guess a bigger number without checking.
+const PENDING_REVIEW_DEADLINE_MS = 15_000;
 
 // Safety net: if Gemini review hasn't reached a pending item within this
 // window — API down, rate-limited, no GEMINI_API_KEY configured at all —

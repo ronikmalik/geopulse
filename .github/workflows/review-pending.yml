@@ -1,0 +1,38 @@
+name: Review pending events
+
+# Dedicated cadence for the pre-publish Gemini gate (2026-09-10, explicit
+# user instruction: prioritize reviewPendingEvents over the backlog sweep,
+# give it real leeway, decouple it from ingest's cramped 30s cron-job.org
+# window). Previously this only ran as an 8s slice embedded in every
+# runIngest cycle — see src/app/api/admin/review-pending/route.ts and
+# PENDING_REVIEW_DEADLINE_MS in src/lib/classifierAudit.ts for the full
+# reasoning, especially the real AI Studio RPD/RPM numbers (490/500,
+# 18/15) that ruled out just giving it MORE total daily requests.
+#
+# Offset from ingest.yml's own :04/:19/:34/:49 minutes so the two don't
+# fire in the exact same second — same spacing reasoning as
+# ingest-priority.yml used before it was removed as dead weight.
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  review-pending:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Call /api/admin/review-pending
+        run: |
+          status=$(curl -sS -o /tmp/body.txt -w "%{http_code}" \
+            -X GET "https://geopulse-green.vercel.app/api/admin/review-pending" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          echo "HTTP $status"
+          cat /tmp/body.txt
+          if [ "$status" -ge 300 ]; then
+            echo "review-pending request failed"
+            exit 1
+          fi

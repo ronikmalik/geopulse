@@ -24,15 +24,22 @@ export const config: VercelConfig = {
     // Gemini calls, which /api/ingest's cron-job.org 30s external trigger
     // has no room for. See src/lib/countryBriefs.ts.
     { path: "/api/admin/generate-briefs", schedule: "0 19 * * *" },
-    // Daily full-sweep floor for the Gemini-assisted classifier audit —
-    // NOT the primary mechanism as of 2026-09-08. The real cadence is a
-    // small slice embedded in every runIngest cycle (~15min, riding
-    // cron-job.org's external trigger the same way embeddings/briefs
-    // piggyback on ingest where their budget allows), so coverage
-    // approaches "everything" within the same day rather than waiting
-    // for this once-daily catch-up. Kept as a floor for the same reason
-    // /api/ingest itself keeps a daily Vercel cron on top of its external
-    // trigger. See src/lib/classifierAudit.ts.
+    // Daily full-sweep for the Gemini-assisted classifier BACKLOG audit
+    // (corrections to already-published items) — this is now its ONLY
+    // cadence (2026-09-10, explicit user instruction: severely
+    // deprioritize this relative to the pre-publish gate below). It used
+    // to also run as a small slice embedded in every runIngest cycle;
+    // that was removed once real AI Studio dashboard data showed the
+    // audit model peaking at 490/500 RPD, and this backlog sweep — post-
+    // hoc corrections, not credibility-gating — is the lower-priority of
+    // the two things competing for that budget. See src/lib/
+    // classifierAudit.ts's own comment on runClassifierAudit.
     { path: "/api/admin/audit-classifier", schedule: "0 20 * * *" },
+    // The PRE-PUBLISH Gemini gate (reviewPendingEvents) is NOT here — it
+    // needs sub-daily, "always active" cadence (2026-09-10 user
+    // instruction), which the Hobby plan's once/day cron cap can't give
+    // it. It runs via .github/workflows/review-pending.yml instead
+    // (~every 15min, GitHub Actions has no once-daily limit) — see that
+    // workflow and GET /api/admin/review-pending for the full reasoning.
   ],
 };
