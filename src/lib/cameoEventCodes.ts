@@ -143,8 +143,16 @@ export function buildEventDescription(row: CameoEventRow): { title: string; snip
   } else {
     const verbPhrase = ROOT_VERB_PHRASE[root];
     if (!verbPhrase) return null; // root 09 (Investigate) and others with no reliable severity signal fall through here
-    const object = actor2 ? ` ${actor2}` : "";
-    title = `${subject} ${verbPhrase}${object}${location}`.trim();
+    // These are all genuinely bilateral actions (threaten/mobilize-near/
+    // reduce-relations-with/coerce/attack/fight/mass-violence-against) — a
+    // one-sided "X is fighting" with no named counterparty is exactly the
+    // ambiguous, GDELT-extraction-noise shape live-testing surfaced
+    // (2026-09-10: "Switzerland is fighting in Switzerland", "Portugal is
+    // fighting in Turkey" — both had no Actor2 at all). Unlike root 14
+    // (Protest, handled above), there's no sensible generic stand-in for
+    // an unnamed opponent here, so these are dropped rather than guessed.
+    if (!actor2) return null;
+    title = `${subject} ${verbPhrase} ${actor2}${location}`.trim();
   }
 
   const snippet = `${CAMEO_ROOT_LABELS[root] ?? "Reported development"}: ${title}. Reported via GDELT's structured event stream (GoldsteinScale ${row.goldsteinScale.toFixed(1)}).`;

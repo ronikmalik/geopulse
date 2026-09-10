@@ -349,13 +349,33 @@ const SCOPE_DESCRIPTION = PILLAR_LIST.map((p) => `- ${p.label}: ${p.description}
 // none of a real headline's own signals of genuine significance (no
 // editorial judgment about whether this is actually noteworthy, no
 // corroborating detail beyond the bare action code) — treat it with MORE
-// skepticism than a real headline making the same claim, not less. When in
-// doubt about whether a gdelt-sourced item is a genuinely fresh, material
-// development rather than a routine/recurring structural signal GDELT
-// happens to log constantly (routine military posturing, boilerplate
-// diplomatic friction), flag it rather than assume unstated detail backs it
-// up.
-const GDELT_BULK_GUIDANCE = `Items from source "gdelt" are auto-generated from structured event codes, not real article text — a templated description of a real GDELT-recorded event, not a journalist's judgment that it's newsworthy. Apply MORE scrutiny to these, not less: flag any gdelt item that reads as routine/recurring/low-significance even if it nominally matches an in-scope category, since nothing here has already been through editorial judgment the way a real headline has.`;
+// skepticism than a real headline making the same claim, not less.
+//
+// The specific failure patterns below are from live-testing gdeltBulk.ts
+// against real production data (2026-09-10), not theoretical — GDELT's own
+// automated NLP/CAMEO extraction has a documented, real false-positive rate
+// this app's original narrow-search-query design existed partly to avoid,
+// and bulk ingestion reintroduces that noise directly. Two rounds of
+// deterministic tightening in gdeltBulk.ts/cameoEventCodes.ts (requiring a
+// real actor-affiliation code, then requiring a genuine second party) each
+// measurably cut the noise but didn't eliminate it — the remaining pattern
+// (confirmed via a second live test after both fixes) is GDELT tagging
+// generic INSTITUTIONAL nouns with a real country/political-affiliation
+// code simply because they're geographically associated with one, not
+// because they're a real political/military actor: "University attacks
+// United States", "Professor is fighting United States", "Utah is fighting
+// University in Iran", "Authorities is fighting Hartford" all cleared every
+// deterministic filter this app has, live. Distinguishing a genuine
+// government/military/rebel actor from a university/hospital/chamber-of-
+// commerce/legislature/generic-role noun that merely carries a country code
+// would need GDELT's Actor Type Code taxonomy cross-referenced against
+// verified reference data this app doesn't have confirmed yet — rather than
+// guess at that mapping and risk being systematically wrong, this is
+// deliberately left to Gemini's judgment: it can read the full synthesized
+// description and tell whether the named parties plausibly represent real
+// political/military actors from the phrasing and context, which no
+// unverified heuristic should attempt blind.
+const GDELT_BULK_GUIDANCE = `Items from source "gdelt" are auto-generated from structured event codes, not real article text — a templated description of a real GDELT-recorded event, not a journalist's judgment that it's newsworthy. Apply MORE scrutiny to these, not less: flag any gdelt item that reads as routine/recurring/low-significance even if it nominally matches an in-scope category, since nothing here has already been through editorial judgment the way a real headline has. Also specifically flag as false positives: events where the two "actors" don't cohere as real parties to an international/political development — this app's own deterministic filters cannot reliably catch a GENERIC INSTITUTION (a university, hospital, chamber of commerce, legislature, court, or an unnamed role like "Professor"/"Authorities"/"Deputy") being mis-cast as a government or military actor just because GDELT tagged it with a country code, so treat any such actor as suspect rather than assume it represents a real state/military/organized-political actor. Also flag: self-referential events (a country's actor supposedly acting against itself or the same location with no distinct second party) and any event whose location and named actors don't plausibly connect. These are signs of GDELT's own automated-extraction noise, not of a real development the wording merely undersells.`;
 
 // These exact phrasings are deliberate, documented exclusions in
 // classify.ts's BENIGN_PATTERNS/NON_EVENT_TITLE_PATTERNS — a state visit,
