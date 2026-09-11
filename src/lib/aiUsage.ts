@@ -24,18 +24,40 @@ export type AiUsageKind = "embedding" | "brief" | "audit" | "geocode";
 // audit itself ever blowing past a safe total, not a tight constraint it's
 // expected to bump into under normal operation.
 //
+// 400 -> 350 (2026-09-11, user request, paired with GEOCODE's bump below —
+// a straight reallocation, the sum stays 465 so the real-quota margin is
+// unchanged). Real daily audit usage has been 118-367 on ordinary days;
+// the one outlier (470 on 2026-09-10) predates a same-day concurrency fix
+// (recordAiUsage moved to per-round instead of end-of-call, since
+// multiple simultaneous invocations were overshooting the check before
+// that), so it's not a clean baseline for what 350 needs to cover going
+// forward. If audit ever does exhaust 350 on a genuinely busy day, that's
+// the existing accepted degrade path, not a new failure mode: non-gdelt
+// pending items still auto-promote unreviewed after
+// PENDING_REVIEW_MAX_AGE_MINUTES regardless, gdelt items wait for the
+// next day's backlog sweep — this caller is already documented as the
+// lowest-priority consumer of the three.
+//
 // BRIEF's cap (15) just formalizes the existing natural ceiling
 // (MAX_COUNTRIES_PER_RUN in countryBriefs.ts, one run/day) as an enforced
 // safety net rather than an incidental one.
 //
-// GEOCODE's cap (50) is the real cut: it previously ran uncapped, once per
-// ~15min ingest cycle (up to 96 calls/day) — the one caller nobody had
-// touched in the earlier audit-priority rebalance. This directly frees the
-// headroom the other two now have.
+// GEOCODE's cap: 50 -> 100 (2026-09-11, user request) — real production
+// showed the flat 50/day cap exhausted by ~9.5 hours into the Pacific day
+// (last successful geocode 16:39 UTC, then nothing for the rest of the
+// day), because backfillEventGeocodes runs once per ~15min ingest cycle
+// (~96-110 cycles/day) and real RSS/Telegram intake keeps a backlog most
+// cycles, so it was spending its unit almost every single cycle. Unlike
+// embedding (which had NO cap at all and needed real adaptive intra-day
+// pacing to fix), 100 sits right at that natural per-cycle ceiling — as
+// long as not literally every cycle needs a call, this should now cover
+// the full day on its own without needing the same hourly-fair-share
+// machinery embedding got. Revisit with real pacing if 100 still front-
+// loads and goes dark before end of day.
 export const GEMINI_LITE_DAILY_CAPS: Record<"audit" | "brief" | "geocode", number> = {
-  audit: 400,
+  audit: 350,
   brief: 15,
-  geocode: 50,
+  geocode: 100,
 };
 
 // Embedding's own daily pacing (2026-09-11, live-caught): unlike the three
