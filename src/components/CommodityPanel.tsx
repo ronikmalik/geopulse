@@ -20,11 +20,10 @@ export default function CommodityPanel({ data }: CommodityPanelProps) {
     <div className="flex flex-col border-t border-red-950/50">
       <div className="p-3">
         <h2 className="mb-1 font-mono text-xs uppercase tracking-[0.2em] text-red-500">
-          Commodities
+          Energy and Commodities
         </h2>
         <p className="mb-3 font-mono text-[10px] text-red-800">
-          Energy (EIA) &amp; precious metals (community FX mirror) — supply-shock and
-          safe-haven barometers
+          Crude oil &amp; natural gas, plus gold/silver — EIA / community FX mirror
         </p>
 
         {commodities.length === 0 && (
