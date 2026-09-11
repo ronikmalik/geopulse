@@ -100,6 +100,23 @@ export async function fetchRealArticleTitle(url: string): Promise<FetchedArticle
   const title = extractTag(html, /<title[^>]*>([\s\S]*?)<\/title>/i);
   if (!title) return null;
 
+  // Reject rolling live-blog pages (2026-09-11, user-caught bug): a URL
+  // like ".../australia-news-live-updates-german-police-foil-hamas-attack-
+  // norway-princess-dies..." resolves to a page whose <title> bundles
+  // several unrelated headlines with semicolons ("German police foil
+  // Hamas attack;Israel says it has killed Hamas commander") because the
+  // outlet's live-blog convention keeps rewriting one <title> tag as the
+  // page updates. GDELT's own country/category tag for the candidate
+  // reflects whichever single event triggered the crawl (here: Germany),
+  // but the fetched title can read like an entirely different story by
+  // the time this runs — there's no single discrete event this row could
+  // accurately represent. Treated as an unusable title, same as a fetch
+  // failure: the candidate stays queued and naturally expires via
+  // expireStalePendingGdeltTitles (24h) rather than ever publishing — a
+  // live-blog's <title> keeps matching this pattern indefinitely, so
+  // retrying it is never going to produce a usable single-story title.
+  if (/\blive\s+(updates?|blog|coverage)\b/i.test(title)) return null;
+
   const description =
     extractTag(html, /<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']*)["']/i) ??
     extractTag(html, /<meta[^>]+content=["']([^"']*)["'][^>]+property=["']og:description["']/i) ??
