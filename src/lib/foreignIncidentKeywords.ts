@@ -44,7 +44,22 @@ const FOREIGN_INCIDENT_PATTERNS: Record<string, RegExp> = {
   // specifically for this channel — additional plausible impact/hit
   // synonyms beyond the one root already verified, since a channel this
   // valued is worth erring further toward over-matching.
-  uk: /удар|атак|вбит|загинул|загибл|поранен|збит|перехоплен|приліт|влучан|влучив|уражен|вибух|обстріл|пошкодж|зруйнован|жертв|загроз|попередж/i,
+  //
+  // 2026-09-10, second pass: "пуск" (launch/launched) added — a real
+  // recall gap a translated-sample review surfaced: kpszsu posts guided-
+  // bomb LAUNCH notifications ("Пуски керованих авіаційних бомб ворожою
+  // тактичною авіацією на Харківщину") that were being silently pre-
+  // filter-dropped in Ukrainian, never even attempted for translation —
+  // despite CONFLICT_ACTION_PATTERN in telegram.ts explicitly recognizing
+  // "missile (launch|fired)" as valid incident language for the exact same
+  // kind of report once translated. "приліт" (arrival/impact) was
+  // considered for removal in the same pass as a likely source of wasted
+  // translations on pure in-transit tracking posts, but that's an
+  // inference, not verified against the actual original text (only the
+  // English output is retained once a post is translated) — kept in place
+  // rather than cut on a guess, consistent with this pattern's own stated
+  // bias (false positives over false negatives).
+  uk: /удар|атак|вбит|загинул|загибл|поранен|збит|перехоплен|приліт|пуск|влучан|влучив|уражен|вибух|обстріл|пошкодж|зруйнован|жертв|загроз|попередж/i,
   // Russian (mod_russia, rybar, wargonzo, medvedev_telegram).
   ru: /удар|атак|убит|погиб|ранен|сбит|перехват|взрыв|обстрел|поврежд|разрушен|жертв|угроз|предупрежд/i,
   // Farsi (iribnews, farsna, defapress_ir, sepah_pasdaran,
