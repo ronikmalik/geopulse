@@ -43,3 +43,8 @@ next-env.d.ts
 
 # personal Claude Code settings (permission overrides, etc.)
 .claude/settings.local.json
+
+# one-off verification scripts (should live in the scratchpad, not here —
+# this is a safety net after one got committed by mistake on 2026-09-10)
+/scratch_*.ts
+/scratch_*.js
