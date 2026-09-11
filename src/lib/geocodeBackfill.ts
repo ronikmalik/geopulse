@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, or, like } from "drizzle-orm";
+import { and, desc, eq, isNull, ne, or, like } from "drizzle-orm";
 import { getDb } from "@/db";
 import { events } from "@/db/schema";
 import { resolveLocationsBatch, GEOCODE_BATCH_SIZE, type GeocodeCandidate } from "./geocodeEvents";
@@ -19,6 +19,19 @@ import { canAffordGeminiLiteCall, recordAiUsage } from "./aiUsage";
 // alone; their rows' geocodedAt simply stays NULL forever, which is
 // harmless since nothing else reads that column.
 const SOURCE_SCOPE = or(like(events.source, "rss:%"), like(events.source, "telegram:%"));
+
+// Excludes already-rejected rows (2026-09-11) — geocoding and review
+// (classifierAudit.ts's reviewPendingEvents) are deliberately decoupled,
+// running on independent schedules with no ordering dependency (this
+// query never reads reviewStatus for anything else, and review never
+// reads lat/lon), so a row can legitimately get geocoded before, during,
+// or after review resolves. But once a row IS known-rejected, geocoding
+// it is pure waste — a rejected event never renders regardless of its
+// coordinates, and the geocode daily cap (50/day, see aiUsage.ts) is
+// scarce enough that spending it on invisible rows is worth skipping.
+// pending/approved rows are unaffected — this only skips the one outcome
+// where the answer is already known to be thrown away.
+const NOT_REJECTED = ne(events.reviewStatus, "rejected");
 
 export interface GeocodeBackfillResult {
   processed: number;
@@ -49,7 +62,7 @@ export async function backfillEventGeocodes(): Promise<GeocodeBackfillResult> {
         country: events.country,
       })
       .from(events)
-      .where(and(isNull(events.geocodedAt), SOURCE_SCOPE))
+      .where(and(isNull(events.geocodedAt), SOURCE_SCOPE, NOT_REJECTED))
       .orderBy(desc(events.id))
       .limit(GEOCODE_BATCH_SIZE);
 
