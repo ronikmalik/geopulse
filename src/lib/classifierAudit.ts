@@ -394,7 +394,8 @@ const COUNTRY_GUIDANCE = `Country attribution: identify the ISO 3166-1 alpha-2 c
 - A person's nationality is not the country at risk unless the event itself happened in that person's home country (e.g. "a Venezuelan man shot by police in Texas" is a US-risk item, not Venezuela).
 - When one country's forces/government act against or target another (a strike, sanctions, an attack), the country at risk is the one being acted upon, not the actor — unless the story is specifically about consequences for the actor itself.
 - A country whose officials, forces, or assets are simply visiting or present elsewhere with no incident occurring is not the country at risk.
-- If you cannot confidently identify a country, use null rather than guessing.`;
+- If you cannot confidently identify a country, use null rather than guessing.
+- Exception: for the EXACT source "telegram:presstv" specifically, never suggest "US" as the country even when the US is the one being acted upon (e.g. "Iran struck a US base") — Iran's own state media claiming to have struck the US is a one-sided, unverified claim that shouldn't move the US's own risk score (user request, 2026-09-10). This is enforced in code regardless of what you suggest, so a "US" suggestion for this source is simply wasted — resolve to Iran or the country where the action physically occurred instead (e.g. "IQ"/"JO" for a strike on a base in Iraq/Jordan), or null.`;
 
 // The recursive-learning loop (2026-09-08 user request: "make the system
 // better each time because we learn more classifications"). Every review
@@ -1390,6 +1391,30 @@ async function applyFinding(
   const db = getDb();
   const effectiveSeverity = overrides?.severity ?? finding.suggestedSeverity;
   const effectiveCountry = overrides?.country ?? finding.suggestedCountry;
+
+  // Hard guard (user request, 2026-09-10): presstv content is never
+  // attributed to the US as the at-risk country, no matter what Gemini
+  // suggests or a reviewer approves — Iran's own state media reporting
+  // "we struck the US" shouldn't be able to move the US's own risk
+  // score/momentum on the strength of Iran's self-reported, one-sided
+  // claim. The normal live-fetch path already can't do this (Telegram
+  // events always use the channel's fixed config.country, "IR" for
+  // presstv, never a dynamically resolved one) — this closes the two
+  // paths that CAN dynamically set country: a country_mismatch
+  // correction, and a false_negative recovery (both below), either of
+  // which could otherwise land on "US" since resolveCountryFromText's own
+  // "the country being acted upon, not the actor" logic would reasonably
+  // read "Iran struck a US base" as US-at-risk. Applies regardless of
+  // whether this is a human/Claude approval or the auto-apply path —
+  // both call this same function. Scoped to presstv specifically, not
+  // Telegram generally — other sources reporting a real US-directed
+  // attack should still be able to attribute it there normally.
+  if (finding.source === "telegram:presstv" && effectiveCountry === "US") {
+    return {
+      applied: false,
+      note: "blocked: presstv content is never attributed to the US as the at-risk country (user request, 2026-09-10) — Iran's own state media claiming to have struck the US shouldn't move the US's own risk score",
+    };
+  }
 
   if (finding.kind === "false_positive") {
     if (!finding.url) return { applied: false, note: "no url on this finding (predates url tracking) — cannot locate the live row" };
