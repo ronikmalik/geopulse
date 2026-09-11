@@ -66,17 +66,23 @@ documented public URL. It is: `gpsjam.org/data/manifest.csv` +
 `{date}-h3_4.csv`, found via worldmonitor.app's public source
 (github.com/koala73/worldmonitor). See `gpsjam.ts`.
 
-**`commodities.ts`** (oil/gas/gold/silver, 2026-09-10) — same always-on
-"headline feature" treatment as `forex.ts`, which it's rendered alongside
-in the Live Wire tab. Two no-key providers: FRED's public `fredgraph.csv`
-export (official, unauthenticated — the same endpoint that backs FRED's
-own embeddable graphs) for daily WTI/Brent/Henry Hub spot prices, and the
-same community currency-API CDN `forex.ts` already uses for RUB/UAH for
-gold/silver (FRED stopped publishing LBMA gold/silver fixes in 2015).
-Yahoo Finance's unofficial chart API and stooq.com's CSV export were both
-tried first and rejected: Yahoo 429'd within a handful of requests from a
-single IP, and stooq now gates its CSV endpoint behind a JS proof-of-work
-challenge — neither is safe to poll from a server on a schedule.
+**`commodities.ts`** (gold/silver, 2026-09-10) — same always-on "headline
+feature" treatment as `forex.ts`, which it's rendered alongside in the
+Live Wire tab. Uses the same community currency-API CDN `forex.ts`
+already uses for RUB/UAH, which carries precious metals as pseudo-
+currencies (XAU, XAG). Originally also carried WTI/Brent/Henry Hub via
+FRED's public `fredgraph.csv` export, but that was dropped 2026-09-11:
+every request timed out specifically from Vercel's serverless runtime
+(confirmed live via `vercel logs`), including after adding realistic
+browser headers and hitting a fresh deployment directly — the same
+request succeeded instantly and repeatedly from a residential IP, which
+points to an IP/ASN-level block on Vercel's outbound range that no
+header can fix. Yahoo Finance's unofficial chart API and stooq.com's CSV
+export were tried before that and rejected too: Yahoo 429'd within a
+handful of requests from a single IP, and stooq now gates its CSV
+endpoint behind a JS proof-of-work challenge. Revisit energy prices via
+a registered-key official source (e.g. EIA's free API, api.eia.gov) if
+that's worth the extra env var.
 
 **Crypto markets, trending GitHub repos, generic satellite tracking
 (CelesTrak), and Eurozone/BIS macro indicators (ECB, Eurostat, BIS) were
