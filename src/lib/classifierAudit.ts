@@ -116,7 +116,18 @@ import { isPressTvInScope } from "./sources/telegram";
 // into code.
 const AUDIT_MODEL = process.env.GEMINI_AUDIT_MODEL || "gemini-3.5-flash-lite";
 const GENERATE_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${AUDIT_MODEL}:generateContent`;
-const REQUEST_TIMEOUT_MS = 20_000;
+// 20s -> 28s (2026-09-11, live-caught): BATCH_SIZE went 6->18 the same day
+// this was still 20s, so a single call's prompt/response tripled in size
+// without its own timeout budget growing to match — production logged an
+// intermittent TimeoutError on generateContent as a result (one batch per
+// hour or so aborted and left pending for the next cycle, per callGeminiJson's
+// "leave pending, retry next cycle" degrade path — never data loss, just
+// avoidable churn). Safe to widen: every caller of callGeminiJson now runs
+// on its own decoupled cadence with a 55s+ maxDuration (see the 2026-09-10
+// rebalance comment on runGeminiAuditChain in ingest.ts — reviewPendingEvents
+// no longer shares ingest's cramped 30s cron-job.org window), so there's no
+// tight ceiling this eats into.
+const REQUEST_TIMEOUT_MS = 28_000;
 
 // How many unaudited rows to pull per DB round-trip — generous since the
 // deadline (not this number) is what actually bounds a run's total work.
