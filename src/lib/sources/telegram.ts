@@ -374,19 +374,47 @@ function isPressTvInScope(excerpt: string): boolean {
   );
 }
 
+// A Ukrainian Air Force-style alert naming a SPECIFIC city as currently
+// under a tracked aerial threat ("over the city! stay in shelter") —
+// user request (2026-09-10), real evidence from kpszsu (24 all-time
+// occurrences sampled, e.g. "Kyiv / Jet UAV over the city! Stay in
+// cover!"). Distinct from both existing patterns: not a confirmed strike
+// (CONFLICT_ACTION_PATTERN), not a state actor vowing future action
+// (DIRECT_THREAT_PATTERN) — the object is directly over a named,
+// populated location right now, meaningfully more acute than ordinary
+// "heading toward X" in-transit tracking, which stays excluded. See
+// foreignIncidentKeywords.ts's "над містом" addition for the matching
+// pre-translation side of this.
+const IMMEDIATE_CITY_THREAT_PATTERN = /over the city|stay in (cover|shelter)/i;
+
 // Used by the live fetch path below — the sole source of kept/dropped
-// decisions now that nothing drains pending_translation anymore.
-function isKeptConflictPost(
+// decisions now that nothing drains pending_translation anymore. Returns
+// the severity to actually store/display, not just a bare boolean — an
+// immediate-city-threat post can qualify even when classify.ts's shared
+// severity scorer (tuned for confirmed strikes/casualties, not live
+// tracking alerts) sees no signal at all, and storing severity 1 on a
+// kept item would misrepresent it as a non-event.
+function evaluateConflictPost(
   excerpt: string,
-  severity: number | null,
+  computedSeverity: number | null,
   handle: string,
-): boolean {
-  const baseKept =
-    severity !== null &&
-    severity >= TELEGRAM_MIN_SEVERITY &&
+): { kept: boolean; severity: number } {
+  const immediateCityThreat = IMMEDIATE_CITY_THREAT_PATTERN.test(excerpt);
+  const meetsActionOrThreatBar =
+    computedSeverity !== null &&
+    computedSeverity >= TELEGRAM_MIN_SEVERITY &&
     (CONFLICT_ACTION_PATTERN.test(excerpt) || DIRECT_THREAT_PATTERN.test(excerpt));
-  if (!baseKept) return false;
-  return handle === "presstv" ? isPressTvInScope(excerpt) : true;
+
+  if (!immediateCityThreat && !meetsActionOrThreatBar) {
+    return { kept: false, severity: computedSeverity ?? 1 };
+  }
+  if (handle === "presstv" && !isPressTvInScope(excerpt)) {
+    return { kept: false, severity: computedSeverity ?? 1 };
+  }
+  return {
+    kept: true,
+    severity: Math.max(computedSeverity ?? 1, immediateCityThreat ? 2 : 1),
+  };
 }
 
 export async function fetchTelegramChannel(
@@ -511,20 +539,20 @@ export async function fetchTelegramChannel(
   // outright", both mean "nothing here looks like an incident."
   const items = candidatePosts
     .map((p, i) => {
-      const severity = assessIncidentSeverity(finalExcerpts[i]);
-      const kept = isKeptConflictPost(finalExcerpts[i], severity, config.handle);
+      const computedSeverity = assessIncidentSeverity(finalExcerpts[i]);
+      const { kept, severity } = evaluateConflictPost(finalExcerpts[i], computedSeverity, config.handle);
       archiveOutcomes.push({
         source: `telegram:${config.handle}`,
         url: `https://t.me/${p.id}`,
         title: finalExcerpts[i].slice(0, 200),
         snippet: finalExcerpts[i],
         kept,
-        severity: severity ?? 1,
+        severity,
         category: kept ? config.category : null,
         publishedAt: p.publishedAt,
       });
       if (!kept) return null;
-      return toDirectItem(p, finalExcerpts[i], translated, config, severity as number);
+      return toDirectItem(p, finalExcerpts[i], translated, config, severity);
     })
     .filter((item): item is DirectItem => item !== null);
 

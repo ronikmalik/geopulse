@@ -59,7 +59,17 @@ const FOREIGN_INCIDENT_PATTERNS: Record<string, RegExp> = {
   // English output is retained once a post is translated) — kept in place
   // rather than cut on a guess, consistent with this pattern's own stated
   // bias (false positives over false negatives).
-  uk: /удар|атак|вбит|загинул|загибл|поранен|збит|перехоплен|приліт|пуск|влучан|влучив|уражен|вибух|обстріл|пошкодж|зруйнован|жертв|загроз|попередж/i,
+  //
+  // 2026-09-10, third pass: "над містом" (over the city) added — kpszsu's
+  // distinct "[city] / Jet UAV over the city! Stay in cover!" alert (24
+  // all-time occurrences sampled), a different signal from ordinary
+  // in-transit tracking: the object is directly over a NAMED city right
+  // now, not just approaching from a distance. See
+  // IMMEDIATE_CITY_THREAT_PATTERN in src/lib/sources/telegram.ts for the
+  // matching English-side change that actually lets this survive the real
+  // kept decision once translated — this pre-filter addition alone only
+  // gets it as far as translation being attempted.
+  uk: /удар|атак|вбит|загинул|загибл|поранен|збит|перехоплен|приліт|пуск|влучан|влучив|уражен|вибух|обстріл|пошкодж|зруйнован|жертв|загроз|попередж|над містом/i,
   // Russian (mod_russia, rybar, wargonzo, medvedev_telegram).
   ru: /удар|атак|убит|погиб|ранен|сбит|перехват|взрыв|обстрел|поврежд|разрушен|жертв|угроз|предупрежд/i,
   // Farsi (iribnews, farsna, defapress_ir, sepah_pasdaran,
