@@ -19,6 +19,27 @@ import { withCache } from "@/lib/layerCache";
 // usually within this or the next ~15min ingest cycle.
 const PRIMARY_ONLY = isNull(events.primaryEventId);
 const APPROVED_ONLY = eq(events.reviewStatus, "approved");
+
+// GDELT backlog filter (2026-09-11 user request): gdeltBulk.ts's
+// DRAIN_BATCH_SIZE/CONCURRENCY fix (100/100) is still working through a
+// multi-thousand-row backlog in pending_gdelt_title — see that table's own
+// doc comment — so a gdelt item approved right now can carry a publishedAt
+// 10+ hours in the past. Interleaving those next to genuinely-fresh
+// headlines made the top of the feed look stuck even while real approvals
+// kept flowing. Scoped to gdelt only; every other source already resolves
+// within minutes of its own publishedAt (verified 2026-09-11), so this is
+// a no-op for them. Deliberately self-obsoleting rather than a flag to
+// remember to remove later: once the backlog is actually drained, no gdelt
+// item will ever again be approved with a publishedAt this old, so this
+// stops excluding anything on its own with no future cleanup step — and if
+// a discovery burst ever outpaces drain capacity again, it quietly
+// protects the feed again without a redeploy.
+const GDELT_BACKLOG_MAX_AGE_MS = 3 * 60 * 60 * 1000;
+const NOT_STALE_GDELT_BACKLOG = sql`(${events.source} != 'gdelt' or ${events.publishedAt} > now() - interval '3 hours')`;
+function isStaleGdeltBacklog(row: { source: string; publishedAt: string | Date }): boolean {
+  return row.source === "gdelt" && new Date(row.publishedAt).getTime() < Date.now() - GDELT_BACKLOG_MAX_AGE_MS;
+}
+
 const withSourceCount = {
   ...getTableColumns(events),
   sourceCount: sql<number>`(select count(*) from ${events} e2 where e2.primary_event_id = ${events.id})`.as(
@@ -121,7 +142,7 @@ export async function GET(req: NextRequest) {
         const recent = await db
           .select(withSourceCount)
           .from(events)
-          .where(and(PRIMARY_ONLY, APPROVED_ONLY))
+          .where(and(PRIMARY_ONLY, APPROVED_ONLY, NOT_STALE_GDELT_BACKLOG))
           .orderBy(desc(events.id))
           .limit(INITIAL_BACKFILL_LIMIT);
         const ordered = recent.reverse();
@@ -206,12 +227,14 @@ export async function GET(req: NextRequest) {
             // on later polls — same as before, just no longer jumping
             // ahead of the row that's blocking them.
             if (sawUnresolvedPending) continue;
-            if (row.reviewStatus === "approved" && !sentIds.has(row.id)) {
+            if (row.reviewStatus === "approved" && !sentIds.has(row.id) && !isStaleGdeltBacklog(row)) {
               send("event", row);
               sentIds.add(row.id);
             }
             // "rejected" rows are silently skipped — never sent, but safe
             // to advance the cursor past since that's a terminal state.
+            // A stale gdelt-backlog row (see NOT_STALE_GDELT_BACKLOG above)
+            // gets the same treatment: approved, but deliberately not sent.
             advanceTo = row.id;
           }
           lastId = advanceTo;
