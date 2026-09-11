@@ -404,6 +404,41 @@ const PRESSTV_AXIS_OF_RESISTANCE_PATTERN =
 const PRESSTV_ANALYSIS_PATTERN =
   /^.{0,10}\b(feature|conversation|analyst|analysis|commentary|opinion|op-ed|explainer|interview)\b\s*[-:]/i;
 
+// User follow-up, same request: catches the unlabeled version of the same
+// problem — a named INDIVIDUAL (not a title/office) quoted making a claim
+// or interpretation, usually an outside commentator rather than a state/
+// military actor reporting its own action. Real example that motivated
+// this: '"US attacks against Iranian oil vessels are an act of
+// desperation": Nick Mottern says Trump's attacks... are an act of
+// desperation amid US weapons shortages...' — full of real conflict
+// vocabulary, but the actual subject is a commentator's opinion about an
+// already-known event, not a fresh development. "[Name] [Name] says/
+// said/tells/argues/contends/believes/claims" with no official title
+// ANYWHERE in the same excerpt is treated as this case; a title anywhere
+// in the text (spokesman, minister, IRGC, government, etc.) exempts it,
+// since the quoted person could be the official even if the title sits
+// elsewhere in the sentence ("IRGC spokesman Ali Hosseini says...").
+// Honest limitation, same as PRESSTV_ANALYSIS_PATTERN above: this can't
+// know who's actually significant without a title cue — a genuine quote
+// from a named leader with no title anywhere nearby could be wrongly
+// excluded. Accepted trade-off given the user's explicit priority here
+// (false positives — a legitimate quote excluded — recoverable via
+// Gemini's false_negative audit pass; false negatives — propaganda
+// slipping through — are the actual thing being guarded against). See
+// classifierAudit.ts's DELIBERATE_EXCLUSIONS for the same distinction
+// restated for Gemini's own judgment on cases this regex can't resolve.
+const PRESSTV_OFFICIAL_TITLE_PATTERN =
+  /spokesman|spokesperson|\bminister\b|ministry|commander|\bgeneral\b|admiral|colonel|\bofficial\b|government|parliament|\bpresident\b|\bleader\b|\birgc\b|foreign ministry|\barmy\b|\bnavy\b|\bforces\b|ambassador|chief of staff|defense/i;
+const PRESSTV_NAMED_INDIVIDUAL_CLAIM_PATTERN =
+  /\b[A-Z][a-z]+ [A-Z][a-z]+\s+(says|said|tells|argues|contends|believes|claims)\b/;
+
+function isPresstvPunditAttribution(excerpt: string): boolean {
+  return (
+    PRESSTV_NAMED_INDIVIDUAL_CLAIM_PATTERN.test(excerpt) &&
+    !PRESSTV_OFFICIAL_TITLE_PATTERN.test(excerpt)
+  );
+}
+
 // Exported so classifierAudit.ts's false_negative auto-apply path can
 // check it too (2026-09-10, real bug found live): Gemini's audit has no
 // concept of a source-specific scope restriction, and auto-applied a
@@ -417,6 +452,7 @@ export function isPressTvInScope(excerpt: string): boolean {
   return (
     !PRESSTV_EXCLUDE_PATTERN.test(excerpt) &&
     !PRESSTV_ANALYSIS_PATTERN.test(excerpt) &&
+    !isPresstvPunditAttribution(excerpt) &&
     PRESSTV_AXIS_OF_RESISTANCE_PATTERN.test(excerpt)
   );
 }
