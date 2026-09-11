@@ -24,40 +24,39 @@ export type AiUsageKind = "embedding" | "brief" | "audit" | "geocode";
 // audit itself ever blowing past a safe total, not a tight constraint it's
 // expected to bump into under normal operation.
 //
-// 400 -> 350 (2026-09-11, user request, paired with GEOCODE's bump below —
-// a straight reallocation, the sum stays 465 so the real-quota margin is
-// unchanged). Real daily audit usage has been 118-367 on ordinary days;
-// the one outlier (470 on 2026-09-10) predates a same-day concurrency fix
-// (recordAiUsage moved to per-round instead of end-of-call, since
-// multiple simultaneous invocations were overshooting the check before
-// that), so it's not a clean baseline for what 350 needs to cover going
-// forward. If audit ever does exhaust 350 on a genuinely busy day, that's
-// the existing accepted degrade path, not a new failure mode: non-gdelt
-// pending items still auto-promote unreviewed after
-// PENDING_REVIEW_MAX_AGE_MINUTES regardless, gdelt items wait for the
-// next day's backlog sweep — this caller is already documented as the
-// lowest-priority consumer of the three.
+// 400 -> 350 -> 285 (2026-09-11, user requests, each paired with an equal
+// bump to GEOCODE below — straight reallocations, the sum stays 465 each
+// time so the real-quota margin is unchanged). Real daily audit usage has
+// been 118-367 on ordinary days; the one outlier (470 on 2026-09-10)
+// predates a same-day concurrency fix (recordAiUsage moved to per-round
+// instead of end-of-call, since multiple simultaneous invocations were
+// overshooting the check before that), so it's not a clean baseline for
+// what 285 needs to cover going forward. If audit ever does exhaust 285
+// on a genuinely busy day, that's the existing accepted degrade path, not
+// a new failure mode: non-gdelt pending items still auto-promote
+// unreviewed after PENDING_REVIEW_MAX_AGE_MINUTES regardless, gdelt items
+// wait for the next day's backlog sweep — this caller is already
+// documented as the lowest-priority consumer of the three.
 //
 // BRIEF's cap (15) just formalizes the existing natural ceiling
 // (MAX_COUNTRIES_PER_RUN in countryBriefs.ts, one run/day) as an enforced
 // safety net rather than an incidental one.
 //
-// GEOCODE's cap: 50 -> 100 (2026-09-11, user request) — real production
-// showed the flat 50/day cap exhausted by ~9.5 hours into the Pacific day
-// (last successful geocode 16:39 UTC, then nothing for the rest of the
-// day), because backfillEventGeocodes runs once per ~15min ingest cycle
-// (~96-110 cycles/day) and real RSS/Telegram intake keeps a backlog most
-// cycles, so it was spending its unit almost every single cycle. Unlike
-// embedding (which had NO cap at all and needed real adaptive intra-day
-// pacing to fix), 100 sits right at that natural per-cycle ceiling — as
-// long as not literally every cycle needs a call, this should now cover
-// the full day on its own without needing the same hourly-fair-share
-// machinery embedding got. Revisit with real pacing if 100 still front-
-// loads and goes dark before end of day.
+// GEOCODE's cap: 50 -> 100 -> 165 (2026-09-11, user requests) — real
+// production showed the original flat 50/day cap exhausted by ~9.5 hours
+// into the Pacific day (last successful geocode 16:39 UTC, then nothing
+// for the rest of the day), because backfillEventGeocodes runs once per
+// ~15min ingest cycle (~96-110 cycles/day) and real RSS/Telegram intake
+// keeps a backlog most cycles, so it was spending its unit almost every
+// single cycle. 165 now exceeds that natural ~96-110/day per-cycle
+// ceiling — meaning at real steady-state demand, this caller should
+// never actually hit this cap at all, the same way BRIEF's cap formalizes
+// a ceiling the caller's own natural behavior already respects. Revisit
+// if real usage ever suggests otherwise.
 export const GEMINI_LITE_DAILY_CAPS: Record<"audit" | "brief" | "geocode", number> = {
-  audit: 350,
+  audit: 285,
   brief: 15,
-  geocode: 100,
+  geocode: 165,
 };
 
 // Embedding's own daily pacing (2026-09-11, live-caught): unlike the three
