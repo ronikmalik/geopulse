@@ -87,12 +87,10 @@ export const LIVE_CHANNELS: Record<string, LiveChannel> = {
 
 export type LiveChannelId = keyof typeof LIVE_CHANNELS;
 
-// Al Jazeera — always-live, globally comprehensive, confirmed working
-// throughout the 2026-09-09 verification sweep. Replaces the old default
-// (Sky News), which is what triggered this whole re-evaluation: it simply
-// doesn't embed, and had been silently broken with no error surfaced
-// anywhere in the app.
-export const DEFAULT_LIVE_CHANNEL: LiveChannelId = "aljazeera";
+// Bloomberg TV — always-live, confirmed working throughout the 2026-09-09
+// verification sweep (see that sweep's own comment above). User request,
+// 2026-09-11: replaces Al Jazeera as the default.
+export const DEFAULT_LIVE_CHANNEL: LiveChannelId = "bloomberg";
 
 // Country (ISO alpha-2) -> broadcaster whose live feed is most likely to
 // actually be covering that country right now. Deliberately broad regional
