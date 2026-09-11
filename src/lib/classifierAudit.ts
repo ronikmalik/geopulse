@@ -867,10 +867,51 @@ function corroboratedCountry(item: DroppedCandidate, suggestedCountry: string | 
   return resolved;
 }
 
+// Auto-apply corroboration for "kept" findings (2026-09-11, user request:
+// "whenever gemini detects a false negative or positive it should
+// automatically be built into our classifier... autonomous" — before
+// this, only false_negative had any auto-apply path at all; false_
+// positive/severity_mismatch/country_mismatch always sat pending no
+// matter what, which is why those queues had 368/241/185 unreviewed
+// findings after one week. Same "Gemini's judgment alone isn't enough"
+// principle as corroboratedCountry above, applied to the other three
+// kinds — each gets its own independent, deterministic check before
+// applyFinding's hard presstv-US guard even gets a chance to run.
+//
+// country_mismatch: mirrors corroboratedCountry's own logic exactly, just
+// against a KeptCandidate (a currently-LIVE row) instead of a
+// DroppedCandidate — resolveCountryFromText must independently agree
+// with Gemini's suggested reassignment.
+function corroboratedCountryReassignment(
+  item: { title: string; snippet: string },
+  suggestedCountry: string,
+): boolean {
+  const resolved = resolveCountryFromText(item.title) ?? resolveCountryFromText(item.snippet);
+  return resolved === suggestedCountry;
+}
+
+// false_positive: the mirror-image bar to AUTO_APPLY_MIN_KEYWORD_SEVERITY
+// — there, a HIGH archived severity (real incident language) corroborates
+// ADDING a dropped item; here, a LOW current severity corroborates
+// REMOVING a kept one (the keyword classifier itself never strongly
+// justified this being here in the first place). item.severity is the
+// row's current LIVE value (see KeptCandidate's own doc comment) — it can
+// reflect a prior severity_mismatch correction, not necessarily the
+// original keyword-derived score, but a low stored severity is still a
+// real, independent-of-Gemini signal either way. A HIGH-severity item
+// (real incident language, possibly Gemini-confirmed via an earlier
+// pass) that Gemini now flags as a false positive is a genuine three-way
+// tension — left pending for human/Claude review rather than silently
+// removed, not auto-applied.
+const AUTO_APPLY_MAX_LIVE_SEVERITY_FOR_REMOVAL = 2;
+
 interface KeptAuditCounts {
   falsePositives: number;
+  falsePositivesAutoApplied: number;
   severityMismatches: number;
+  severityMismatchesAutoApplied: number;
   countryMismatches: number;
+  countryMismatchesAutoApplied: number;
 }
 
 async function processKeptCandidates(
@@ -878,7 +919,14 @@ async function processKeptCandidates(
   apiKey: string,
   deadlineAt: number,
 ): Promise<KeptAuditCounts> {
-  const counts: KeptAuditCounts = { falsePositives: 0, severityMismatches: 0, countryMismatches: 0 };
+  const counts: KeptAuditCounts = {
+    falsePositives: 0,
+    falsePositivesAutoApplied: 0,
+    severityMismatches: 0,
+    severityMismatchesAutoApplied: 0,
+    countryMismatches: 0,
+    countryMismatchesAutoApplied: 0,
+  };
   if (candidates.length === 0) return counts;
 
   // Fetched once per call, not once per batch — lessons don't change
@@ -930,7 +978,17 @@ async function processKeptCandidates(
 
         if (a.validInclusion === false) {
           const findingId = await insertFinding("false_positive", item, reasoning, null, null, null);
-          if (findingId !== null) counts.falsePositives++;
+          if (findingId !== null) {
+            counts.falsePositives++;
+            if (item.severity <= AUTO_APPLY_MAX_LIVE_SEVERITY_FOR_REMOVAL) {
+              const result = await reviewAuditFinding(
+                findingId,
+                "approved",
+                `auto-applied: corroboration-gated — current severity ${item.severity} (<= ${AUTO_APPLY_MAX_LIVE_SEVERITY_FOR_REMOVAL}) never strongly justified inclusion; Gemini's judgment alone was not the basis for this`,
+              );
+              if (result.applied) counts.falsePositivesAutoApplied++;
+            }
+          }
           if (pattern && lesson) await maybeAutoPromote(pattern, lesson, "kept", item.id, item.source, findingId);
           continue; // don't also check severity/country on an item that shouldn't be there
         }
@@ -938,14 +996,38 @@ async function processKeptCandidates(
         const assessedSeverity = clampSeverity(a.severity);
         if (assessedSeverity !== null && Math.abs(assessedSeverity - item.severity) >= SEVERITY_MISMATCH_THRESHOLD) {
           const findingId = await insertFinding("severity_mismatch", item, reasoning, null, assessedSeverity, null);
-          if (findingId !== null) counts.severityMismatches++;
+          if (findingId !== null) {
+            counts.severityMismatches++;
+            // Auto-applied unconditionally: the >= SEVERITY_MISMATCH_THRESHOLD
+            // gate just above IS the corroboration bar here — a trivial 1-point
+            // wobble never even creates a finding, so anything reaching this
+            // point already reflects a real, meaningful disagreement. Lowest
+            // blast radius of the three kinds (a severity dial, not inclusion/
+            // exclusion or country attribution), so no extra gate on top.
+            const result = await reviewAuditFinding(
+              findingId,
+              "approved",
+              `auto-applied: severity gap (${Math.abs(assessedSeverity - item.severity)}) met SEVERITY_MISMATCH_THRESHOLD (${SEVERITY_MISMATCH_THRESHOLD})`,
+            );
+            if (result.applied) counts.severityMismatchesAutoApplied++;
+          }
           if (pattern && lesson) await maybeAutoPromote(pattern, lesson, "kept", item.id, item.source, findingId);
         }
 
         const assessedCountry = validateCountry(a.country);
         if (assessedCountry && assessedCountry !== item.country) {
           const findingId = await insertFinding("country_mismatch", item, reasoning, null, null, assessedCountry);
-          if (findingId !== null) counts.countryMismatches++;
+          if (findingId !== null) {
+            counts.countryMismatches++;
+            if (corroboratedCountryReassignment(item, assessedCountry)) {
+              const result = await reviewAuditFinding(
+                findingId,
+                "approved",
+                `auto-applied: corroboration-gated — country ${assessedCountry} independently confirmed via resolveCountryFromText; Gemini's judgment alone was not the basis for this`,
+              );
+              if (result.applied) counts.countryMismatchesAutoApplied++;
+            }
+          }
           if (pattern && lesson) await maybeAutoPromote(pattern, lesson, "kept", item.id, item.source, findingId);
         }
       }
@@ -1054,21 +1136,33 @@ async function processDroppedCandidates(
 
 export interface ClassifierAuditResult {
   falsePositives: number;
+  // Subsets of each *Mismatches/falsePositives count that were
+  // corroboration-gated auto-applied rather than left as a pending
+  // finding (2026-09-11 — see corroboratedCountryReassignment and
+  // AUTO_APPLY_MAX_LIVE_SEVERITY_FOR_REMOVAL above; severity_mismatch's
+  // own gate is just SEVERITY_MISMATCH_THRESHOLD itself, unconditional
+  // past that).
+  falsePositivesAutoApplied: number;
   falseNegatives: number;
   // Subset of falseNegatives that were corroboration-gated auto-applied
   // rather than left as a pending finding — see corroboratedCountry.
   falseNegativesAutoApplied: number;
   severityMismatches: number;
+  severityMismatchesAutoApplied: number;
   countryMismatches: number;
+  countryMismatchesAutoApplied: number;
   skipped: boolean;
 }
 
 const EMPTY_RESULT: ClassifierAuditResult = {
   falsePositives: 0,
+  falsePositivesAutoApplied: 0,
   falseNegatives: 0,
   falseNegativesAutoApplied: 0,
   severityMismatches: 0,
+  severityMismatchesAutoApplied: 0,
   countryMismatches: 0,
+  countryMismatchesAutoApplied: 0,
   skipped: true,
 };
 
@@ -1108,8 +1202,11 @@ async function runAudit(deadlineAt: number): Promise<ClassifierAuditResult> {
       ]);
 
       totals.falsePositives += keptCounts.falsePositives;
+      totals.falsePositivesAutoApplied += keptCounts.falsePositivesAutoApplied;
       totals.severityMismatches += keptCounts.severityMismatches;
+      totals.severityMismatchesAutoApplied += keptCounts.severityMismatchesAutoApplied;
       totals.countryMismatches += keptCounts.countryMismatches;
+      totals.countryMismatchesAutoApplied += keptCounts.countryMismatchesAutoApplied;
       totals.falseNegatives += droppedCounts.falseNegatives;
       totals.falseNegativesAutoApplied += droppedCounts.falseNegativesAutoApplied;
     }
