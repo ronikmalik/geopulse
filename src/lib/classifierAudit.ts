@@ -121,24 +121,29 @@ const REQUEST_TIMEOUT_MS = 20_000;
 // How many unaudited rows to pull per DB round-trip — generous since the
 // deadline (not this number) is what actually bounds a run's total work.
 const FETCH_LIMIT = 200;
-// 20 -> 10 -> 6 (2026-09-10, verified live both times): the 10 fix was
-// confirmed clean on 2 consecutive ingest runs, but that was against the
-// pre-gdeltBulk candidate volume (~96 candidates/cycle). Once commit
-// 9ac9415 (GDELT rewrite: rate-limited DOC-API search -> unthrottled bulk
-// 15-min event file) went live, candidate volume jumped to ~143-163/cycle
-// and classifierAuditSlice went right back to timing out (8000ms
-// exceeded) on 3 of the next 4 verification runs — the extra upstream
-// translation/classification calls eat more of the shared 15 RPM Gemini
-// budget before the audit slice's own 2 concurrent calls get their turn,
-// so even ONE round (see ROUND_SPACING_MS) is running slower than
-// before. 10 -> 6 mirrors the actual volume ratio (~96/153 ≈ 0.63) rather
-// than guessing; raising SLICE_DEADLINE_MS instead was deliberately not
-// the lever here — cron-job.org's real dashboard (checked live
-// 2026-09-10) already shows a persistent ~40%+ timeout rate on its own
-// 30s ceiling across today, so there is no headroom left to spend on a
-// bigger deadline. If gdeltBulk's candidate volume changes again, this
-// needs re-tuning the same way, not just bumped back up.
-const BATCH_SIZE = 6;
+// 20 -> 10 -> 6 -> 18 (2026-09-11). The 10->6 cut (2026-09-10) was tuned
+// for a since-gone constraint: back then reviewPendingEvents ran as an
+// 8s slice embedded in every ingest cycle, competing with cron-job.org's
+// 30s ceiling and every other Gemini caller in that same cycle. It now
+// runs in its own dedicated route/schedule (see review-pending.yml) with
+// a clean 15s budget of its own — that original cron-job.org pressure no
+// longer applies here at all.
+//
+// Raised 3x same-day the GDELT drain throughput fix (see gdeltBulk.ts)
+// shipped: production showed 26 GDELT items sitting pending at once
+// shortly after, more than one review cycle at BATCH_SIZE=6 could clear
+// before the next drain added more. BATCH_SIZE controls how many
+// candidates go into ONE Gemini call's prompt/response, NOT how many
+// calls get made — CONCURRENCY/ROUND_SPACING_MS (the actual 15 RPM
+// throttle) are unaffected by this number, so raising it adds zero rate-
+// limit pressure. The real ceiling is Gemini's output token budget for
+// the JSON array response (structured output mode, generationConfig.
+// responseMimeType — reliable constrained decoding, not free-text
+// parsing): each item's response is roughly 50-100 tokens, so even 18
+// items/call sits nowhere near typical flash-lite output limits. Input
+// side is even less of a concern — SNIPPET_CHARS=300 x 18 items is a
+// trivial fraction of the model's context window.
+const BATCH_SIZE = 18;
 // Checked live against AI Studio's own Rate Limit dashboard (2026-09-08):
 // gemini-3.5-flash-lite's free-tier cap is 15 RPM, and real production
 // logs showed 429s — 18/15 RPM, bursting past it — from exactly this
