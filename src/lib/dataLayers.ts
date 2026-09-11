@@ -69,7 +69,7 @@ export const DATA_LAYER_DESCRIPTIONS: Record<DataLayerId, string> = {
   gdp: "World Bank — GDP by country. Structural context for how much economic exposure a threat in that country represents.",
   population: "World Bank — population by country. Structural context for how many people a threat in that country could affect.",
   cyber: "CISA KEV — vulnerabilities with confirmed active exploitation, most recent first. Global feed (no country attribution yet) for the Cyber & Technology pillar.",
-  telegram: "The same 9 Telegram channels feeding scored events, filtered to breaking incidents only (not a raw channel firehose) — shown here with full channel attribution as context rather than mapped/scored. See docs/TELEGRAM_SOURCES.md for the filter and the terms-of-service tradeoff this source involves.",
+  telegram: "The same 12 Telegram channels feeding scored events, filtered to breaking incidents only (not a raw channel firehose) — shown here with full channel attribution as context rather than mapped/scored.",
   "gps-jamming":
     "gpsjam.org — aircraft-derived GPS/GNSS interference, attributed to the nearest country/coastline. Jamming clusters concentrate near contested straits and active conflict zones, a Geopolitical & Security signal.",
   "submarine-cables":
