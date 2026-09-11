@@ -66,23 +66,28 @@ documented public URL. It is: `gpsjam.org/data/manifest.csv` +
 `{date}-h3_4.csv`, found via worldmonitor.app's public source
 (github.com/koala73/worldmonitor). See `gpsjam.ts`.
 
-**`commodities.ts`** (gold/silver, 2026-09-10) — same always-on "headline
-feature" treatment as `forex.ts`, which it's rendered alongside in the
-Live Wire tab. Uses the same community currency-API CDN `forex.ts`
-already uses for RUB/UAH, which carries precious metals as pseudo-
-currencies (XAU, XAG). Originally also carried WTI/Brent/Henry Hub via
-FRED's public `fredgraph.csv` export, but that was dropped 2026-09-11:
-every request timed out specifically from Vercel's serverless runtime
-(confirmed live via `vercel logs`), including after adding realistic
-browser headers and hitting a fresh deployment directly — the same
-request succeeded instantly and repeatedly from a residential IP, which
-points to an IP/ASN-level block on Vercel's outbound range that no
+**`commodities.ts`** (gold/silver + WTI/Brent/Henry Hub, 2026-09-10) —
+same always-on "headline feature" treatment as `forex.ts`, which it's
+rendered alongside in the Live Wire tab. Gold/silver come from the same
+community currency-API CDN `forex.ts` already uses for RUB/UAH, which
+carries precious metals as pseudo-currencies (XAU, XAG) — no key
+required. Energy comes from the EIA (U.S. Energy Information
+Administration) v2 API, requiring a free `EIA_API_KEY` (instant
+email signup, no approval wait — https://www.eia.gov/opendata/register.php)
+— same soft-no-op-without-a-key pattern as `firms.ts`'s `FIRMS_MAP_KEY`.
+This replaced FRED's public `fredgraph.csv` export (dropped 2026-09-11):
+every FRED request timed out specifically from Vercel's serverless
+runtime (confirmed live via `vercel logs`), including after adding
+realistic browser headers and hitting a fresh deployment directly — the
+same request succeeded instantly and repeatedly from a residential IP,
+pointing to an IP/ASN-level block on Vercel's outbound range that no
 header can fix. Yahoo Finance's unofficial chart API and stooq.com's CSV
-export were tried before that and rejected too: Yahoo 429'd within a
+export were tried before FRED and rejected too: Yahoo 429'd within a
 handful of requests from a single IP, and stooq now gates its CSV
-endpoint behind a JS proof-of-work challenge. Revisit energy prices via
-a registered-key official source (e.g. EIA's free API, api.eia.gov) if
-that's worth the extra env var.
+endpoint behind a JS proof-of-work challenge. EIA's route/series shape
+was confirmed reachable (clean 403 API_KEY_MISSING JSON, not a
+timeout/404) but has NOT yet been live-verified end-to-end with a real
+key as of 2026-09-11 — worth a real check once `EIA_API_KEY` is set.
 
 **Crypto markets, trending GitHub repos, generic satellite tracking
 (CelesTrak), and Eurozone/BIS macro indicators (ECB, Eurostat, BIS) were

@@ -23,8 +23,8 @@ export default function CommodityPanel({ data }: CommodityPanelProps) {
           Commodities
         </h2>
         <p className="mb-3 font-mono text-[10px] text-red-800">
-          Precious metals (community FX mirror) — safe-haven barometer during conflict
-          and currency stress
+          Energy (EIA) &amp; precious metals (community FX mirror) — supply-shock and
+          safe-haven barometers
         </p>
 
         {commodities.length === 0 && (
