@@ -253,8 +253,20 @@ const CATEGORY_FALLBACK_COUNTRY: Partial<Record<NewsCategory, string>> = {
 // reliable second line of defense for every future case like it. Added as
 // its own alternation rather than folded into the "what happened" branch
 // since "what X means" is a distinct, common analysis-piece construction.
+// [.!?]\s*(who is|why is|...) (2026-09-11, live-caught): the who/why/how
+// branch above only matched at the very START of a title (^), on the
+// assumption this phrasing is always its own standalone headline. A real
+// GDELT hit broke that: "Houthis have seized a crucial Red Sea port. Why
+// is it so significant?" — a genuine breaking-news clause FOLLOWED BY an
+// explainer question tacked onto the same title (a real headline
+// convention some outlets use, not something the original design
+// anticipated). The leading clause meant `^` never matched, and nothing
+// else here catches an explainer question appearing mid-title after
+// sentence-ending punctuation. Same phrase list as the ^-anchored branch,
+// just also matched right after a period/question mark/exclamation point
+// instead of only at position 0.
 const NON_EVENT_TITLE_PATTERNS =
-  /^(what to know|explainer|analysis|opinion|op-ed|q&a|in pictures|in photos|photos:|the backstory|timeline:|explained:|commentary|roundup|special report|deep dive|backgrounder|primer)\b|explainer$|^(who is|who are|why is|why did|why does|how is|how did|how does|what happened|what to make of)\b|:\s*(what to know|what happened|explained|explainer|analysis|q&a|commentary)\b|^what\b.{0,80}\bmeans?\b/i;
+  /^(what to know|explainer|analysis|opinion|op-ed|q&a|in pictures|in photos|photos:|the backstory|timeline:|explained:|commentary|roundup|special report|deep dive|backgrounder|primer)\b|explainer$|^(who is|who are|why is|why did|why does|how is|how did|how does|what happened|what to make of)\b|[.!?]\s*(who is|who are|why is|why did|why does|how is|how did|how does|what happened|what to make of)\b|:\s*(what to know|what happened|explained|explainer|analysis|q&a|commentary)\b|^what\b.{0,80}\bmeans?\b/i;
 
 // GDELT-specific (see classifyGdeltItem below): press releases/advisories
 // from advocacy orgs and media-criticism pieces that argue an outlet got
