@@ -891,6 +891,16 @@ async function processKeptCandidates(
     const results = await Promise.all(
       round.map((batch) => callGeminiJson<RawKeptAssessment>(buildKeptAuditPrompt(batch, lessons), apiKey)),
     );
+    // Recorded immediately, not once at the end with batches.length (fixed
+    // 2026-09-11 — see aiUsage.ts's own history for the bug this caused: a
+    // stale total is why the daily audit cap's check couldn't see this same
+    // call's own in-progress spending across rounds, letting a single
+    // invocation blow past GEMINI_LITE_DAILY_CAPS.audit before the trailing
+    // recordAiUsage ever caught up. This also means canAffordGeminiLiteCall
+    // now sees real up-to-the-round usage, including from a concurrent
+    // caller (processDroppedCandidates/reviewPendingEvents), not a number
+    // that's already stale by the time this call started.
+    await recordAiUsage("audit", round.length);
 
     for (let j = 0; j < round.length; j++) {
       const assessments = results[j];
@@ -938,7 +948,6 @@ async function processKeptCandidates(
     }
   }
 
-  await recordAiUsage("audit", batches.length);
   return counts;
 }
 
@@ -967,6 +976,10 @@ async function processDroppedCandidates(
     const results = await Promise.all(
       round.map((batch) => callGeminiJson<RawDroppedFinding>(buildFalseNegativePrompt(batch, lessons), apiKey)),
     );
+    // Recorded immediately, not once at the end — see processKeptCandidates'
+    // own comment above for why the old batches.length-at-the-end shape let
+    // the daily cap be overshot.
+    await recordAiUsage("audit", round.length);
 
     for (let j = 0; j < round.length; j++) {
       const findings = results[j];
@@ -1030,7 +1043,6 @@ async function processDroppedCandidates(
     }
   }
 
-  await recordAiUsage("audit", batches.length);
   return counts;
 }
 
@@ -1286,6 +1298,12 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
           const results = await Promise.all(
             round.map((batch) => callGeminiJson<RawKeptAssessment>(buildKeptAuditPrompt(batch, lessons), apiKey)),
           );
+          // Recorded immediately, not once at the end of each while-loop
+          // iteration — see processKeptCandidates' own comment for why the
+          // old batches.length-at-the-end shape let the daily cap be
+          // overshot (this caller's own iteration ran multiple rounds
+          // before that trailing call ever caught up).
+          await recordAiUsage("audit", round.length);
 
           for (let j = 0; j < round.length; j++) {
             const assessments = results[j];
@@ -1302,7 +1320,6 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
             }
           }
         }
-        await recordAiUsage("audit", batches.length);
       }
     } catch (err) {
       console.error(`reviewPendingEvents failed: ${err}`);
