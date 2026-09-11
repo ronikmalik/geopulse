@@ -2,6 +2,7 @@ import { and, desc, eq, isNull, or, like } from "drizzle-orm";
 import { getDb } from "@/db";
 import { events } from "@/db/schema";
 import { resolveLocationsBatch, GEOCODE_BATCH_SIZE, type GeocodeCandidate } from "./geocodeEvents";
+import { canAffordGeminiLiteCall, recordAiUsage } from "./aiUsage";
 
 // Decoupled backfill pass — same posture as embeddingBackfill.ts: never
 // block the insert path (ingest.ts inserts every event with
@@ -28,6 +29,16 @@ export async function backfillEventGeocodes(): Promise<GeocodeBackfillResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return { processed: 0, skipped: true };
 
+  // Daily cap check (see aiUsage.ts's GEMINI_LITE_DAILY_CAPS) — this used
+  // to run uncapped, once per ~15min ingest cycle (up to 96 calls/day),
+  // the one gemini-3.5-flash-lite caller left untouched by the earlier
+  // audit-priority rebalance. Checked before the DB query too, not just
+  // before the Gemini call, so a day at cap doesn't even pay for the
+  // query — same "ask first" posture as translationUsage.ts.
+  if (!(await canAffordGeminiLiteCall("geocode"))) {
+    return { processed: 0, skipped: true };
+  }
+
   try {
     const db = getDb();
     const rows = await db
@@ -49,6 +60,9 @@ export async function backfillEventGeocodes(): Promise<GeocodeBackfillResult> {
       .map((r) => ({ id: r.id, title: r.title, snippet: r.summary, country: r.country }));
 
     const resolved = await resolveLocationsBatch(candidates, apiKey);
+    // resolveLocationsBatch no-ops (no real call) when candidates is
+    // empty — only record spend when a call could actually have happened.
+    if (candidates.length > 0) await recordAiUsage("geocode", 1);
 
     // The whole call failed (network/timeout/parse error) — leave every
     // row's geocodedAt untouched so this exact backlog is retried next

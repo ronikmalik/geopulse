@@ -578,7 +578,7 @@ export const aiUsage = pgTable(
   {
     id: serial("id").primaryKey(),
     date: text("date").notNull(), // "YYYY-MM-DD", UTC
-    kind: text("kind").notNull(), // "embedding" | "brief"
+    kind: text("kind").notNull(), // "embedding" | "brief" | "audit" | "geocode"
     count: integer("count").notNull().default(0),
   },
   (table) => [unique("ai_usage_date_kind_unique").on(table.date, table.kind)],

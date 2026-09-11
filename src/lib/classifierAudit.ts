@@ -8,7 +8,7 @@ import {
   events,
   type ClassifierCalibrationRow,
 } from "@/db/schema";
-import { recordAiUsage } from "./aiUsage";
+import { recordAiUsage, canAffordGeminiLiteCall } from "./aiUsage";
 import { PILLAR_LIST } from "./pillars";
 import { deriveFieldsForRecovery } from "./classify";
 import { correlationGroupId } from "./correlation";
@@ -883,6 +883,11 @@ async function processKeptCandidates(
     if (Date.now() > deadlineAt) break; // remainder stays unaudited, picked up next call
     if (i > 0) await sleep(ROUND_SPACING_MS);
     const round = batches.slice(i, i + CONCURRENCY);
+    // Daily cap check (see aiUsage.ts's GEMINI_LITE_DAILY_CAPS) — this is
+    // the once-daily backlog sweep, the lowest-priority of the three
+    // gemini-3.5-flash-lite callers; it's the one that should give way
+    // first if today's shared budget is running low.
+    if (!(await canAffordGeminiLiteCall("audit", round.length))) break;
     const results = await Promise.all(
       round.map((batch) => callGeminiJson<RawKeptAssessment>(buildKeptAuditPrompt(batch, lessons), apiKey)),
     );
@@ -956,6 +961,9 @@ async function processDroppedCandidates(
     if (Date.now() > deadlineAt) break; // remainder stays unaudited, picked up next call
     if (i > 0) await sleep(ROUND_SPACING_MS);
     const round = batches.slice(i, i + CONCURRENCY);
+    // Same daily cap check as processKeptCandidates above — see that
+    // call site's own comment.
+    if (!(await canAffordGeminiLiteCall("audit", round.length))) break;
     const results = await Promise.all(
       round.map((batch) => callGeminiJson<RawDroppedFinding>(buildFalseNegativePrompt(batch, lessons), apiKey)),
     );
@@ -1266,6 +1274,15 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
           if (Date.now() > deadlineAt) break;
           if (i > 0) await sleep(ROUND_SPACING_MS);
           const round = batches.slice(i, i + CONCURRENCY);
+          // Same daily cap as the backlog sweep (see processKeptCandidates)
+          // — this is the priority caller, but it shares the same "audit"
+          // pool; running far more often through the day (~every 15min vs.
+          // once/day) already gives it first claim on the shared budget in
+          // practice, without needing a separate, larger cap of its own.
+          if (!(await canAffordGeminiLiteCall("audit", round.length))) {
+            exhausted = true;
+            break;
+          }
           const results = await Promise.all(
             round.map((batch) => callGeminiJson<RawKeptAssessment>(buildKeptAuditPrompt(batch, lessons), apiKey)),
           );

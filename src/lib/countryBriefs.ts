@@ -2,7 +2,7 @@ import { eq, desc } from "drizzle-orm";
 import { getDb } from "@/db";
 import { countryBriefs } from "@/db/schema";
 import { getCountryRiskEvents, getCountryThreatSummaries } from "./risk";
-import { recordAiUsage } from "./aiUsage";
+import { recordAiUsage, canAffordGeminiLiteCall } from "./aiUsage";
 
 // Daily AI-generated situation briefs per active country — see GET
 // /api/admin/generate-briefs, run once/day by vercel.ts's cron rather
@@ -138,6 +138,15 @@ export async function generateBriefsForActiveCountries(): Promise<GenerateBriefs
         skipped++;
         continue;
       }
+
+      // Daily cap check (see aiUsage.ts's GEMINI_LITE_DAILY_CAPS) — this
+      // was already effectively bounded by MAX_COUNTRIES_PER_RUN/once-a-
+      // day, but that was an incidental ceiling, not an enforced one; this
+      // formalizes it as a real safety net alongside audit/geocode's new
+      // caps. Breaks rather than continues: once today's brief budget is
+      // spent, every remaining country would skip for the same reason, so
+      // there's no point burning the rest of this loop's DB queries.
+      if (!(await canAffordGeminiLiteCall("brief"))) break;
 
       const text = await callGemini(buildPrompt(s.country, top), apiKey);
       if (!text) {
