@@ -450,12 +450,12 @@ export type ClassificationArchiveRow = typeof classificationArchive.$inferSelect
 export type NewClassificationArchiveRow = typeof classificationArchive.$inferInsert;
 
 // A non-English Telegram post that couldn't be translated this ingest
-// cycle — today's character budget was already spent, or the Translate
-// API call itself failed — parked here instead of being silently dropped.
-// See src/lib/pendingTranslation.ts: drained on a later cycle once budget
-// frees up (or the API recovers), oldest first; rows that sit unprocessed
-// past PENDING_TRANSLATION_MAX_AGE_MS are expired without ever being
-// translated, since by then it's no longer "live breaking" content.
+// cycle — today's byte budget was already spent, or the Translate API call
+// itself failed — parked here instead of being silently dropped. See
+// src/lib/pendingTranslation.ts: a post either gets translated the cycle
+// it's discovered, using that day's live budget, or it sits here (2026-09-10,
+// user request — no more automatic drain, no more time-based expiry;
+// removed only once it resolves some other way, or by a future decision).
 export const pendingTranslation = pgTable(
   "pending_translation",
   {

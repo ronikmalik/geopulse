@@ -9,12 +9,7 @@ import {
   getArchivedUrls,
   type ClassificationOutcome,
 } from "../classificationArchive";
-import {
-  enqueuePendingTranslations,
-  getPendingBatch,
-  deletePending,
-  expireStalePending,
-} from "../pendingTranslation";
+import { enqueuePendingTranslations } from "../pendingTranslation";
 import { hasLikelyForeignIncidentLanguage } from "../foreignIncidentKeywords";
 import { byteLength } from "../translate";
 
@@ -379,9 +374,8 @@ function isPressTvInScope(excerpt: string): boolean {
   );
 }
 
-// Shared between the live fetch path below and the pending-translation
-// drain (drainPendingTelegramTranslations) so the two can never silently
-// diverge on what counts as a kept incident.
+// Used by the live fetch path below — the sole source of kept/dropped
+// decisions now that nothing drains pending_translation anymore.
 function isKeptConflictPost(
   excerpt: string,
   severity: number | null,
@@ -480,15 +474,16 @@ export async function fetchTelegramChannel(
       );
       translated = true;
     } else {
-      // Couldn't translate this cycle — today's character budget is
-      // already spent, or the Translate API call itself failed. Rather
-      // than drop live content just because quota happens to be tight
-      // right now (user, 2026-09-05: "dont remove stuff just because we
-      // run out of translation tokens"), park these brand-new posts for
-      // drainPendingTelegramTranslations to retry on a later cycle, once
-      // budget frees up or the API recovers. Only the pre-filtered
-      // candidates get queued — the pre-filtered-out posts above are
-      // already archived, not lost, just never queued in the first place.
+      // Couldn't translate this cycle — today's byte budget is already
+      // spent, or the Translate API call itself failed. Rather than drop
+      // live content just because quota happens to be tight right now
+      // (user, 2026-09-05: "dont remove stuff just because we run out of
+      // translation tokens"), park these brand-new posts — not for a later
+      // retry (2026-09-10: nothing drains this anymore), just preserved
+      // until removeAlreadyResolvedPending notices it resolved some other
+      // way or a future decision is made. Only the pre-filtered candidates
+      // get queued — the pre-filtered-out posts above are already
+      // archived, not lost, just never queued in the first place.
       await enqueuePendingTranslations(
         candidatePosts.map((p, i) => ({
           url: `https://t.me/${p.id}`,
@@ -538,96 +533,10 @@ export async function fetchTelegramChannel(
   return items;
 }
 
-// Companion to the queuing branch above: works through whatever's parked
-// in pending_translation, oldest first, one post at a time — a small
-// per-post batch rather than one big all-or-nothing translateBatch call
-// so a nearly-exhausted daily budget can still afford *some* of the
-// backlog instead of the whole group failing canAfford together (see
-// src/lib/translate.ts). Called once per ingest cycle from ingest.ts,
-// independent of which 3-channel chunk the live rotation is currently on,
-// so backlog doesn't have to wait for its own channel's turn to come back
-// around. Stops at the first failure (budget exhausted, or a real API
-// error) rather than trying every remaining row — if it's budget, later
-// rows would fail too; if it's a transient API error, the rest retry next
-// cycle regardless.
-const MAX_DRAIN_PER_CYCLE = 20;
-
-export async function drainPendingTelegramTranslations(): Promise<DirectItem[]> {
-  await expireStalePending().catch((err) =>
-    console.error(`expireStalePending failed: ${err}`),
-  );
-
-  const pending = await getPendingBatch(MAX_DRAIN_PER_CYCLE).catch(() => []);
-  if (pending.length === 0) return [];
-
-  const configByHandle = new Map(TELEGRAM_CHANNELS.map((c) => [c.handle, c]));
-  const archiveOutcomes: ClassificationOutcome[] = [];
-  const items: DirectItem[] = [];
-  const processedUrls: string[] = [];
-
-  for (const row of pending) {
-    const config = configByHandle.get(row.handle);
-    if (!config) {
-      // Channel was removed from TELEGRAM_CHANNELS since this was queued
-      // — nothing left to reconstruct label/category/country from.
-      processedUrls.push(row.url);
-      continue;
-    }
-
-    // Same pre-translation triage as the live-fetch path above — a post
-    // that sat in the queue is no more likely to contain real incident
-    // language than it was when queued, so check again before spending
-    // budget on it (see foreignIncidentKeywords.ts's own doc comment).
-    if (!hasLikelyForeignIncidentLanguage(row.excerpt, config.language)) {
-      archiveOutcomes.push({
-        source: `telegram:${config.handle}`,
-        url: row.url,
-        title: row.excerpt.slice(0, 200),
-        snippet: row.excerpt,
-        kept: false,
-        severity: 1,
-        category: null,
-        publishedAt: row.publishedAt,
-      });
-      processedUrls.push(row.url);
-      continue;
-    }
-
-    const result = await translateBatch([row.excerpt], config.language).catch(() => null);
-    if (!result) break;
-
-    const translatedExcerpt = sanitizeForStorage(result[0]) || row.excerpt;
-    const severity = assessIncidentSeverity(translatedExcerpt);
-    const kept = isKeptConflictPost(translatedExcerpt, severity, config.handle);
-
-    archiveOutcomes.push({
-      source: `telegram:${config.handle}`,
-      url: row.url,
-      title: translatedExcerpt.slice(0, 200),
-      snippet: translatedExcerpt,
-      kept,
-      severity: severity ?? 1,
-      category: kept ? config.category : null,
-      publishedAt: row.publishedAt,
-    });
-
-    if (kept) {
-      const postId = row.url.slice("https://t.me/".length);
-      const item = toDirectItem(
-        { id: postId, text: row.excerpt, publishedAt: row.publishedAt },
-        translatedExcerpt,
-        true,
-        config,
-        severity as number,
-      );
-      if (item) items.push(item);
-    }
-
-    processedUrls.push(row.url);
-  }
-
-  await archiveClassifications(archiveOutcomes);
-  await deletePending(processedUrls);
-
-  return items;
-}
+// Nothing drains pending_translation for translation purposes anymore
+// (2026-09-10, user request — see enqueuePendingTranslations's own doc
+// comment in pendingTranslation.ts). It's a pure holding pen now: a post
+// either gets translated the cycle it's discovered, using that cycle's
+// live budget, or it sits here untouched until removeAlreadyResolvedPending
+// notices it resolved some other way, or until a future decision is made
+// about what to do with it.

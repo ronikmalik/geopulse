@@ -1,14 +1,17 @@
-import { asc, inArray, lt } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { pendingTranslation, type NewPendingTranslationRow } from "@/db/schema";
 
-// How long a post can sit waiting for translation budget (or a recovering
-// Translate API) before it's no longer meaningfully "live breaking" —
-// dropped unprocessed past this rather than kept forever, since an
-// ever-growing backlog would eventually just be translating old news.
-// See src/lib/sources/telegram.ts.
-export const PENDING_TRANSLATION_MAX_AGE_MS = 48 * 60 * 60_000;
-
+// A non-English Telegram post that couldn't be translated the cycle it was
+// discovered — today's budget was already spent, or the Translate API call
+// itself failed. Parked here and left alone (2026-09-10, user request:
+// stop spending the day's budget re-translating backlog — a post either
+// gets translated the cycle it's discovered, using that day's live
+// budget, or it doesn't, full stop). No automatic drain and, as of the
+// same request, no time-based expiry either — this used to auto-delete
+// anything older than 48h, but the user wants everything kept until they
+// decide what to do with it, NOT silently lost on a timer. The only
+// removal path left is removeAlreadyResolvedPending below.
 export async function enqueuePendingTranslations(
   rows: NewPendingTranslationRow[],
 ): Promise<void> {
@@ -20,41 +23,26 @@ export async function enqueuePendingTranslations(
     .onConflictDoNothing({ target: pendingTranslation.url });
 }
 
-export interface PendingBatchRow {
-  url: string;
-  handle: string;
-  excerpt: string;
-  publishedAt: Date;
-}
-
-// Oldest first — a post that's been waiting longest is closest to
-// PENDING_TRANSLATION_MAX_AGE_MS, so it gets first claim on whatever
-// budget this cycle has.
-export async function getPendingBatch(limit: number): Promise<PendingBatchRow[]> {
+// A queued post can still end up translated some other way — Telegram's
+// web preview keeps re-showing a channel's last ~20 posts on every fetch,
+// so a later ingest cycle's own live-fetch path (not this queue) can
+// independently re-encounter and successfully translate the same post,
+// landing it in classification_archive with a real decision. Once that's
+// happened, the queued copy here is pure duplication of data that already
+// has a home, so it's safe (and the only thing left) to remove it — see
+// enqueuePendingTranslations's own comment for why nothing else deletes
+// from this table anymore. An indexed EXISTS check against
+// classification_archive.url (already unique/indexed) rather than pulling
+// rows into the app to compare, so this stays cheap regardless of how
+// large either table grows.
+export async function removeAlreadyResolvedPending(): Promise<number> {
   const db = getDb();
-  return db
-    .select({
-      url: pendingTranslation.url,
-      handle: pendingTranslation.handle,
-      excerpt: pendingTranslation.excerpt,
-      publishedAt: pendingTranslation.publishedAt,
-    })
-    .from(pendingTranslation)
-    .orderBy(asc(pendingTranslation.discoveredAt))
-    .limit(limit);
-}
-
-export async function deletePending(urls: string[]): Promise<void> {
-  if (urls.length === 0) return;
-  const db = getDb();
-  await db.delete(pendingTranslation).where(inArray(pendingTranslation.url, urls));
-}
-
-// Called once per drain pass, before attempting to translate what's left
-// — silently drops anything too stale to still count as breaking news
-// rather than spending budget translating it.
-export async function expireStalePending(): Promise<void> {
-  const db = getDb();
-  const cutoff = new Date(Date.now() - PENDING_TRANSLATION_MAX_AGE_MS);
-  await db.delete(pendingTranslation).where(lt(pendingTranslation.discoveredAt, cutoff));
+  const result = await db.execute(sql`
+    DELETE FROM pending_translation
+    WHERE EXISTS (
+      SELECT 1 FROM classification_archive
+      WHERE classification_archive.url = pending_translation.url
+    )
+  `);
+  return result.rowCount ?? 0;
 }

@@ -9,11 +9,8 @@ import { fetchNasaEonet } from "./sources/eonet";
 import { fetchGdacsAlerts } from "./sources/gdacs";
 import { fetchIodaOutages } from "./sources/ioda";
 import { fetchFirmsThermalAnomalies } from "./sources/firms";
-import {
-  fetchTelegramChannel,
-  drainPendingTelegramTranslations,
-  TELEGRAM_CHANNELS,
-} from "./sources/telegram";
+import { fetchTelegramChannel, TELEGRAM_CHANNELS } from "./sources/telegram";
+import { removeAlreadyResolvedPending } from "./pendingTranslation";
 import type { DirectItem } from "./sources/direct";
 import {
   classifyByKeywords,
@@ -294,15 +291,14 @@ export async function runIngest(
     // clearly sanction, a deliberate risk the user accepted, so keeping
     // request volume light matters more than usual, not just for timing.
     priorityGdelt ? skippedFetch<DirectItem>("telegram") : trackFetch("telegram", async () => {
-      // Drained first, independent of whichever channel chunk is up this
-      // cycle — a post parked here (see src/lib/pendingTranslation.ts)
-      // has been waiting since a prior cycle couldn't afford or complete
-      // its translation, so it gets first claim on whatever budget this
-      // cycle has rather than waiting for its own channel's rotation turn
-      // to come back around too.
-      const drained = await drainPendingTelegramTranslations().catch((err) => {
-        telegramErrors.push(`telegram(pending-drain): ${err}`);
-        return [];
+      // No more draining pending_translation for a translation attempt
+      // (2026-09-10, user request — see enqueuePendingTranslations's own
+      // doc comment) — today's budget goes only to this cycle's live
+      // fetch below. removeAlreadyResolvedPending is a pure cleanup (no
+      // translation spend): it clears out queued rows that ended up
+      // translated some other way, without ever retrying the rest.
+      await removeAlreadyResolvedPending().catch((err) => {
+        telegramErrors.push(`telegram(pending-cleanup): ${err}`);
       });
 
       const chunkCount = Math.ceil(TELEGRAM_CHANNELS.length / TELEGRAM_CHUNK_SIZE);
@@ -328,12 +324,11 @@ export async function runIngest(
           results.push([]);
         }
       }
-      const combined = [...drained, ...results.flat()];
+      const combined = results.flat();
       // Only treated as a failed cycle if truly nothing came out of it —
-      // a successful drain still counts as "telegram worked this cycle"
-      // even if this cycle's own rotation chunk errored; the per-channel
-      // errors themselves remain visible via telegramErrors regardless
-      // (folded into the top-level errors array below).
+      // the per-channel errors themselves remain visible via
+      // telegramErrors regardless (folded into the top-level errors array
+      // below).
       if (combined.length === 0 && telegramErrors.length > 0) {
         throw new Error(telegramErrors.join("; "));
       }
