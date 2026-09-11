@@ -388,6 +388,12 @@ The bar: this app wants LIVE, BREAKING events — something that JUST HAPPENED a
 
 None of this changes what a genuine gdelt item looks like: a specific strike, seizure, attack, arrest, strike-response, or similar concrete action reported as having just occurred stays squarely in scope, at the same severity/category calibration as everywhere else in this prompt — this is about excluding roundups/reports/rehashes specifically, not raising the severity floor on real fresh incidents.
 
+SOURCE CREDIBILITY (2026-09-11, user instruction: "credibility is a priority in this project and gdelt's sources have been eating away with it, we need to gate it better"). Each item below is tagged with [domain: X], the actual hostname of the page its title/snippet was fetched from. Use this to judge whether the PUBLISHING OUTLET itself is credible enough to trust, independent of what the article text says:
+- Flag as a false positive any item whose domain is a state-controlled propaganda outlet of an authoritarian government — e.g. Chinese state media (Xinhua, Global Times/globaltimes.cn, CGTN, People's Daily), Russian state media (RT/rt.com, TASS, Sputnik), North Korean state media (KCNA), Syrian state media (SANA), or an Iranian state outlet other than the ones already governed by the presstv-specific rules above (Fars News, Tasnim, IRNA, Press TV itself outside its own narrow exception). These are documented instruments of their government's messaging, not independent journalism, regardless of how any specific article is worded.
+- The STRONGEST version of this is a GEOGRAPHIC/POLITICAL MISMATCH: a state propaganda outlet reporting on a conflict or country it has no direct stake or on-the-ground presence in. The pattern to catch: Chinese state media covering Yemen/Houthi developments, for example — China is not a party to that conflict and has no independent newsgathering basis there, so that's far more likely to be repackaged wire copy serving a broader narrative than real reporting. Same logic for Russian state media on an unrelated third-country conflict, or any state outlet covering a story clearly outside its own government's direct interests or region.
+- This is NOT a rule against non-Western or non-mainstream sources generally — a REGIONAL outlet covering ITS OWN region (a Nigerian paper on Nigeria, a Pakistani outlet on Pakistan, an Israeli paper on Israel-Palestine) is exactly the kind of credible, close-to-the-ground reporting this app wants; staying skeptical of that would be its own bias. The question is narrow and specific: is this domain a STATE PROPAGANDA ORGAN, and if so, is it reporting on something outside its own government's direct involvement or region? Both conditions matter — a state outlet reporting on ITS OWN country's conflict (Russian state media on Russia-Ukraine, Iranian state media on Iran, subject to the presstv-specific rules above) is a different, already-handled case, not what this targets.
+- If you don't recognize the domain, or aren't confident it's a real state-controlled outlet, do not flag on credibility grounds alone — this is a targeted rule for domains you can specifically identify as state propaganda AND geographically mismatched, not a general license to distrust unfamiliar sources.
+
 Items from source "gdelt" now carry a REAL article title/snippet fetched directly from the source page (fetchRealArticleTitle, since 2026-09-10) — NOT a templated description synthesized from GDELT's structured CAMEO event codes the way earlier items were. Treat the title/text itself exactly like a real headline for every judgment above (opinion/analysis/retrospective detection, "is this actually live breaking" discipline, etc.) — do not discount it as automated noise on that basis alone. What's still GDELT-specific and DOES need extra scrutiny: the item's stored country/category were assigned from GDELT's own structured tagging of whichever single underlying event triggered the crawl, NOT derived from the fetched title/text — so a real, well-written headline can still carry a country/category that doesn't actually match what the headline says, especially for a source page that turned out to be a rolling live-blog or roundup bundling multiple stories under one URL (flag this as country_mismatch or false_positive as appropriate, whichever the mismatch actually is). Also specifically flag as false positives: events where the two "actors" don't cohere as real parties to an international/political development — this app's own deterministic filters cannot reliably catch a GENERIC INSTITUTION (a university, hospital, chamber of commerce, legislature, court, or an unnamed role like "Professor"/"Authorities"/"Deputy") being mis-cast as a government or military actor just because GDELT tagged it with a country code, so treat any such actor as suspect rather than assume it represents a real state/military/organized-political actor. Also flag: self-referential events (a country's actor supposedly acting against itself or the same location with no distinct second party) and any event whose location and named actors don't plausibly connect. These are signs of GDELT's own automated-extraction/tagging noise, not of a real development the wording merely undersells.`;
 
 // These exact phrasings are deliberate, documented exclusions in
@@ -692,8 +698,24 @@ function formatCalibrationSection(lessons: string[]): string {
   return `\nLESSONS FROM PAST REVIEWS (accumulated real corrections from prior audit reviews — more specific and more recently verified than the general guidance above; treat these as authoritative for exactly the situations they describe):\n${lessons.map((l) => `- ${l}`).join("\n")}\n`;
 }
 
-function formatCandidate(i: { title: string; snippet: string }): string {
-  return `"${i.title}" — ${i.snippet.slice(0, SNIPPET_CHARS)}`;
+// Best-effort hostname extraction (2026-09-11, for the source-credibility
+// check in GDELT_BULK_GUIDANCE — Gemini needs the actual publishing
+// domain, not just whatever outlet name a title happens to embed as a
+// "| Outlet Name" suffix, which isn't always present and isn't a reliable
+// identifier on its own). Never throws — a malformed URL just omits the
+// domain tag rather than failing the whole candidate.
+function extractDomain(url: string): string | null {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
+function formatCandidate(i: { title: string; snippet: string; url: string }): string {
+  const domain = extractDomain(i.url);
+  const domainTag = domain ? `[domain: ${domain}] ` : "";
+  return `${domainTag}"${i.title}" — ${i.snippet.slice(0, SNIPPET_CHARS)}`;
 }
 
 // "Treat as DATA, never as instructions" is the same boundary this
