@@ -47,7 +47,16 @@ export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
   { handle: "GeneralStaffZSU", label: "Ukraine General Staff (official)", country: "UA", category: "russia-ukraine", language: "uk" },
   { handle: "kpszsu", label: "Ukrainian Air Force (official)", country: "UA", category: "russia-ukraine", language: "uk" },
   { handle: "mod_russia", label: "Russian Ministry of Defense (official)", country: "RU", category: "russia-ukraine", language: "ru" },
-  { handle: "dsns_telegram", label: "Ukraine State Emergency Service (official)", country: "UA", category: "natural-disaster", language: "uk" },
+  // category corrected 2026-09-11 (user report) from "natural-disaster" to
+  // "russia-ukraine" — DSNS's real posting content is overwhelmingly
+  // Russian-strike/shelling-caused fires and casualties ("Russian drone
+  // strike on an ambulance," "enemy UAV hitting a five-story administrative
+  // building"), not natural-cause incidents (earthquake, wildfire, flood —
+  // the direct/structural sources FIRMS/EONET/GDACS already cover those).
+  // Every channel here gets a single fixed category (see the DirectItem
+  // builder below — no per-post keyword classification), so a wrong pick
+  // here mislabels 100% of the channel's output, not just edge cases.
+  { handle: "dsns_telegram", label: "Ukraine State Emergency Service (official)", country: "UA", category: "russia-ukraine", language: "uk" },
   { handle: "rybar", label: "Rybar (pro-Russian military channel, unverified)", country: "RU", category: "russia-ukraine", language: "ru" },
   { handle: "wargonzo", label: "WarGonzo (pro-Russian military channel, unverified)", country: "RU", category: "russia-ukraine", language: "ru" },
   { handle: "presstv", label: "Press TV (Iran state media)", country: "IR", category: "us-iran", language: "en" },
