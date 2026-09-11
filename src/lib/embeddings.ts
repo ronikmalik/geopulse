@@ -1,4 +1,4 @@
-import { recordAiUsage } from "./aiUsage";
+import { recordAiUsage, canAffordEmbeddingCalls } from "./aiUsage";
 
 // Gemini embeddings, REST + simple API key — same shape as translate.ts's
 // Google Cloud Translation integration (no OAuth/service account, no
@@ -94,6 +94,22 @@ function sleep(ms: number): Promise<void> {
 export async function embedBatch(texts: string[]): Promise<(number[] | null)[] | null> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || texts.length === 0) return null;
+
+  // Paced courtesy check (2026-09-11, live-caught) — see aiUsage.ts's
+  // EMBEDDING_DAILY_CAP/getEmbeddingBudget doc comment for the incident
+  // this fixes: with no cap at all, a real production day spent its whole
+  // RPD budget by mid-morning Pacific and then 429ed on every attempt for
+  // the rest of the day. Checked once per embedBatch call (both current
+  // callers pass a small fixed-size chunk — see BACKFILL_BATCH_SIZE in
+  // embeddingBackfill.ts/classificationArchiveEmbeddingBackfill.ts — so one
+  // check per call already means one check per chunk in practice) rather
+  // than mid-loop, same "ask before spending, not after" posture as the
+  // quota-exceeded circuit breaker below. Returns null (not an array of
+  // nulls) — "nothing could even be attempted this cycle" is exactly what
+  // this is, the same meaning null already has for no-API-key/empty-input
+  // above, and every existing caller already treats null as "skipped, try
+  // again next cycle."
+  if (!(await canAffordEmbeddingCalls(texts.length))) return null;
 
   const results: (number[] | null)[] = new Array(texts.length).fill(null);
   for (let start = 0; start < texts.length; start += CONCURRENCY) {

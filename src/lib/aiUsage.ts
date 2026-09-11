@@ -38,6 +38,25 @@ export const GEMINI_LITE_DAILY_CAPS: Record<"audit" | "brief" | "geocode", numbe
   geocode: 50,
 };
 
+// Embedding's own daily pacing (2026-09-11, live-caught): unlike the three
+// callers above, "embedding" had no cap at all — embeddingBackfill.ts/
+// classificationArchiveEmbeddingBackfill.ts's own 4+4/cycle sizing assumed
+// spreading ~768/day evenly was enough margin under the confirmed ~1,000
+// RPD ceiling, but real production hit a hard wall less than 11 hours into
+// the Pacific day (1,005 successful calls by ~10:48am Pacific, then 429 on
+// every attempt for the rest of the day) — the two backfills apparently draw more real-world
+// volume per day than that ceiling estimate assumed (a large one-time
+// GDELT/telegram backlog inflates a single day's count well past a steady-
+// state average), so nothing was pacing consumption ACROSS the day the way
+// translationUsage.ts already does for Google Translate. Same fix, same
+// shape: a daily cap (900, a deliberate margin under the confirmed ~1,000
+// RPD figure — cheaper to recalibrate this one constant later against real
+// AI Studio dashboard data than to guess higher and risk the exact same
+// mid-day wall) PLUS an intra-day fair-share so the whole day's budget
+// can't be front-loaded into the first few hours the way a flat daily
+// counter alone would still allow.
+export const EMBEDDING_DAILY_CAP = 900;
+
 // Google's Gemini/AI Studio free-tier RPD quotas reset at midnight
 // PACIFIC time, not UTC (standard, documented Google Cloud/AI Studio
 // behavior) — using a UTC calendar day here meant this module's own
@@ -78,12 +97,16 @@ export async function recordAiUsage(kind: AiUsageKind, count: number): Promise<v
   }
 }
 
-// Read today's count for one gemini-3.5-flash-lite kind. Fails OPEN (0,
-// i.e. "assume nothing spent yet") on a DB error — the real Google-side
-// 429 is still the backstop if this read fails and a caller goes over;
-// this is a courtesy cap to stay well clear of that, not the only thing
-// standing between the app and an overage.
-async function todayCountFor(kind: "audit" | "brief" | "geocode"): Promise<number> {
+// Read today's count for one kind. Fails OPEN (0, i.e. "assume nothing
+// spent yet") on a DB error — the real Google-side 429 is still the
+// backstop if this read fails and a caller goes over; this is a courtesy
+// cap to stay well clear of that, not the only thing standing between the
+// app and an overage. Shared by both the flat gemini-lite caps below and
+// embedding's own adaptive pacing (widened from the narrower "audit" |
+// "brief" | "geocode" union, 2026-09-11 — the underlying query is already
+// generic over AiUsageKind, this was only ever narrowed to match its two
+// original callers).
+async function todayCountFor(kind: AiUsageKind): Promise<number> {
   try {
     const db = getDb();
     const today = todayPacific();
@@ -109,6 +132,56 @@ export async function canAffordGeminiLiteCall(
 ): Promise<boolean> {
   const used = await todayCountFor(kind);
   return used + estimatedCalls <= GEMINI_LITE_DAILY_CAPS[kind];
+}
+
+// Same "remaining pool / remaining time" adaptive idea as
+// translationUsage.ts's getUsageBudget (see that file's own comment for the
+// full reasoning) — one level simpler since embedding's quota is a flat
+// daily RPD count, not a monthly byte pool needing a day-level layer first.
+// A floor of 1 hour's worth keeps embedding available immediately after
+// Pacific midnight rather than blocking until real elapsed time accrues
+// from zero.
+const EMBEDDING_HOURLY_FLOOR_FRACTION = 1 / 24;
+
+export interface EmbeddingBudget {
+  todayUsed: number;
+  remainingToday: number;
+  remainingRightNow: number;
+}
+
+export async function getEmbeddingBudget(): Promise<EmbeddingBudget> {
+  const todayUsed = await todayCountFor("embedding");
+  const remainingToday = Math.max(0, EMBEDDING_DAILY_CAP - todayUsed);
+
+  // Pacific hour:minute, not UTC (this budget's "today" is the Pacific
+  // calendar day — see todayPacific() — so elapsed-time-today has to be
+  // measured against that same clock, not UTC's).
+  const [pacificHour, pacificMinute] = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    hour: "numeric",
+    minute: "numeric",
+    hourCycle: "h23",
+  })
+    .format(new Date())
+    .split(":")
+    .map(Number);
+  const hoursElapsedToday = pacificHour + pacificMinute / 60;
+  const hourlyFloor = EMBEDDING_DAILY_CAP * EMBEDDING_HOURLY_FLOOR_FRACTION;
+  const fairShareByNow = Math.max(hourlyFloor, EMBEDDING_DAILY_CAP * (hoursElapsedToday / 24));
+  const remainingRightNow = Math.max(0, Math.min(remainingToday, Math.floor(fairShareByNow) - todayUsed));
+
+  return { todayUsed, remainingToday, remainingRightNow };
+}
+
+// Checked BEFORE spending a chunk of embedding calls, same "ask first"
+// posture as canAffordGeminiLiteCall/translationUsage.ts's canAfford — a
+// caller past its pace for right now skips the call entirely (soft-
+// degrades to leaving those rows unembedded for a later cycle, same as a
+// real 429 already does) rather than spending the day's whole budget in
+// the first few hours and going dark for the rest of it.
+export async function canAffordEmbeddingCalls(estimatedCalls: number): Promise<boolean> {
+  const budget = await getEmbeddingBudget();
+  return estimatedCalls <= budget.remainingRightNow && estimatedCalls <= budget.remainingToday;
 }
 
 export interface AiUsageSummary {
