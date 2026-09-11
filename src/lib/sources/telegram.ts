@@ -372,6 +372,35 @@ function canAssess(config: TelegramChannelConfig, translated: boolean): boolean 
 const PRESSTV_EXCLUDE_PATTERN =
   /\bgaza\b|\bpalestin(e|ian)s?\b|west bank|\bhamas\b/i;
 
+// Second hard veto (user request, 2026-09-10, "just like for gaza/
+// palestine/israel"): direct Iran-US military conflict — IRGC vs the US
+// Navy, US strikes on Iranian tankers, Iran retaliating against US bases
+// — is presstv's single highest-volume beat, and also the single most
+// heavily wire-covered US-Iran story globally; every mainstream outlet
+// this app's RSS/GDELT sources already pull from covers it from every
+// angle. That's the opposite of the axis-of-resistance theater content
+// (Yemen/Houthi, Iraq/PMF, Lebanon) this file was just widened to admit,
+// which mainstream wire coverage covers far less — presstv's real,
+// distinct value is THAT gap, not re-litigating a story already told
+// everywhere else. Same blunt co-occurrence style as
+// PRESSTV_EXCLUDE_PATTERN above (not attempting to parse who-struck-whom
+// — either direction of this one bilateral story is equally over-covered
+// elsewhere). Deliberately scoped to Iran/IRGC specifically, not the
+// wider axis — a Houthi-vs-US Red Sea strike stays in scope; the user's
+// own framing was specifically about Iran, not the whole network.
+// "\bUS\b" is checked case-SENSITIVELY and separately from the
+// case-insensitive terms below — a case-insensitive \bus\b would also
+// match the common pronoun "us" ("targeting us all"), a real false-
+// positive risk this avoids.
+const IRAN_SIDE_PATTERN = /\biran(ian)?\b|\birgc\b/i;
+const US_SIDE_PATTERN_CI = /\bamerican\b|united states|\bwashington\b|\bpentagon\b|u\.s\./i;
+const US_ABBREVIATION_PATTERN_CS = /\bUS\b/;
+
+function isUsIranBilateralStory(excerpt: string): boolean {
+  const mentionsUs = US_SIDE_PATTERN_CI.test(excerpt) || US_ABBREVIATION_PATTERN_CS.test(excerpt);
+  return IRAN_SIDE_PATTERN.test(excerpt) && mentionsUs;
+}
+
 // Widened 2026-09-10 (user request) from a bare Iran-mention requirement:
 // "if we let presstv cover axis of resistance theater content" — Iran's
 // own state media naturally covers the whole aligned network (Yemen/
@@ -451,6 +480,7 @@ function isPresstvPunditAttribution(excerpt: string): boolean {
 export function isPressTvInScope(excerpt: string): boolean {
   return (
     !PRESSTV_EXCLUDE_PATTERN.test(excerpt) &&
+    !isUsIranBilateralStory(excerpt) &&
     !PRESSTV_ANALYSIS_PATTERN.test(excerpt) &&
     !isPresstvPunditAttribution(excerpt) &&
     PRESSTV_AXIS_OF_RESISTANCE_PATTERN.test(excerpt)
