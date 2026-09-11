@@ -224,6 +224,15 @@ export async function runIngest(
   const ROTATION_INTERVAL_MS = 15 * 60_000;
   const gdeltQueryErrors: string[] = [];
   const GDELT_BULK_TIMEOUT_MS = 20_000;
+  // Deadline for drainPendingGdeltTitles — added 2026-09-11 alongside that
+  // function's own DRAIN_BATCH_SIZE/DRAIN_CONCURRENCY increase (see
+  // gdeltBulk.ts's own comment for the "not much GDELT coverage" bug this
+  // fixes). It never actually had a deadline before this despite an
+  // earlier comment claiming one existed — a real gap, not just missing
+  // documentation. Sized to the drain's own worst case (40 candidates /
+  // 20 concurrency = 2 rounds x articleTitleFetch.ts's 8s cap = 16s) with
+  // a small margin for the DB round-trips before/after.
+  const GDELT_DRAIN_TIMEOUT_MS = 18_000;
 
   // Same rotation cadence as GDELT (ROTATION_INTERVAL_MS) but its own chunk
   // size — 18 channels (as of the 2026-09-04 v2 pass) at 3 per cycle
@@ -255,22 +264,33 @@ export async function runIngest(
     // discoverGdeltCandidates only enqueues candidates that clear GDELT's
     // structural filters, and drainPendingGdeltTitles fetches each one's
     // REAL title from its own page before it can become a real item.
-    // Drained first for the same "oldest-waiting gets first claim on this
-    // cycle's budget" reason as Telegram's drain.
+    //
+    // Run CONCURRENTLY (not drain-then-discover), fixed 2026-09-11: they
+    // touch pending_gdelt_title independently (drain reads/deletes the
+    // oldest rows, discover inserts new ones with onConflictDoNothing) —
+    // nothing requires sequencing them, and running them one after another
+    // let their worst cases STACK (drain's own uncapped worst case, plus
+    // discover's already-deadlined 20s) well past cron-job.org's hard 30s
+    // budget for the whole ingest cycle. Concurrently, the combined worst
+    // case is just the larger of the two deadlines instead of their sum.
     trackFetch("gdelt", async () => {
-      const drained = await drainPendingGdeltTitles().catch((err) => {
-        gdeltQueryErrors.push(`gdelt(title-drain): ${err}`);
-        return [];
-      });
-      // discoverGdeltCandidates never returns display items itself (see its
-      // own doc comment) — only awaited for its enqueue side effect and to
-      // catch its own errors, same "empty result is normal, an error isn't"
-      // distinction the throw below relies on.
-      try {
-        await withDeadline(discoverGdeltCandidates(), GDELT_BULK_TIMEOUT_MS, "gdelt-bulk-discover");
-      } catch (err) {
-        gdeltQueryErrors.push(`gdelt(discover): ${err}`);
-      }
+      const [drained] = await Promise.all([
+        withDeadline(drainPendingGdeltTitles(), GDELT_DRAIN_TIMEOUT_MS, "gdelt-title-drain").catch(
+          (err) => {
+            gdeltQueryErrors.push(`gdelt(title-drain): ${err}`);
+            return [];
+          },
+        ),
+        // discoverGdeltCandidates never returns display items itself (see
+        // its own doc comment) — only awaited for its enqueue side effect
+        // and to catch its own errors, same "empty result is normal, an
+        // error isn't" distinction the throw below relies on.
+        withDeadline(discoverGdeltCandidates(), GDELT_BULK_TIMEOUT_MS, "gdelt-bulk-discover").catch(
+          (err) => {
+            gdeltQueryErrors.push(`gdelt(discover): ${err}`);
+          },
+        ),
+      ]);
       if (drained.length === 0 && gdeltQueryErrors.length > 0) {
         throw new Error(gdeltQueryErrors.join("; "));
       }
