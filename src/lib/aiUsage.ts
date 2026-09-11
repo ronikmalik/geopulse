@@ -24,39 +24,52 @@ export type AiUsageKind = "embedding" | "brief" | "audit" | "geocode";
 // audit itself ever blowing past a safe total, not a tight constraint it's
 // expected to bump into under normal operation.
 //
-// 400 -> 350 -> 285 (2026-09-11, user requests, each paired with an equal
-// bump to GEOCODE below — straight reallocations, the sum stays 465 each
-// time so the real-quota margin is unchanged). Real daily audit usage has
-// been 118-367 on ordinary days; the one outlier (470 on 2026-09-10)
-// predates a same-day concurrency fix (recordAiUsage moved to per-round
-// instead of end-of-call, since multiple simultaneous invocations were
-// overshooting the check before that), so it's not a clean baseline for
-// what 285 needs to cover going forward. If audit ever does exhaust 285
-// on a genuinely busy day, that's the existing accepted degrade path, not
-// a new failure mode: non-gdelt pending items still auto-promote
+// 400 -> 350 -> 285 -> 270 (2026-09-11, user requests, each paired with a
+// bump to GEOCODE or BRIEF below — straight reallocations, the sum stays
+// 465 each time so the real-quota margin is unchanged). Real daily audit
+// usage has been 118-367 on ordinary days; the one outlier (470 on
+// 2026-09-10) predates a same-day concurrency fix (recordAiUsage moved to
+// per-round instead of end-of-call, since multiple simultaneous
+// invocations were overshooting the check before that), so it's not a
+// clean baseline for what 270 needs to cover going forward. If audit ever
+// does exhaust 270 on a genuinely busy day, that's the existing accepted
+// degrade path, not a new failure mode: non-gdelt pending items still auto-promote
 // unreviewed after PENDING_REVIEW_MAX_AGE_MINUTES regardless, gdelt items
 // wait for the next day's backlog sweep — this caller is already
 // documented as the lowest-priority consumer of the three.
 //
-// BRIEF's cap (15) just formalizes the existing natural ceiling
-// (MAX_COUNTRIES_PER_RUN in countryBriefs.ts, one run/day) as an enforced
-// safety net rather than an incidental one.
+// BRIEF's cap: 15 -> 50 (2026-09-11, user request — one call per country,
+// descending pulse/risk-score order, "50 refreshes every day"). Paired
+// with -15 audit / -20 geocode so the sum stays 465, same real-quota
+// margin as every reallocation above. This ONLY works safely because
+// generateBriefsForActiveCountries was restructured the same day to
+// generate exactly ONE country's brief per invocation instead of looping
+// through up to 15 sequentially in one 55s-budgeted call — 50 sequential
+// calls in one invocation would have blown both the wall-clock timeout
+// and the shared 15 RPM ceiling (50 calls in under a minute is 3-4x that
+// limit). Spread across many small invocations instead (see
+// .github/workflows/generate-briefs.yml, ~every 15min, same cadence
+// family as review-pending/ingest) — each one re-ranks every active
+// country by current score descending and generates a brief for the
+// FIRST one that isn't already fresh (REFRESH_INTERVAL_MS), so the ~70+
+// invocations/day naturally work down the ranked list and this cap is
+// what stops it at 50 for the day, not an artificial per-run slice.
 //
-// GEOCODE's cap: 50 -> 100 -> 165 (2026-09-11, user requests) — real
-// production showed the original flat 50/day cap exhausted by ~9.5 hours
-// into the Pacific day (last successful geocode 16:39 UTC, then nothing
-// for the rest of the day), because backfillEventGeocodes runs once per
-// ~15min ingest cycle (~96-110 cycles/day) and real RSS/Telegram intake
-// keeps a backlog most cycles, so it was spending its unit almost every
-// single cycle. 165 now exceeds that natural ~96-110/day per-cycle
-// ceiling — meaning at real steady-state demand, this caller should
-// never actually hit this cap at all, the same way BRIEF's cap formalizes
-// a ceiling the caller's own natural behavior already respects. Revisit
-// if real usage ever suggests otherwise.
+// GEOCODE's cap: 50 -> 100 -> 165 -> 145 (2026-09-11, user requests) —
+// real production showed the original flat 50/day cap exhausted by ~9.5
+// hours into the Pacific day (last successful geocode 16:39 UTC, then
+// nothing for the rest of the day), because backfillEventGeocodes runs
+// once per ~15min ingest cycle (~96-110 cycles/day) and real RSS/
+// Telegram intake keeps a backlog most cycles, so it was spending its
+// unit almost every single cycle. 145 still comfortably exceeds that
+// natural ~96-110/day per-cycle ceiling — meaning at real steady-state
+// demand, this caller should still never actually hit this cap, the same
+// way BRIEF's cap formalizes a ceiling its own natural behavior already
+// respects. Revisit if real usage ever suggests otherwise.
 export const GEMINI_LITE_DAILY_CAPS: Record<"audit" | "brief" | "geocode", number> = {
-  audit: 285,
-  brief: 15,
-  geocode: 165,
+  audit: 270,
+  brief: 50,
+  geocode: 145,
 };
 
 // Embedding's own daily pacing (2026-09-11, live-caught): unlike the three

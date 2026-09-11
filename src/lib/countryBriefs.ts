@@ -4,12 +4,30 @@ import { countryBriefs } from "@/db/schema";
 import { getCountryRiskEvents, getCountryThreatSummaries } from "./risk";
 import { recordAiUsage, canAffordGeminiLiteCall } from "./aiUsage";
 
-// Daily AI-generated situation briefs per active country — see GET
-// /api/admin/generate-briefs, run once/day by vercel.ts's cron rather
-// than piggybacked on the ingest cycle: ingest is bound by cron-job.org's
-// hard 30s external-trigger timeout (see the comment in
-// src/lib/ingest.ts), which has zero room for N sequential LLM calls.
-// This route has the standard 55s admin-route budget instead.
+// AI-generated situation briefs per active country — see GET
+// /api/admin/generate-briefs. NOT piggybacked on the ingest cycle: ingest
+// is bound by cron-job.org's hard 30s external-trigger timeout (see the
+// comment in src/lib/ingest.ts), which has zero room for even one LLM
+// call on top of everything else that cycle already does. This route has
+// the standard 55s admin-route budget instead, and its own dedicated
+// cadence (see .github/workflows/generate-briefs.yml).
+//
+// ONE country per invocation (2026-09-11, user request — "50 refreshes
+// every day," one call per country, descending pulse/risk-score order).
+// Used to loop through up to MAX_COUNTRIES_PER_RUN (15) sequentially in a
+// single call — safe at 15, but 50 sequential calls in one 55s-budgeted
+// invocation would blow both the wall-clock timeout and the 15 RPM real
+// rate limit this model shares with audit/geocode (50 calls in under a
+// minute is 3-4x that ceiling). Restructured instead to generate exactly
+// ONE brief per call and return immediately: re-rank every active country
+// by current score descending, walk down the list, and stop at the FIRST
+// one that isn't already fresh (REFRESH_INTERVAL_MS) and has events to
+// summarize. Called frequently (~every 15min, same cadence family as
+// ingest/review-pending) rather than once/day — each invocation picks up
+// wherever the ranked list currently stands, so ~70+ invocations/day
+// naturally work down the list in descending-score order, and
+// GEMINI_LITE_DAILY_CAPS.brief (50) is what actually stops it for the
+// day, not an artificial per-call slice.
 //
 // Verified live 2026-09-08 against a real key. Two rounds of correction:
 // gemini-2.0-flash (original guess) doesn't exist in the current lineup
@@ -23,19 +41,16 @@ const BRIEF_MODEL = process.env.GEMINI_BRIEF_MODEL || "gemini-3.5-flash-lite";
 const GENERATE_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${BRIEF_MODEL}:generateContent`;
 const REQUEST_TIMEOUT_MS = 20_000;
 
-// Bounds cost and this route's wall-clock time (sequential calls, 55s
-// budget) — not a hard quota, just "how many countries get a fresh brief
-// today." Ranked by current score, so coverage always favors whatever's
-// actually active over blindly rotating through all ~190 countries,
-// most of which have zero events most days anyway (see risk.ts's
-// baseline-row comment).
-const MAX_COUNTRIES_PER_RUN = 15;
 const MAX_EVENTS_IN_PROMPT = 8;
 
 // Skip a country whose most recent brief is still within this window —
-// this runs once/day, so anything under ~20h old is today's brief, not a
-// stale one. Slack under 24h so a slightly-early or slightly-late cron
-// firing doesn't skip a day entirely.
+// this is what makes the once-per-country-per-invocation design above
+// actually converge on "each active country gets refreshed once a day,"
+// not just "the top-ranked country every single cycle": once a country
+// gets a fresh brief, it drops out of eligibility for ~20h, so the NEXT
+// invocation's re-ranking naturally reaches the next-highest-scoring
+// country that still needs one. Slack under 24h so a slightly-early or
+// slightly-late cadence firing doesn't skip a day entirely.
 const REFRESH_INTERVAL_MS = 20 * 60 * 60_000;
 
 const regionNames =
@@ -109,14 +124,15 @@ export async function generateBriefsForActiveCountries(): Promise<GenerateBriefs
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return { generated: 0, skipped: 0 };
 
+  // Checked once, up front, not per-candidate — see this file's own
+  // header comment for why this is what actually stops the day at 50
+  // rather than an artificial slice of the ranked list.
+  if (!(await canAffordGeminiLiteCall("brief"))) return { generated: 0, skipped: 0 };
+
   const db = getDb();
   const summaries = await getCountryThreatSummaries();
-  const active = summaries
-    .filter((s) => s.eventCount > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, MAX_COUNTRIES_PER_RUN);
+  const active = summaries.filter((s) => s.eventCount > 0).sort((a, b) => b.score - a.score);
 
-  let generated = 0;
   let skipped = 0;
 
   for (const s of active) {
@@ -139,15 +155,6 @@ export async function generateBriefsForActiveCountries(): Promise<GenerateBriefs
         continue;
       }
 
-      // Daily cap check (see aiUsage.ts's GEMINI_LITE_DAILY_CAPS) — this
-      // was already effectively bounded by MAX_COUNTRIES_PER_RUN/once-a-
-      // day, but that was an incidental ceiling, not an enforced one; this
-      // formalizes it as a real safety net alongside audit/geocode's new
-      // caps. Breaks rather than continues: once today's brief budget is
-      // spent, every remaining country would skip for the same reason, so
-      // there's no point burning the rest of this loop's DB queries.
-      if (!(await canAffordGeminiLiteCall("brief"))) break;
-
       const text = await callGemini(buildPrompt(s.country, top), apiKey);
       if (!text) {
         skipped++;
@@ -161,14 +168,21 @@ export async function generateBriefsForActiveCountries(): Promise<GenerateBriefs
         model: BRIEF_MODEL,
       });
       await recordAiUsage("brief", 1);
-      generated++;
+      // One per invocation — see this file's own header comment. The
+      // next call (this cadence fires every ~15min) re-ranks and picks up
+      // the next-highest-scoring country that still needs a refresh.
+      return { generated: 1, skipped };
     } catch (err) {
       console.error(`generateCountryBrief(${s.country}) failed: ${err}`);
       skipped++;
     }
   }
 
-  return { generated, skipped };
+  // Walked the whole ranked list without finding anything eligible —
+  // every active country already has a brief under REFRESH_INTERVAL_MS
+  // old, or none have summarizable events. Not an error, just nothing to
+  // do this cycle.
+  return { generated: 0, skipped };
 }
 
 export interface LatestBrief {

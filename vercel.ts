@@ -17,12 +17,13 @@ export const config: VercelConfig = {
     // Daily per-country military aircraft count snapshot, building a real
     // baseline for future surge detection — see src/lib/flightBaseline.ts.
     { path: "/api/admin/snapshot-flights", schedule: "30 18 * * *" },
-    // Daily AI country situation briefs — deliberately after the pulse
-    // snapshot above so it reflects the same day's already-computed
-    // scores, and on its own schedule (not piggybacked on /api/ingest)
-    // since it needs the full 55s admin-route budget for N sequential
-    // Gemini calls, which /api/ingest's cron-job.org 30s external trigger
-    // has no room for. See src/lib/countryBriefs.ts.
+    // Low-tier FLOOR for AI country situation briefs (2026-09-11) — the
+    // real driver is .github/workflows/generate-briefs.yml (~every
+    // 15min, one country per call, same "GitHub Actions for anything
+    // sub-daily" reasoning as ingest/review-pending's own floor comments)
+    // since Vercel's Hobby-tier cron can't go more often than once/day.
+    // This entry just guarantees at least one country gets a fresh brief
+    // if that workflow ever stops firing. See src/lib/countryBriefs.ts.
     { path: "/api/admin/generate-briefs", schedule: "0 19 * * *" },
     // Daily full-sweep for the Gemini-assisted classifier BACKLOG audit
     // (corrections to already-published items) — this is now its ONLY

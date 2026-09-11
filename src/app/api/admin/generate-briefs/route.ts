@@ -4,8 +4,12 @@ import { isCronAuthorized } from "@/lib/cronAuth";
 
 export const maxDuration = 55;
 
-// Daily cron (see vercel.ts) — generates an AI situation brief for each
-// currently-active country. See src/lib/countryBriefs.ts.
+// Frequent cadence (see .github/workflows/generate-briefs.yml, ~every
+// 15min) — generates AI situation brief for exactly ONE active country
+// per call, highest-risk-score-first, skipping anything already fresh.
+// vercel.ts's own once-daily entry is kept as a low-tier floor (same
+// "in case the primary driver ever stops" reasoning as ingest's daily
+// Vercel cron). See src/lib/countryBriefs.ts for the full design.
 export async function GET(req: NextRequest) {
   if (!isCronAuthorized(req)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });

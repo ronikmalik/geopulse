@@ -1,0 +1,36 @@
+name: Generate country briefs
+
+# Frequent cadence for AI country situation briefs (2026-09-11, user
+# request — "50 refreshes every day," one call per country, descending
+# pulse/risk-score order). Used to be a single once/day run looping
+# through up to 15 countries sequentially; restructured the same day to
+# generate exactly ONE country's brief per call (see
+# src/lib/countryBriefs.ts's own header comment for why 50 sequential
+# calls in one invocation isn't safe) and needs a cadence like this one to
+# actually reach 50/day. Offset from ingest.yml's :04/:19/:34/:49 and
+# review-pending.yml's :07/:22/:37/:52 so none of the three fire in the
+# same minute.
+on:
+  schedule:
+    - cron: "10,25,40,55 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  generate-briefs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Call /api/admin/generate-briefs
+        run: |
+          status=$(curl -sS -o /tmp/body.txt -w "%{http_code}" \
+            -X GET "https://geopulse-green.vercel.app/api/admin/generate-briefs" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
+          echo "HTTP $status"
+          cat /tmp/body.txt
+          if [ "$status" -ge 300 ]; then
+            echo "generate-briefs request failed"
+            exit 1
+          fi
