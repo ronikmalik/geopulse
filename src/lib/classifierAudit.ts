@@ -17,6 +17,8 @@ import { archiveFeedItems } from "./feedArchive";
 import { COUNTRY_CENTROIDS } from "./countryCentroids";
 import { resolveCountryFromText } from "./countryNames";
 import { isPressTvInScope } from "./sources/telegram";
+import { callGeminiJson } from "./geminiAuditClient";
+import { runStoryDedupPass, type DedupCandidate } from "./storyDedup";
 
 // Gemini pass over classification_archive, auditing the keyword
 // classifier along three independent dimensions:
@@ -114,21 +116,6 @@ import { isPressTvInScope } from "./sources/telegram";
 // Claude's own recurring monitor cadence makes that call, same judgment
 // already used to promote the presstv-scope and actor-vs-target fixes
 // into code.
-const AUDIT_MODEL = process.env.GEMINI_AUDIT_MODEL || "gemini-3.5-flash-lite";
-const GENERATE_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${AUDIT_MODEL}:generateContent`;
-// 20s -> 28s (2026-09-11, live-caught): BATCH_SIZE went 6->18 the same day
-// this was still 20s, so a single call's prompt/response tripled in size
-// without its own timeout budget growing to match — production logged an
-// intermittent TimeoutError on generateContent as a result (one batch per
-// hour or so aborted and left pending for the next cycle, per callGeminiJson's
-// "leave pending, retry next cycle" degrade path — never data loss, just
-// avoidable churn). Safe to widen: every caller of callGeminiJson now runs
-// on its own decoupled cadence with a 55s+ maxDuration (see the 2026-09-10
-// rebalance comment on runGeminiAuditChain in ingest.ts — reviewPendingEvents
-// no longer shares ingest's cramped 30s cron-job.org window), so there's no
-// tight ceiling this eats into.
-const REQUEST_TIMEOUT_MS = 28_000;
-
 // How many unaudited rows to pull per DB round-trip — generous since the
 // deadline (not this number) is what actually bounds a run's total work.
 const FETCH_LIMIT = 200;
@@ -410,6 +397,7 @@ const DELIBERATE_EXCLUSIONS = `This classifier deliberately EXCLUDES the followi
 - Commentary or analysis attributed to a named INDIVIDUAL who is not a state/military official or spokesperson (a pundit, an author, an outside "analyst") — even when it references a real past event and uses real conflict vocabulary. Example: '"US attacks against Iranian oil vessels are an act of desperation": Nick Mottern says Trump's attacks... are an act of desperation' reports one commentator's OPINION about an already-known event, not a fresh development — the sentence's actual subject is a commentator's interpretation, not a state/military actor doing or threatening something. Contrast with "IRGC spokesman warns..." or "Iran's Foreign Ministry condemned..." — those ARE the relevant actor speaking in an official capacity, and stay in scope. Ask: who is the actual subject of this sentence — a real actor taking or threatening action, or someone's commentary about one?
 - Sports, entertainment, festivals, and other clearly unrelated content
 - General economic, cultural, social, or policy content that is merely topically adjacent to a category above without describing an actual incident/escalation/crisis in that category — e.g. routine economic reporting mentioning sanctions-affected trade, a cultural piece set against a conflict's backdrop, or general domestic politics coverage that happens to touch a pillar's subject matter without describing an actual instability/humanitarian/conflict event. The bar is the same one classify.ts itself was built around: live, breaking, and specific to the category — not everything that could loosely be described as related to a country experiencing conflict or instability.
+- Domestic accidents, crime, and natural mishaps with NO political, military, or organized-armed-group actor involved — a traffic accident, a building fire, a structural collapse, a drowning, a plane crash caused by mechanical failure, are real tragedies but not geopolitical events, no matter how many people were killed or injured. Real user example (2026-09-11) that should NOT have been kept: "12 killed, 20 injured in multi-vehicle crash in Russia" — casualty count and a flashpoint country's name are not enough on their own; this app already has dedicated sources for actual disasters (earthquakes, wildfires, floods), so an accident story reaching you at all is out of scope, not a miss to double-check. Contrast with a helicopter SHOT DOWN, a building deliberately DEMOLISHED in a strike, or a bridge destroyed by SABOTAGE — those involve a real actor taking deliberate action and stay in scope; the test is whether a political/military/organized actor caused it on purpose, not whether the vocabulary (crash, collapse, killed) sounds similar to conflict reporting.
 - The EXACT source "telegram:presstv" (and ONLY that source — no other Telegram channel, including other Iranian state-linked ones like telegram:iribnews, telegram:defapress_ir, telegram:sepah_pasdaran, telegram:Nournews_ir) is scoped to axis-of-resistance conflict content (widened 2026-09-10 from an Iran-only rule, user request): Iran, or Yemen/Houthi, Lebanon/Hezbollah, and Iraq/PMF or other Iran-aligned militias being attacked, attacking, or threatening others. A presstv item about Yemen/Houthi or Iraq/PMF conflict action is now correctly IN scope, not excluded — do not flag it as over-included, and do not flag its ABSENCE as a miss either if it's not there yet, this is a recent change. What still stays OUT of scope for presstv specifically: any Gaza/Palestine/West Bank/Hamas mention at all (user request, 2026-09-06, unchanged), even if Iran or another axis actor is also named. This restriction does NOT apply to any other source: real conflict content from other Iranian-affiliated or state-linked channels about Israel-Palestine, Yemen, Saudi Arabia, Iraq, etc. is normal, in-scope content there — do not invent or assume a similar restriction exists for them. A live audit run (2026-09-08) found Gemini incorrectly over-generalizing this presstv-only rule to other Iranian channels; be precise about which exact source string this applies to.
 - IMPORTANT exception to the bullet above about officials staying in scope, for "telegram:presstv" ONLY (widened 2026-09-11, user request: "remove any (name) says or (name name) says, doesn't matter who it is"): for this one source, ANY named subject's statement/claim/quote is out of scope, INCLUDING officials — "IRGC spokesman warns...", "Iran's Foreign Ministry condemned...", "Khamenei says..." are now all excluded for presstv specifically, not just unofficial pundits. This is enforced in code (isPressTvInScope) regardless of what you suggest, so a false_negative flag on a presstv item matching this pattern is simply wasted — do not recover it. This does NOT apply to any other source: an official's on-the-record statement from RSS or another Telegram channel is normal in-scope content there, unchanged. Ask specifically for presstv: is this reporting that something happened/is happening (in scope), or reporting that someone SAID something about it (out of scope), no matter how authoritative that someone is?`;
 
@@ -795,39 +783,6 @@ function validateCountry(v: unknown): string | null {
   if (typeof v !== "string") return null;
   const code = v.toUpperCase();
   return COUNTRY_CENTROIDS[code] ? code : null;
-}
-
-async function callGeminiJson<T>(prompt: string, apiKey: string): Promise<T[] | null> {
-  let res: Response;
-  try {
-    res = await fetch(`${GENERATE_ENDPOINT}?key=${apiKey}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json" },
-      }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-  } catch (err) {
-    console.error(`Classifier audit request failed: ${err}`);
-    return null;
-  }
-  if (!res.ok) {
-    const errBody = await res.text().catch(() => "");
-    console.error(`Classifier audit fetch failed: ${res.status} ${errBody.slice(0, 200)}`);
-    return null;
-  }
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (typeof text !== "string") return null;
-  try {
-    const parsed = JSON.parse(text);
-    return Array.isArray(parsed) ? parsed : null;
-  } catch (err) {
-    console.error(`Classifier audit JSON parse failed: ${err}`);
-    return null;
-  }
 }
 
 // Returns the new finding's id (so processDroppedCandidates can
@@ -1349,15 +1304,25 @@ async function getPendingEventCandidates(limit: number): Promise<PendingEventCan
   return rows.filter((r): r is PendingEventCandidate => r.country !== null);
 }
 
+interface PendingAssessmentOutcome {
+  status: "approved" | "rejected";
+  // The final country this item now lives under, only set on approval —
+  // added 2026-09-11 so callers doing post-approval work (storyDedup.ts's
+  // country+category-keyed pool lookup) use the ACTUAL stored country,
+  // not the pre-assessment one that may have just been overridden by a
+  // country_mismatch correction above.
+  finalCountry: string | null;
+}
+
 async function applyPendingAssessment(
   item: PendingEventCandidate,
   a: RawKeptAssessment,
-): Promise<"approved" | "rejected"> {
+): Promise<PendingAssessmentOutcome> {
   const db = getDb();
 
   if (a.validInclusion === false) {
     await db.update(events).set({ reviewStatus: "rejected" }).where(eq(events.id, item.id));
-    return "rejected";
+    return { status: "rejected", finalCountry: null };
   }
 
   const severity = clampSeverity(a.severity) ?? item.severity;
@@ -1380,12 +1345,12 @@ async function applyPendingAssessment(
           correlationGroupId: correlationGroupId(assessedCountry, item.category as Category, item.publishedAt),
         })
         .where(eq(events.id, item.id));
-      return "approved";
+      return { status: "approved", finalCountry: assessedCountry };
     }
   }
 
   await db.update(events).set({ reviewStatus: "approved", severity }).where(eq(events.id, item.id));
-  return "approved";
+  return { status: "approved", finalCountry: item.country };
 }
 
 export interface PendingReviewResult {
@@ -1437,6 +1402,11 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
           // before that trailing call ever caught up).
           await recordAiUsage("audit", round.length);
 
+          // Collected across this round's batches so the story-dedup pass
+          // (below) can run ONCE per round in one Gemini call, not once
+          // per batch — same batching discipline as everything else here.
+          const justApproved: DedupCandidate[] = [];
+
           for (let j = 0; j < round.length; j++) {
             const assessments = results[j];
             if (!assessments) continue; // left pending — retried next cycle, or auto-promoted if it goes stale
@@ -1447,9 +1417,42 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
               const item = byId.get(a.id);
               if (!item) continue;
               const outcome = await applyPendingAssessment(item, a);
-              if (outcome === "approved") approved++;
-              else rejected++;
+              if (outcome.status === "approved") {
+                approved++;
+                if (outcome.finalCountry) {
+                  justApproved.push({
+                    id: item.id,
+                    title: item.title,
+                    snippet: item.snippet,
+                    country: outcome.finalCountry,
+                    category: item.category,
+                    publishedAt: item.publishedAt,
+                  });
+                }
+              } else rejected++;
             }
+          }
+
+          // Gemini-assisted story-level dedup (2026-09-11 user request) —
+          // see storyDedup.ts's own header comment for the full reasoning.
+          // Runs after this round's approvals are final (needs each item's
+          // POST-correction country), gated behind the exact same daily
+          // budget check as the round's own audit call — skips cleanly if
+          // today's "audit" cap is already spent rather than competing
+          // with the higher-priority validInclusion/severity/country call
+          // above for it. Also deadline-gated on its own, separately from
+          // the per-round check at the top of this loop: this is one more
+          // up-to-28s call stacked onto a round that already spent up to
+          // 28s on its main call, and skipping it late is free (the item
+          // just stays un-deduped, no data loss) versus risking the whole
+          // route's 55s maxDuration on a call that was never the priority
+          // one to begin with.
+          if (Date.now() < deadlineAt && justApproved.length > 0 && (await canAffordGeminiLiteCall("audit", 1))) {
+            const dedup = await runStoryDedupPass(justApproved, apiKey).catch((err) => {
+              console.error(`runStoryDedupPass failed: ${err}`);
+              return { checked: 0, merged: 0 };
+            });
+            if (dedup.checked > 0) await recordAiUsage("audit", 1);
           }
         }
       }

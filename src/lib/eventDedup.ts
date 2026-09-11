@@ -139,13 +139,21 @@ export interface PrimaryCandidate {
 // country+category within the lookback window — the pool a new item gets
 // compared against. Separate from the matching logic itself so the pure
 // comparison function (findDuplicateOf below) can be tested without a DB.
+//
+// windowMinutes defaults to DEDUP_LOOKBACK_MINUTES (2026-09-11: made
+// configurable, existing callers unaffected) — storyDedup.ts's Gemini-
+// assisted pass reuses this same query with a much wider window (see that
+// file) for a genuinely different question than this function's own
+// 90-minute default answers: this stays the same tight same-wire-story
+// check tuned on 2026-09-05, untouched.
 export async function fetchRecentPrimaries(
   country: string,
   category: string,
   beforeOrAt: Date,
+  windowMinutes: number = DEDUP_LOOKBACK_MINUTES,
 ): Promise<PrimaryCandidate[]> {
   const db = getDb();
-  const since = new Date(beforeOrAt.getTime() - DEDUP_LOOKBACK_MINUTES * 60_000);
+  const since = new Date(beforeOrAt.getTime() - windowMinutes * 60_000);
   const rows = await db
     .select({ id: events.id, title: events.title, summary: events.summary })
     .from(events)

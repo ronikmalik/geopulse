@@ -333,6 +333,37 @@ const DEFINITELY_ONGOING_PATTERNS =
 const RHETORICAL_ARGUMENT_PATTERNS =
   /(is|are) (an? )?outrageous lies?|(is|are) a lie\b|(is|are) lies\b|smacks of hypocrisy|(is|are) (pure |sheer )?hypocrisy|(is|are) (pure |sheer )?propaganda|double standards?|so-called\b/i;
 
+// 2026-09-11 (user report: "12 killed, 20 injured in multi-vehicle crash
+// in Russia -- absolute fluff is making it through"). Root cause: MODERATE_
+// SEVERITY's casualty vocabulary (kill/dead/injured/wounded/casualties) is
+// deliberately generic — it has to be, real conflict reporting uses those
+// exact words constantly — but that means it fires identically on a
+// domestic traffic accident, a building fire, or a natural mishap that
+// merely happens to be datelined in a country this app also tracks for
+// conflict (russia-ukraine's own category matcher is bare "russia", no
+// conflict-specific requirement — see CATEGORY_MATCHERS above). This app
+// already has dedicated structural sources for natural disasters (USGS/
+// EONET/GDACS/FIRMS), so an accident/disaster story reaching this keyword
+// path at all isn't a miss to recover — it's out of scope by definition:
+// not a political, military, or organized-actor event, just a tragedy
+// that happens to share vocabulary with one.
+//
+// Same "only suppresses if nothing else reads as genuinely political/
+// military" carve-out shape as BENIGN_PATTERNS/ONGOING_COVERAGE_PATTERNS
+// above — a real conflict story that HAPPENS to also involve e.g. a
+// helicopter crash (shot down, not a mechanical failure) must still get
+// through, so this is gated on GENUINE_CONFLICT_SIGNAL below rather than
+// suppressing unconditionally. GENUINE_CONFLICT_SIGNAL is deliberately a
+// SEPARATE, narrower allowlist from HIGH_SEVERITY/MODERATE_SEVERITY (which
+// both still include the generic casualty words this exists to exclude)
+// — it only lists vocabulary that's specific to political/military/
+// organized-actor action or a recognized instability/humanitarian crisis,
+// never bare tragedy words alone.
+const ACCIDENT_DISASTER_PATTERNS =
+  /\b(car|vehicle|multi-vehicle|bus|train|truck|traffic|road) (crash|collision|accident|pile-?up|wreck)\b|\bplane crash\b|\bhelicopter crash\b|\bderail(ed|ment|s)?\b|\bcapsiz(ed|es|ing)\b|\bshipwreck\b|\bdrown(ed|ing|s)?\b|\bstampede\b|\b(building|structural) collapse\b|\bgas leak\b|\bhouse fire\b|\bwildfire\b|\b(land|mud)slide\b|\bavalanche\b|\bfood poisoning\b|\bindustrial accident\b|\bplung(e|es|ed)\b|\boverturn(s|ed)?\b/i;
+const GENUINE_CONFLICT_SIGNAL =
+  /nuclear (test|strike|weapon)|invad(ed|es|ing)|invasion|genocide|ethnic cleansing|declared war|\bstrikes?\b|missile|airstrike|drone strike|\battack(ed|ing|s)?\b|\btroops?\b|\bmilitary\b|militant|insurgen|\brebels?\b|\bmilitia\b|paramilitary|\bcoup\b|martial law|\bsanctions?\b|shot down|downed (a |an )?(drone|aircraft|jet|missile)|ambush(ed|es|ing)?|shell(ed|ing|s)?|\bbombing\b|\boffensive\b|clash(es)?|seiz(ed|es|ing)|captur(ed|es|ing)|raid(ed|s)?|storm(ed|s)?|\bmassacre\b|\bjunta\b|\bregime\b|blockade|embargo|\bannex|election fraud|disputed election|government collapse|\bousted\b|\boverthrown\b|impeach|corruption scandal|displaced|displacement|\brefugees?\b|\bfamine\b|humanitarian crisis|humanitarian emergency|disease outbreak|\bepidemic\b|gang violence|organized crime|\bcartel\b|\bprotests?\b|\bunrest\b/i;
+
 // Routine, expected, or de-escalatory activity that the topical KEYWORDS
 // filter above will still catch (a port call by a US carrier mentions
 // "troops"/a country by name, a peace summit mentions the same countries
@@ -556,6 +587,12 @@ export function assessIncidentSeverity(text: string): number | null {
   // but "joint exercise cancelled after strikes" is not.
   if (BENIGN_PATTERNS.test(text) && !hasEscalation) return null;
   if (ONGOING_COVERAGE_PATTERNS.test(text) && !hasEscalation) return null;
+  // Deliberately checked against GENUINE_CONFLICT_SIGNAL, NOT hasEscalation
+  // above — hasEscalation is satisfied by the bare casualty words this
+  // exists to exclude ("12 killed" alone makes hasEscalation true), which
+  // would defeat this carve-out entirely. See ACCIDENT_DISASTER_PATTERNS'
+  // own doc comment.
+  if (ACCIDENT_DISASTER_PATTERNS.test(text) && !GENUINE_CONFLICT_SIGNAL.test(text)) return null;
 
   return keywordSeverity(text);
 }
@@ -591,6 +628,11 @@ export function classifyGdeltItem(item: RawItem): ClassifiedItem | null {
   const text = `${item.title} ${item.snippet}`;
   if (DEFINITELY_ONGOING_PATTERNS.test(text)) return null;
   if (RHETORICAL_ARGUMENT_PATTERNS.test(text)) return null;
+  // Same accident/disaster carve-out as assessIncidentSeverity above — this
+  // path has no other suppression at all (see this function's own header
+  // comment), so it's even more exposed to the "12 killed in a car crash"
+  // false-positive than classifyByKeywords is.
+  if (ACCIDENT_DISASTER_PATTERNS.test(text) && !GENUINE_CONFLICT_SIGNAL.test(text)) return null;
 
   const severity = keywordSeverity(text);
   if (severity < 2) return null;
