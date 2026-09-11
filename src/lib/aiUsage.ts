@@ -38,15 +38,34 @@ export const GEMINI_LITE_DAILY_CAPS: Record<"audit" | "brief" | "geocode", numbe
   geocode: 50,
 };
 
-function todayUtc(): string {
-  return new Date().toISOString().slice(0, 10);
+// Google's Gemini/AI Studio free-tier RPD quotas reset at midnight
+// PACIFIC time, not UTC (standard, documented Google Cloud/AI Studio
+// behavior) — using a UTC calendar day here meant this module's own
+// "today" rolled over at UTC midnight (8pm Eastern during EDT), up to
+// ~7 hours before Google's real quota actually refreshes. In that gap,
+// canAffordGeminiLiteCall could report a fresh, empty budget while
+// Google's own counter was still the OLD, possibly-exhausted one — not a
+// crash risk (every caller already degrades gracefully on a real 429,
+// unchanged by this file), just a courtesy cap that wasn't actually
+// courteous during that window. Fixed 2026-09-10 (user request) by keying
+// on the Pacific calendar date instead. Intl.DateTimeFormat with an
+// explicit IANA zone handles the PST/PDT transition automatically via
+// Node's built-in ICU data — no new dependency, and no manual UTC-offset
+// arithmetic to get wrong across a DST boundary.
+function todayPacific(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
 export async function recordAiUsage(kind: AiUsageKind, count: number): Promise<void> {
   if (count <= 0) return;
   try {
     const db = getDb();
-    const today = todayUtc();
+    const today = todayPacific();
     await db
       .insert(aiUsage)
       .values({ date: today, kind, count })
@@ -67,7 +86,7 @@ export async function recordAiUsage(kind: AiUsageKind, count: number): Promise<v
 async function todayCountFor(kind: "audit" | "brief" | "geocode"): Promise<number> {
   try {
     const db = getDb();
-    const today = todayUtc();
+    const today = todayPacific();
     const rows = await db
       .select({ count: aiUsage.count })
       .from(aiUsage)

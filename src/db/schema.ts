@@ -577,7 +577,13 @@ export const aiUsage = pgTable(
   "ai_usage",
   {
     id: serial("id").primaryKey(),
-    date: text("date").notNull(), // "YYYY-MM-DD", UTC
+    // "YYYY-MM-DD" — Pacific calendar day (see aiUsage.ts's todayPacific),
+    // matching Google's own Gemini/AI Studio RPD reset clock, not UTC.
+    // Rows written before 2026-09-10 were keyed on UTC instead; left as
+    // historical artifacts under the old scheme rather than migrated —
+    // this table is observability/pacing, not a ledger that needs to
+    // reconcile perfectly across the switchover.
+    date: text("date").notNull(),
     kind: text("kind").notNull(), // "embedding" | "brief" | "audit" | "geocode"
     count: integer("count").notNull().default(0),
   },
