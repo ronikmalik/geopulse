@@ -16,6 +16,7 @@ import type { Category } from "./categories";
 import { archiveFeedItems } from "./feedArchive";
 import { COUNTRY_CENTROIDS } from "./countryCentroids";
 import { resolveCountryFromText } from "./countryNames";
+import { isPressTvInScope } from "./sources/telegram";
 
 // Gemini pass over classification_archive, auditing the keyword
 // classifier along three independent dimensions:
@@ -989,8 +990,23 @@ async function processDroppedCandidates(
         // recovery goes through the exact same deriveFieldsForRecovery +
         // correlationGroupId path, and the exact same audit-trail status
         // transition (pending -> applied), as a human/Claude approval.
+        // Real bug found live (2026-09-10): a presstv post correctly
+        // dropped by isPressTvInScope's Iran-mention requirement ("Israeli
+        // military launched a fresh wave of attacks on southern Lebanon…"
+        // — no Iran mention at all) got auto-applied anyway, Gemini having
+        // reasoned it was "over-application of the exclusion rule." It
+        // wasn't a classifier mistake — it was the deliberate, source-
+        // specific editorial policy that rule exists to enforce, and
+        // Gemini has no concept of a per-source scope restriction. Checked
+        // here, not folded into corroboratedCountry, since this is a
+        // policy veto independent of keyword-severity/country agreement —
+        // a violation still becomes a normal pending finding for human/
+        // Claude review (which can knowingly override it), just never
+        // silently auto-applied.
+        const violatesSourceScope =
+          item.source === "telegram:presstv" && !isPressTvInScope(item.snippet);
         const corroborated = corroboratedCountry(item, suggestedCountry);
-        if (corroborated) {
+        if (corroborated && !violatesSourceScope) {
           const result = await reviewAuditFinding(
             findingId,
             "approved",

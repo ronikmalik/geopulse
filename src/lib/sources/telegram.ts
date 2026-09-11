@@ -373,7 +373,16 @@ const PRESSTV_EXCLUDE_PATTERN =
   /\bgaza\b|\bpalestin(e|ian)s?\b|west bank|\bhamas\b/i;
 const PRESSTV_IRAN_MENTION_PATTERN = /\biran(ian)?\b/i;
 
-function isPressTvInScope(excerpt: string): boolean {
+// Exported so classifierAudit.ts's false_negative auto-apply path can
+// check it too (2026-09-10, real bug found live): Gemini's audit has no
+// concept of a source-specific scope restriction, and auto-applied a
+// "false negative" recovery for a presstv post that was correctly dropped
+// by this exact rule ("Israeli military launched a fresh wave of attacks
+// on southern Lebanon..." — no Iran mention at all), reasoning it was
+// "over-application of the exclusion rule." It wasn't a classifier
+// mistake, it was the deliberate policy this function exists to enforce —
+// see this function's own history above.
+export function isPressTvInScope(excerpt: string): boolean {
   return (
     !PRESSTV_EXCLUDE_PATTERN.test(excerpt) &&
     PRESSTV_IRAN_MENTION_PATTERN.test(excerpt)
