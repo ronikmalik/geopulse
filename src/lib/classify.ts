@@ -364,6 +364,32 @@ const ACCIDENT_DISASTER_PATTERNS =
 const GENUINE_CONFLICT_SIGNAL =
   /nuclear (test|strike|weapon)|invad(ed|es|ing)|invasion|genocide|ethnic cleansing|declared war|\bstrikes?\b|missile|airstrike|drone strike|\battack(ed|ing|s)?\b|\btroops?\b|\bmilitary\b|militant|insurgen|\brebels?\b|\bmilitia\b|paramilitary|\bcoup\b|martial law|\bsanctions?\b|shot down|downed (a |an )?(drone|aircraft|jet|missile)|ambush(ed|es|ing)?|shell(ed|ing|s)?|\bbombing\b|\boffensive\b|clash(es)?|seiz(ed|es|ing)|captur(ed|es|ing)|raid(ed|s)?|storm(ed|s)?|\bmassacre\b|\bjunta\b|\bregime\b|blockade|embargo|\bannex|election fraud|disputed election|government collapse|\bousted\b|\boverthrown\b|impeach|corruption scandal|displaced|displacement|\brefugees?\b|\bfamine\b|humanitarian crisis|humanitarian emergency|disease outbreak|\bepidemic\b|gang violence|organized crime|\bcartel\b|\bprotests?\b|\bunrest\b/i;
 
+// GDELT-ONLY, deterministic (2026-09-11 user request: "far higher
+// credibility and relevancy bar for the gdelt inclusions... only LIVE,
+// BREAKING events... even if it means lowering the gdelt approval rate a
+// [lot] more"). Live review of the purged feed surfaced a recognizable,
+// regex-catchable failure mode distinct from the accident/analysis ones
+// already excluded above: periodic/statistical security roundups —
+// "Nigeria's security agencies engaged in 7,062 operations, killed 1,487
+// terrorists in two months", "Third quarter national security update" —
+// use real conflict vocabulary and score real severity, but describe a
+// TALLY across a reporting period, not one specific thing that just
+// happened. Scoped to gdelt only (not RSS/Telegram) since this exact
+// tallied-summary shape is characteristic of GDELT's institutional-report
+// sourcing, and a blanket RSS/Telegram exclusion risks cutting real
+// wire-service articles that legitimately open with a statistic before
+// reporting a fresh incident.
+// Deliberately conservative — only the clean, unambiguous forms ("Q3
+// national security update," "over the past month"). A trickier real
+// example ("...killed 1,487 terrorists in two months") has the tally
+// separated from the time-span by an intervening clause, which no safe
+// regex reliably distinguishes from a legitimate forward-looking use of
+// the same phrase ("ceasefire to take effect in two months") without
+// real comprehension — left to the Gemini audit's own GDELT-specific
+// scrutiny instead of guessing here.
+const PERIODIC_REPORT_PATTERNS =
+  /\b(quarterly|monthly|weekly|annual) (report|update|review|summary)\b|\bsecurity update\b|\bnational security update\b|\bover the (past|last) (week|month|quarter|year)s?\b|\bin the (past|last) (one|two|three|four|five|six|seven|eight|nine|ten|\d+) (days?|weeks?|months?|years?)\b/i;
+
 // Routine, expected, or de-escalatory activity that the topical KEYWORDS
 // filter above will still catch (a port call by a US carrier mentions
 // "troops"/a country by name, a peace summit mentions the same countries
@@ -737,6 +763,8 @@ export function classifyByKeywords(item: RawItem): ClassifiedItem | null {
   if (NON_EVENT_TITLE_PATTERNS.test(item.title)) return null;
 
   const text = `${item.title} ${item.snippet}`;
+  // gdelt-only — see PERIODIC_REPORT_PATTERNS' own doc comment.
+  if (item.source === "gdelt" && PERIODIC_REPORT_PATTERNS.test(text)) return null;
   const severity = assessIncidentSeverity(text);
   if (severity === null || severity < MIN_SEVERITY_TO_INCLUDE) return null;
 
