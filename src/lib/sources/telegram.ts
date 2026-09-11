@@ -50,8 +50,6 @@ export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
   { handle: "dsns_telegram", label: "Ukraine State Emergency Service (official)", country: "UA", category: "natural-disaster", language: "uk" },
   { handle: "rybar", label: "Rybar (pro-Russian military channel, unverified)", country: "RU", category: "russia-ukraine", language: "ru" },
   { handle: "wargonzo", label: "WarGonzo (pro-Russian military channel, unverified)", country: "RU", category: "russia-ukraine", language: "ru" },
-  { handle: "iribnews", label: "IRIB — Iran state broadcaster", country: "IR", category: "us-iran", language: "fa" },
-  { handle: "farsna", label: "Fars News Agency (Iran state-affiliated)", country: "IR", category: "us-iran", language: "fa" },
   { handle: "presstv", label: "Press TV (Iran state media)", country: "IR", category: "us-iran", language: "en" },
   // --- v2 additions (2026-09-04), see docs/TELEGRAM_SOURCES.md "v2" section ---
   { handle: "DIUkraine", label: "Ukrainian Defense Intelligence (official)", country: "UA", category: "russia-ukraine", language: "uk" },
@@ -64,9 +62,17 @@ export const TELEGRAM_CHANNELS: TelegramChannelConfig[] = [
   // sepah_pasdaran 5/155 (3.2%), mehrnews 7/307 (2.3%), Nournews_ir 8/392
   // (2.1%), defapress_ir 4/100 (4%) — together 44% of the current
   // translation-pending backlog (180/409) and ~42% of all-time translated-
-  // candidate volume, for a combined ~2.7% keep rate. iribnews (5.3%,
-  // above) and farsna (5.4%, above) stay — meaningfully better yield, not
-  // flagged.
+  // candidate volume, for a combined ~2.7% keep rate.
+  //
+  // iribnews and farsna removed in a follow-up pass, same day — real
+  // content comparison against presstv found direct duplication, not just
+  // topical overlap: iribnews and farsna repeated each other's wire text
+  // near-verbatim in multiple cases (both mirror Al-Mayadeen — Arabic-
+  // language, not English, so this wasn't presstv's own content leaking
+  // in), and presstv (English, zero translation cost) independently
+  // covered several of the same real events (the Sirik/Kuhestak wedding
+  // strike, Gaza/Lebanon strikes) that iribnews/farsna spent real
+  // translation budget to also surface.
   { handle: "army21ye", label: "Houthi Armed Forces spokesperson (official, unverified claims)", country: "YE", category: "us-iran", language: "ar" },
 ];
 
