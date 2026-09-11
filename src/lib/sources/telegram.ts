@@ -389,11 +389,13 @@ const IMMEDIATE_CITY_THREAT_PATTERN = /over the city|stay in (cover|shelter)/i;
 
 // Used by the live fetch path below — the sole source of kept/dropped
 // decisions now that nothing drains pending_translation anymore. Returns
-// the severity to actually store/display, not just a bare boolean — an
-// immediate-city-threat post can qualify even when classify.ts's shared
-// severity scorer (tuned for confirmed strikes/casualties, not live
-// tracking alerts) sees no signal at all, and storing severity 1 on a
-// kept item would misrepresent it as a non-event.
+// the severity to actually store/display, not just a bare boolean.
+// Immediate-city-threat posts are a deliberate exception (user, 2026-09-10:
+// "ok to keep uav over city as a threat level 1") — kept even though
+// classify.ts's shared severity scorer (tuned for confirmed strikes/
+// casualties, not live tracking alerts) sees no signal and scores it 1;
+// that low severity is left as-is rather than inflated, since it's an
+// honest reflection of "a tracked threat, not a confirmed strike."
 function evaluateConflictPost(
   excerpt: string,
   computedSeverity: number | null,
@@ -411,10 +413,7 @@ function evaluateConflictPost(
   if (handle === "presstv" && !isPressTvInScope(excerpt)) {
     return { kept: false, severity: computedSeverity ?? 1 };
   }
-  return {
-    kept: true,
-    severity: Math.max(computedSeverity ?? 1, immediateCityThreat ? 2 : 1),
-  };
+  return { kept: true, severity: computedSeverity ?? 1 };
 }
 
 export async function fetchTelegramChannel(
