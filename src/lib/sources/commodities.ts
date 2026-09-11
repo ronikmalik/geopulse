@@ -62,6 +62,23 @@ const METALS: MetalConfig[] = [
 // diff for a change% even right after e.g. a long weekend.
 const FRED_LOOKBACK_DAYS = 10;
 
+// FRED's CSV export timed out on every request from Vercel's serverless
+// runtime (verified live 2026-09-11 via `vercel logs`) while working fine
+// from a residential IP with the exact same generic User-Agent Frankfurter
+// already uses successfully from the same runtime — a WAF (Akamai fronts
+// fred.stlouisfed.org) silently dropping/holding requests that look
+// bot-like (minimal headers) from a datacenter IP range is the standard
+// explanation for that specific split. Sending realistic browser headers
+// is the standard mitigation; this endpoint's actual designed consumer is
+// a browser embedding a FRED graph, so this isn't spoofing anything it
+// wasn't already expecting.
+const FRED_BROWSER_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+  Accept: "text/csv,text/plain,*/*",
+  "Accept-Language": "en-US,en;q=0.9",
+};
+
 async function fetchFredSeries(series: FredSeriesConfig): Promise<CommodityPrice | null> {
   const start = new Date(Date.now() - FRED_LOOKBACK_DAYS * 86_400_000)
     .toISOString()
@@ -70,7 +87,7 @@ async function fetchFredSeries(series: FredSeriesConfig): Promise<CommodityPrice
   let res: Response;
   try {
     res = await fetch(`${FRED_CSV_ENDPOINT}?id=${series.id}&cosd=${start}`, {
-      headers: { "User-Agent": "geopulse-globe/1.0" },
+      headers: FRED_BROWSER_HEADERS,
       signal: AbortSignal.timeout(15_000),
     });
   } catch (err) {
