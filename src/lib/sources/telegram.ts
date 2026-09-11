@@ -366,12 +366,43 @@ function canAssess(config: TelegramChannelConfig, translated: boolean): boolean 
 // exactly the "filth" being described, Press TV using Israel-Palestine
 // commentary as content rather than reporting real Iran-conflict news.
 // Only past that gate does the normal conflict-action/direct-threat check
-// apply, with the added requirement that Iran/Iranian actually be named —
-// Iran has to be the one attacked or the one threatening, not merely
-// present in an unrelated regional story.
+// apply, with the added requirement that a real axis-of-resistance actor
+// actually be named — one of them has to be attacked or the one
+// threatening, not merely present in an unrelated regional story.
 const PRESSTV_EXCLUDE_PATTERN =
   /\bgaza\b|\bpalestin(e|ian)s?\b|west bank|\bhamas\b/i;
-const PRESSTV_IRAN_MENTION_PATTERN = /\biran(ian)?\b/i;
+
+// Widened 2026-09-10 (user request) from a bare Iran-mention requirement:
+// "if we let presstv cover axis of resistance theater content" — Iran's
+// own state media naturally covers the whole aligned network (Yemen/
+// Houthi, Lebanon/Hezbollah, Iraq/PMF and Iran-proxy militias), not just
+// direct Iran incidents, and that's real, distinct coverage this app was
+// missing entirely (see the iribnews/farsna investigation this same
+// session — presstv structurally couldn't surface a Kirkuk PMF-vs-ISIS
+// clash or Yemeni forces retaking a coastal city, since neither names
+// Iran). The Gaza/Palestine veto above is untouched — that was a
+// separate, deliberate exclusion, not part of this widening.
+const PRESSTV_AXIS_OF_RESISTANCE_PATTERN =
+  /\biran(ian)?\b|\bhouthis?\b|ansar allah|\bhezbollah\b|\birgc\b|quds force|revolutionary guard|kata'?ib hezbollah|asa'?ib ahl al-haq|al-nujaba|islamic resistance in iraq|popular mobilization|\bpmf\b|\byemen(i)?\b|\biraq(i)?\b|\blebanon(ese)?\b/i;
+
+// Same request, second half: "i dont want propaganda, just real events."
+// Iranian state media routinely labels analyst/commentary segments
+// explicitly rather than blending them into straight reporting — "Feature
+// - Qassem-e-Basir and economics of attrition...", "🎤 Conversation - US
+// bombing of a wedding...", "Analyst: Failed cycle of US Iran policy...".
+// These aren't a report that something new happened, they're an
+// interpretation of something already reported — the same "reflection,
+// not a fresh development" distinction classify.ts's own
+// NON_EVENT_TITLE_PATTERNS draws for RSS headlines, but Telegram posts use
+// different framing markers (emoji-prefixed segment labels, not headline
+// conventions) that pattern doesn't cover, so this is its own check
+// rather than a forced reuse. Honesty check on this pattern's own limits:
+// it only catches EXPLICITLY labeled segments, not every possible form of
+// commentary (an unlabeled quote from a named pundit reacting to a real
+// strike can still get through) — a real but partial mitigation, not a
+// complete propaganda filter.
+const PRESSTV_ANALYSIS_PATTERN =
+  /^.{0,10}\b(feature|conversation|analyst|analysis|commentary|opinion|op-ed|explainer|interview)\b\s*[-:]/i;
 
 // Exported so classifierAudit.ts's false_negative auto-apply path can
 // check it too (2026-09-10, real bug found live): Gemini's audit has no
@@ -385,7 +416,8 @@ const PRESSTV_IRAN_MENTION_PATTERN = /\biran(ian)?\b/i;
 export function isPressTvInScope(excerpt: string): boolean {
   return (
     !PRESSTV_EXCLUDE_PATTERN.test(excerpt) &&
-    PRESSTV_IRAN_MENTION_PATTERN.test(excerpt)
+    !PRESSTV_ANALYSIS_PATTERN.test(excerpt) &&
+    PRESSTV_AXIS_OF_RESISTANCE_PATTERN.test(excerpt)
   );
 }
 
