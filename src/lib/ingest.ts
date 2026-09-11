@@ -227,12 +227,15 @@ export async function runIngest(
   // Deadline for drainPendingGdeltTitles — added 2026-09-11 alongside that
   // function's own DRAIN_BATCH_SIZE/DRAIN_CONCURRENCY increase (see
   // gdeltBulk.ts's own comment for the "not much GDELT coverage" bug this
-  // fixes). It never actually had a deadline before this despite an
-  // earlier comment claiming one existed — a real gap, not just missing
-  // documentation. Sized to the drain's own worst case (40 candidates /
-  // 20 concurrency = 2 rounds x articleTitleFetch.ts's 8s cap = 16s) with
-  // a small margin for the DB round-trips before/after.
-  const GDELT_DRAIN_TIMEOUT_MS = 18_000;
+  // fixes, and its own header comment for why BATCH_SIZE and CONCURRENCY
+  // are now equal). It never actually had a deadline before this despite
+  // an earlier comment claiming one existed — a real gap, not just
+  // missing documentation. Batch size and concurrency being equal means
+  // every candidate fires in one round, so this stays sized to a SINGLE
+  // round's worst case (articleTitleFetch.ts's 8s cap) with margin for
+  // the DB round-trips before/after — not to the batch size, which can
+  // keep growing without this needing to.
+  const GDELT_DRAIN_TIMEOUT_MS = 15_000;
 
   // Same rotation cadence as GDELT (ROTATION_INTERVAL_MS) but its own chunk
   // size — 18 channels (as of the 2026-09-04 v2 pass) at 3 per cycle

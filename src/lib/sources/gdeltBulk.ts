@@ -74,13 +74,26 @@ const REQUEST_TIMEOUT_MS = 20_000;
 // unfetched. Downstream capacity was never the bottleneck — production
 // showed zero GDELT events stuck at reviewStatus='pending' (Gemini review
 // keeps up fine with whatever reaches it); the bottleneck was purely
-// between "discovered" and "title successfully fetched." Raised 3x here
-// (concurrency more than batch size, so round count — and therefore
-// worst-case wall time — actually goes DOWN, not up: 40/20 = 2 rounds vs.
-// the old 12/4 = 3 rounds). See ingest.ts's own GDELT_DRAIN_TIMEOUT_MS for
-// the matching deadline this is bounded by.
-const DRAIN_BATCH_SIZE = 40;
-const DRAIN_CONCURRENCY = 20;
+// between "discovered" and "title successfully fetched."
+//
+// RAISED AGAIN the same day, after confirming GDELT's bulk file host isn't
+// what's constraining this (no documented per-request limit, unlike the
+// old search API — see this file's header comment) — the real ceiling is
+// cron-job.org's fixed 30s timeout on the main trigger. BATCH_SIZE and
+// CONCURRENCY are now equal on purpose: every candidate in a batch fires
+// in the SAME round (Promise.all, not chunked), so round count stays at 1
+// regardless of how big BATCH_SIZE gets — raising it costs no more
+// wall-clock time (still bounded by articleTitleFetch.ts's per-request 8s
+// cap either way), only more candidates attempted per cycle. Each request
+// goes to a different news site, not one shared host, so there's no
+// single-host contention/rate-limit to worry about at this concurrency —
+// the real ceiling here is a Vercel serverless function's own comfort
+// with concurrent outbound connections, not documented as a hard number
+// but 100 is a modest fan-out for lightweight capped-read HTML head
+// fetches (MAX_BYTES=200_000 each in articleTitleFetch.ts). See ingest.
+// ts's own GDELT_DRAIN_TIMEOUT_MS for the matching deadline.
+const DRAIN_BATCH_SIZE = 100;
+const DRAIN_CONCURRENCY = 100;
 
 async function fetchText(url: string): Promise<string> {
   const res = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
