@@ -14,6 +14,7 @@ import type { FaoFoodPriceIndex } from "@/lib/sources/faoFoodPrice";
 import type { AirQualityReading } from "@/lib/sources/openMeteoAirQuality";
 import type { ChokepointTransit } from "@/lib/sources/portwatch";
 import type { CountryTradeSummary } from "@/lib/sources/comtrade";
+import type { CommodityPrice } from "@/lib/sources/commodities";
 
 export interface FlightsResponse {
   aircraft: TrackedAircraft[];
@@ -54,6 +55,10 @@ export interface ForexResponse {
 
 export interface CftcResponse {
   positions: CftcPosition[];
+}
+
+export interface CommodityResponse {
+  commodities: CommodityPrice[];
 }
 
 export interface CyberResponse {

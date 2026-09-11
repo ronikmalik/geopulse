@@ -9,12 +9,14 @@ import {
   type LiveChannelId,
 } from "@/lib/liveNews";
 import ForexPanel from "./ForexPanel";
-import type { CftcResponse, ForexResponse } from "@/lib/dataLayerTypes";
+import CommodityPanel from "./CommodityPanel";
+import type { CftcResponse, ForexResponse, CommodityResponse } from "@/lib/dataLayerTypes";
 
 interface LiveWirePanelProps {
   selectedCountry: string | null;
   forex: ForexResponse | null;
   cftc: CftcResponse | null;
+  commodities: CommodityResponse | null;
 }
 
 const regionNames =
@@ -34,6 +36,7 @@ export default function LiveWirePanel({
   selectedCountry,
   forex,
   cftc,
+  commodities,
 }: LiveWirePanelProps) {
   const [channelId, setChannelId] = useState<LiveChannelId>(DEFAULT_LIVE_CHANNEL);
   const [manualOverride, setManualOverride] = useState(false);
@@ -121,8 +124,9 @@ export default function LiveWirePanel({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         <ForexPanel data={forex} cftc={cftc} />
+        <CommodityPanel data={commodities} />
       </div>
     </div>
   );

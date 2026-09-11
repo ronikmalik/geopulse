@@ -31,6 +31,7 @@ import type {
   AirQualityResponse,
   PortCongestionResponse,
   TradeBalanceResponse,
+  CommodityResponse,
 } from "@/lib/dataLayerTypes";
 
 export type DashboardTab = "feed" | "risk" | "layers" | "forex" | "trends";
@@ -87,6 +88,7 @@ interface DashboardProps {
 
   forex: ForexResponse | null;
   cftc: CftcResponse | null;
+  commodities: CommodityResponse | null;
 
   connectionStatus: ConnectionState;
 }
@@ -216,6 +218,7 @@ export default function Dashboard(props: DashboardProps) {
             selectedCountry={props.selectedCountry}
             forex={props.forex}
             cftc={props.cftc}
+            commodities={props.commodities}
           />
         )}
         {activeTab === "trends" && (

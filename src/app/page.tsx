@@ -45,11 +45,16 @@ import type {
   AirQualityResponse,
   PortCongestionResponse,
   TradeBalanceResponse,
+  CommodityResponse,
 } from "@/lib/dataLayerTypes";
 import type { GeoEvent } from "@/lib/types";
 
 const FOREX_POLL_MS = 5 * 60_000;
 const CFTC_POLL_MS = 60 * 60_000;
+// Same cadence as forex — FRED/the metals CDN both publish once/day, so
+// polling faster wouldn't surface new data any sooner, just re-hit
+// withCache's 5-minute TTL on the route for nothing.
+const COMMODITIES_POLL_MS = 5 * 60_000;
 
 const MOBILE_TABS: { id: DashboardTab; label: string }[] = [
   { id: "feed", label: "Feed" },
@@ -303,6 +308,13 @@ export default function Home() {
     CFTC_POLL_MS,
     true,
   );
+  // Same always-on treatment — oil/gas/gold are as much a headline signal
+  // for this audience as FX rates, not an opt-in Context Layer.
+  const commoditiesLayer = useLiveLayer<CommodityResponse>(
+    "/api/layers/commodities",
+    COMMODITIES_POLL_MS,
+    true,
+  );
 
   const extraPoints = useMemo(() => {
     const points = [];
@@ -396,6 +408,7 @@ export default function Home() {
     tradeBalance: tradeBalanceLayer.data,
     forex: forexLayer.data,
     cftc: cftcLayer.data,
+    commodities: commoditiesLayer.data,
     connectionStatus: status,
   };
 

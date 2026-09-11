@@ -20,8 +20,8 @@ export default function ForexPanel({ data, cftc }: ForexPanelProps) {
   );
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex-1 overflow-y-auto p-3">
+    <div className="flex flex-col">
+      <div className="p-3">
         <h2 className="mb-1 font-mono text-xs uppercase tracking-[0.2em] text-red-500">
           Forex
         </h2>

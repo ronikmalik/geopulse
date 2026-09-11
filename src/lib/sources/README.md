@@ -29,8 +29,8 @@ fitting the same brief.
 The following modules are **standalone and intentionally not integrated**
 into the events table: `openmeteo.ts`, `openMeteoAirQuality.ts`,
 `adsblol.ts`, `worldbank.ts`, `cisakev.ts`, `forex.ts`, `cftc.ts`,
-`gpsjam.ts`, `submarineCables.ts`, `travelAdvisories.ts`, `owidEnergy.ts`,
-`faoFoodPrice.ts`, `portwatch.ts`, `comtrade.ts`. Each exports a working,
+`commodities.ts`, `gpsjam.ts`, `submarineCables.ts`, `travelAdvisories.ts`,
+`owidEnergy.ts`, `faoFoodPrice.ts`, `portwatch.ts`, `comtrade.ts`. Each exports a working,
 live-verified fetch function returning normalized data, but none are
 called from `ingest.ts`. Live-tracked flights/weather, structural
 indicators (GDP/population/grid-loss/energy-mix/trade), and point-in-time
@@ -65,6 +65,18 @@ earlier wrong verdict here that said its data feed wasn't exposed at a
 documented public URL. It is: `gpsjam.org/data/manifest.csv` +
 `{date}-h3_4.csv`, found via worldmonitor.app's public source
 (github.com/koala73/worldmonitor). See `gpsjam.ts`.
+
+**`commodities.ts`** (oil/gas/gold/silver, 2026-09-10) — same always-on
+"headline feature" treatment as `forex.ts`, which it's rendered alongside
+in the Live Wire tab. Two no-key providers: FRED's public `fredgraph.csv`
+export (official, unauthenticated — the same endpoint that backs FRED's
+own embeddable graphs) for daily WTI/Brent/Henry Hub spot prices, and the
+same community currency-API CDN `forex.ts` already uses for RUB/UAH for
+gold/silver (FRED stopped publishing LBMA gold/silver fixes in 2015).
+Yahoo Finance's unofficial chart API and stooq.com's CSV export were both
+tried first and rejected: Yahoo 429'd within a handful of requests from a
+single IP, and stooq now gates its CSV endpoint behind a JS proof-of-work
+challenge — neither is safe to poll from a server on a schedule.
 
 **Crypto markets, trending GitHub repos, generic satellite tracking
 (CelesTrak), and Eurozone/BIS macro indicators (ECB, Eurostat, BIS) were
