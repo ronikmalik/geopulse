@@ -508,6 +508,27 @@ const NAME_REGEX_BY_NAME = new Map<string, RegExp>(
   NAMES_BY_LENGTH_DESC.map((name) => [name, new RegExp(`\\b${escapeRegExp(name)}`)]),
 );
 
+// Real live bug (2026-09-12): "AI agents being tested by OpenAI involved in
+// cyber-attack on another service, say researchers" — an article with zero
+// connection to Mali — got attributed to Mali (ML) because its snippet said
+// "malicious packages," and the left-boundary-only match above (see the
+// 2026-09-08 comment) has no concept of a RIGHT boundary at all, so "mali"
+// matches the first four letters of "malicious" same as it matches the bare
+// word "Mali". Same class of bug also confirmed live for "malice",
+// "malign", "malignant", and "chador" (-> Chad). A right boundary can't
+// just be `\b` unconditionally, though — that would break the exact
+// prefix-demonym matching ("kenya" in "Kenyan", "nepal" in "Nepali") the
+// left-boundary-only design was deliberately built to keep (per the
+// 2026-09-08 comment above). This restores a right boundary while still
+// allowing a small, common set of demonym-forming continuations.
+const DEMONYM_SUFFIX_RE = /^(?:ians?|ese|ish|is|ans?|ns?|i)\b/;
+
+function hasCleanRightBoundary(text: string, endIndex: number): boolean {
+  const rest = text.slice(endIndex);
+  if (!/^[a-z]/.test(rest)) return true; // already at a real boundary (space, punctuation, end of string)
+  return DEMONYM_SUFFIX_RE.test(rest);
+}
+
 // Case-sensitive institutional signals, matched against the ORIGINAL text
 // (not lowercased) and folded into the same earliest-position candidate
 // pool as country names in resolveCountryFromText below — never returned
@@ -590,7 +611,8 @@ const TARGETING_PATTERNS: RegExp[] = [
 function resolveNameInPhrase(phrase: string): string | null {
   const lower = phrase.toLowerCase();
   for (const name of NAMES_BY_LENGTH_DESC) {
-    if (NAME_REGEX_BY_NAME.get(name)!.test(lower)) return COUNTRY_NAME_TO_ALPHA2[name];
+    const m = NAME_REGEX_BY_NAME.get(name)!.exec(lower);
+    if (m && hasCleanRightBoundary(lower, m.index + name.length)) return COUNTRY_NAME_TO_ALPHA2[name];
   }
   return null;
 }
@@ -693,7 +715,7 @@ export function resolveCountryFromText(text: string): string | null {
 
   for (const name of NAMES_BY_LENGTH_DESC) {
     const m = NAME_REGEX_BY_NAME.get(name)!.exec(lower);
-    if (m) {
+    if (m && hasCleanRightBoundary(lower, m.index + name.length)) {
       candidates.push({ index: m.index, length: name.length, alpha2: COUNTRY_NAME_TO_ALPHA2[name] });
     }
   }
