@@ -5,6 +5,7 @@ import type { RawItem } from "./sources/gdelt";
 import { resolveCountryFromText } from "./countryNames";
 import { COUNTRY_CENTROIDS } from "./countryCentroids";
 import { isCountryInSourceRegion } from "./regionScope";
+import { normalizeDomain, isLowCredibility, type CredibilityLookup } from "./sourceCredibility";
 
 // LLM classification only ever assigns news-query-driven categories (plus
 // "other") — the feed-driven categories (earthquake, natural-disaster) are
@@ -759,12 +760,29 @@ export function deriveFieldsForRecovery(
   return { category, country, location: centroid.name, lat: centroid.lat, lon: centroid.lon };
 }
 
-export function classifyByKeywords(item: RawItem): ClassifiedItem | null {
+// credibilityMap: gdelt-only, deterministic replacement for Gemini's own
+// SOURCE CREDIBILITY prompt judgment (2026-09-11, user request — "we can
+// remove gemini's responsibility to audit the bias/credibility... and it
+// can focus on choosing what's relevant for us"). Loaded once per ingest
+// cycle from the local MBFC cache (see sourceCredibility.ts — the real
+// API behind it is hard-capped at 3 requests/month, so this is never a
+// live per-item lookup) and passed through; optional so every other
+// caller of this function (classifyTranslated.ts, tests) doesn't need to
+// thread a map through for a check that's specifically about gdelt's
+// wide-open domain universe, not RSS's already-curated source list.
+export function classifyByKeywords(
+  item: RawItem,
+  credibilityMap?: Map<string, CredibilityLookup>,
+): ClassifiedItem | null {
   if (NON_EVENT_TITLE_PATTERNS.test(item.title)) return null;
 
   const text = `${item.title} ${item.snippet}`;
   // gdelt-only — see PERIODIC_REPORT_PATTERNS' own doc comment.
   if (item.source === "gdelt" && PERIODIC_REPORT_PATTERNS.test(text)) return null;
+  if (item.source === "gdelt" && credibilityMap) {
+    const domain = normalizeDomain(item.url);
+    if (domain && isLowCredibility(credibilityMap.get(domain))) return null;
+  }
   const severity = assessIncidentSeverity(text);
   if (severity === null || severity < MIN_SEVERITY_TO_INCLUDE) return null;
 

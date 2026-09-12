@@ -569,11 +569,26 @@ export type NewFeedArchiveRow = typeof feedArchive.$inferInsert;
 // same thing). MBFC's own RapidAPI listing is HARD-CAPPED at 3 requests
 // per month total (confirmed live against the real subscribed plan), but
 // its one endpoint (GET /fetch-data, no params at all) returns the
-// ENTIRE ~9,000+ source database in a single call — so this is a bulk
+// ENTIRE ~11,000+ source database in a single call — so this is a bulk
 // sync-then-cache-locally table, never a live per-classification lookup.
 // See src/lib/sourceCredibility.ts for the sync logic; classify.ts reads
 // this table (via an in-memory map loaded once per ingest cycle, not a
 // DB round-trip per item) to gate gdelt sources deterministically.
+//
+// Real schema confirmed via the first live sync (2026-09-11) — MBFC's
+// actual JSON keys are "Source", "Source URL", "Bias", "Political Bias",
+// "Factual Reporting", "Credibility", "Country", "Media Type". `bias`
+// below maps to their "Bias" field specifically, NOT "Political Bias" —
+// this is the more useful one for gating: its values are a mix of
+// ordinary political-lean labels (Left/Left-Center/Least Biased/Right-
+// Center/Right/Pro-Science) AND MBFC's own special disqualifying
+// categories (Questionable, Conspiracy-Pseudoscience, Satire) in the
+// SAME field — e.g. Xinhua/Sputnik/Press TV/Breitbart all show
+// bias="Questionable" alongside credibility="Low", while Daily Caller
+// (politically right-leaning but not disqualified) shows bias="Right"
+// and credibility="Medium" — confirming this is a real quality signal,
+// not just a political-lean penalty. `politicalBias` holds their
+// separate, more granular left/right spectrum field for context/display.
 export const sourceCredibility = pgTable(
   "source_credibility",
   {
@@ -583,12 +598,9 @@ export const sourceCredibility = pgTable(
     // formatting mismatch between the two.
     domain: text("domain").notNull().unique(),
     name: text("name"),
-    biasRating: text("bias_rating"),
+    bias: text("bias"),
+    politicalBias: text("political_bias"),
     factualRating: text("factual_rating"),
-    // MBFC's own credibility label for the source, when distinct from
-    // factualRating (their schema sometimes carries both) — nullable
-    // since this is populated from whatever the real API response
-    // actually contains, not assumed in advance.
     credibility: text("credibility"),
     country: text("country"),
     mediaType: text("media_type"),

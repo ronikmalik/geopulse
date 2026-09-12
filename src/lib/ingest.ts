@@ -19,6 +19,7 @@ import {
   type ClassifiedItem,
 } from "./classify";
 import { retryFailedClassificationsViaTranslation } from "./classifyTranslated";
+import { loadCredibilityMap, type CredibilityLookup } from "./sourceCredibility";
 import { trackFetch, recordSourceHealth, type TrackedFetch } from "./sourceHealth";
 import { correlationGroupId } from "./correlation";
 import { archiveClassifications } from "./classificationArchive";
@@ -427,6 +428,20 @@ export async function runIngest(
   const fresh = candidates.filter((c) => !existingUrls.has(c.url));
   const freshDirect = direct.filter((d) => !existingUrls.has(d.url));
 
+  // Loaded ONCE per ingest cycle, not per candidate — this is a local
+  // cache table (~9,000 domains), not a live API call. See classify.ts's
+  // own credibilityMap param and sourceCredibility.ts's doc comment for
+  // why (the real MBFC API behind it is hard-capped at 3 requests/month
+  // total, so it's synced separately and rarely, never from here). Fails
+  // open (empty map, nothing gets rejected on credibility grounds) if the
+  // read itself fails — a courtesy check, not the only thing standing
+  // between the feed and a bad source, same posture as this codebase's
+  // other budget/courtesy checks.
+  const credibilityMap = await loadCredibilityMap().catch((err) => {
+    console.error(`loadCredibilityMap failed: ${err}`);
+    return new Map<string, CredibilityLookup>();
+  });
+
   let inserted = 0;
 
   // classifyByKeywords is a pure, synchronous, local function (no external
@@ -503,7 +518,7 @@ export async function runIngest(
         // same as it already does for every other source. classifyGdeltItem
         // itself is now unused by any live path — left in place, not yet
         // deleted, in case a future narrowly-scoped GDELT path needs it.
-        const c = classifyByKeywords(item);
+        const c = classifyByKeywords(item, credibilityMap);
         if (!c) {
           failedItems.push(item);
           return null;

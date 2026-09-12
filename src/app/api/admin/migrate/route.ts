@@ -363,7 +363,6 @@ const STATEMENTS = [
     id SERIAL PRIMARY KEY,
     domain TEXT NOT NULL UNIQUE,
     name TEXT,
-    bias_rating TEXT,
     factual_rating TEXT,
     credibility TEXT,
     country TEXT,
@@ -372,6 +371,15 @@ const STATEMENTS = [
     fetched_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
   sql`CREATE INDEX IF NOT EXISTS source_credibility_domain_idx ON source_credibility (domain)`,
+  // bias_rating -> bias + political_bias (2026-09-11, same day, first
+  // live sync) — MBFC's real schema turned out to carry two distinct
+  // fields (see schema.ts's own doc comment on `bias`), confirmed only
+  // after the actual call. Table was empty at this point (the first
+  // insert attempt used the wrong key name and matched zero domains),
+  // so this is a rename/add, not a real migration of live data.
+  sql`ALTER TABLE source_credibility DROP COLUMN IF EXISTS bias_rating`,
+  sql`ALTER TABLE source_credibility ADD COLUMN IF NOT EXISTS bias TEXT`,
+  sql`ALTER TABLE source_credibility ADD COLUMN IF NOT EXISTS political_bias TEXT`,
 ];
 
 export async function GET(req: NextRequest) {

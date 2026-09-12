@@ -8,64 +8,51 @@ import { sourceCredibility } from "@/db/schema";
 // per-classification API call. The account backing MBFC_RAPIDAPI_KEY is
 // HARD-CAPPED at 3 requests/month total (confirmed against the real
 // subscribed plan, not a guess) — this file's syncSourceCredibility is
-// meant to be invoked manually/rarely (a monthly cron at most), never
-// from inside the ingest cycle.
+// meant to be invoked manually/rarely, never from inside the ingest cycle.
 const MBFC_HOST = "media-bias-fact-check-ratings-api2.p.rapidapi.com";
 const MBFC_ENDPOINT = `https://${MBFC_HOST}/fetch-data`;
-const REQUEST_TIMEOUT_MS = 60_000; // a ~9,000-row response is a real payload, not a quick call
+const REQUEST_TIMEOUT_MS = 60_000; // an ~11,000-row response is a real payload, not a quick call
 
-function normalizeDomain(raw: string): string | null {
+// Real field names confirmed via the first live sync (2026-09-11): a flat
+// array of objects, keys "Source", "Source URL", "Bias", "Political
+// Bias", "Factual Reporting", "Credibility", "Country", "Media Type",
+// "MBFC URL", "Source ID#", "Factual Score", plus a trailing empty-string
+// key (a CSV-export artifact upstream, ignored). No pagination, no
+// filtering — this is the entire database in one response.
+interface MbfcRecord {
+  Source?: string;
+  "Source URL"?: string;
+  Bias?: string;
+  "Political Bias"?: string;
+  "Factual Reporting"?: string;
+  Credibility?: string;
+  Country?: string;
+  "Media Type"?: string;
+}
+
+// ~936 of 11,009 real records carry a path after the domain (e.g.
+// "metapedia.org/wiki/Main_Page") rather than a bare hostname — this
+// strips everything after the first "/" rather than relying on the URL
+// parser (most values here have no scheme, so `new URL()` would throw on
+// the majority of rows).
+export function normalizeDomain(raw: string): string | null {
   if (!raw) return null;
   let s = raw.trim().toLowerCase();
-  // Accept either a bare domain or a full URL — MBFC's own schema isn't
-  // confirmed yet (this is the first real sync), so tolerate both rather
-  // than assume.
   if (s.includes("://")) {
     try {
       s = new URL(s).hostname;
     } catch {
-      // fall through, try as a bare string below
+      // fall through, treat as a bare string below
     }
   }
-  s = s.replace(/^www\./, "").replace(/\/$/, "");
+  s = s.split("/")[0].replace(/^www\./, "");
   return s || null;
-}
-
-// Best-effort field extraction (2026-09-11, first real sync) — MBFC's
-// exact JSON key names for this RapidAPI listing weren't confirmed ahead
-// of time (their docs pages are client-rendered and didn't expose an
-// example response before spending one of the 3 monthly calls to find
-// out for real). Tries a handful of plausible key-name variants per
-// field rather than assuming one; the full raw record is stored
-// regardless (see `raw` column) so a wrong guess here is fixable later
-// by re-reading the already-fetched data, not by spending another call.
-function pick(record: Record<string, unknown>, keys: string[]): string | null {
-  for (const k of keys) {
-    const v = record[k];
-    if (typeof v === "string" && v.trim()) return v.trim();
-  }
-  return null;
-}
-
-function extractDomainCandidate(record: Record<string, unknown>): string | null {
-  const direct = pick(record, [
-    "domain",
-    "Domain",
-    "url",
-    "URL",
-    "source_url",
-    "website",
-    "Website",
-    "site",
-  ]);
-  return direct ? normalizeDomain(direct) : null;
 }
 
 export interface SyncResult {
   fetched: number;
   upserted: number;
   skippedNoDomain: number;
-  sampleKeys: string[];
 }
 
 export async function syncSourceCredibility(): Promise<SyncResult> {
@@ -87,93 +74,76 @@ export async function syncSourceCredibility(): Promise<SyncResult> {
     throw new Error(`MBFC fetch-data failed: ${res.status} ${body.slice(0, 500)}`);
   }
 
-  const data = await res.json();
-
-  // The top-level shape isn't confirmed either — could be a bare array,
-  // or an object with the array under a wrapper key (data/results/sources
-  // are the common conventions). Handle all three defensively.
-  let records: unknown[];
-  if (Array.isArray(data)) {
-    records = data;
-  } else if (data && typeof data === "object") {
-    const obj = data as Record<string, unknown>;
-    const wrapped = obj.data ?? obj.results ?? obj.sources ?? obj.records;
-    records = Array.isArray(wrapped) ? wrapped : [];
-  } else {
-    records = [];
+  const records = (await res.json()) as MbfcRecord[];
+  if (!Array.isArray(records)) {
+    throw new Error(`MBFC fetch-data returned unexpected shape: ${typeof records}`);
   }
-
-  const sampleKeys =
-    records.length > 0 && records[0] && typeof records[0] === "object"
-      ? Object.keys(records[0] as Record<string, unknown>)
-      : [];
 
   const db = getDb();
   let upserted = 0;
   let skippedNoDomain = 0;
 
-  for (const r of records) {
-    if (!r || typeof r !== "object") {
-      skippedNoDomain++;
-      continue;
-    }
-    const record = r as Record<string, unknown>;
-    const domain = extractDomainCandidate(record);
+  for (const record of records) {
+    const domain = normalizeDomain(record["Source URL"] ?? "");
     if (!domain) {
       skippedNoDomain++;
       continue;
     }
 
-    const name = pick(record, ["name", "Name", "source", "Source", "source_name"]);
-    const biasRating = pick(record, ["bias", "Bias", "bias_rating", "biasRating", "political_bias"]);
-    const factualRating = pick(record, [
-      "factual_reporting",
-      "factualReporting",
-      "factual_rating",
-      "factualRating",
-      "factual",
-      "Factual Reporting",
-    ]);
-    const credibility = pick(record, ["credibility", "Credibility", "credibility_rating"]);
-    const country = pick(record, ["country", "Country"]);
-    const mediaType = pick(record, ["media_type", "mediaType", "type", "Type"]);
+    const values = {
+      domain,
+      name: record.Source ?? null,
+      bias: record.Bias ?? null,
+      politicalBias: record["Political Bias"] ?? null,
+      factualRating: record["Factual Reporting"] ?? null,
+      credibility: record.Credibility ?? null,
+      country: record.Country ?? null,
+      mediaType: record["Media Type"] ?? null,
+      raw: JSON.stringify(record),
+    };
 
     await db
       .insert(sourceCredibility)
-      .values({
-        domain,
-        name,
-        biasRating,
-        factualRating,
-        credibility,
-        country,
-        mediaType,
-        raw: JSON.stringify(record),
-      })
+      .values(values)
       .onConflictDoUpdate({
         target: sourceCredibility.domain,
-        set: {
-          name,
-          biasRating,
-          factualRating,
-          credibility,
-          country,
-          mediaType,
-          raw: JSON.stringify(record),
-          fetchedAt: new Date(),
-        },
+        set: { ...values, fetchedAt: new Date() },
       });
     upserted++;
   }
 
-  return { fetched: records.length, upserted, skippedNoDomain, sampleKeys };
+  return { fetched: records.length, upserted, skippedNoDomain };
 }
 
 export interface CredibilityLookup {
   domain: string;
-  biasRating: string | null;
+  bias: string | null;
   factualRating: string | null;
   credibility: string | null;
+}
+
+// MBFC's own explicit disqualifying categories — distinct from ordinary
+// political-lean labels (Left/Left-Center/Least Biased/Right-Center/
+// Right/Pro-Science), which stay in scope regardless of which side they
+// lean. See schema.ts's own doc comment for the real confirmed examples
+// (Xinhua/Sputnik/Press TV/Breitbart all carry one of these, Daily Caller
+// does not despite also being politically right-leaning).
+const DISQUALIFYING_BIAS_CATEGORIES = new Set(["Questionable", "Conspiracy-Pseudoscience", "Satire"]);
+const DISQUALIFYING_FACTUAL_RATINGS = new Set(["Low", "Very Low"]);
+const DISQUALIFYING_CREDIBILITY = new Set(["Low"]);
+
+// The single gating decision classify.ts actually needs — kept here
+// (not duplicated in classify.ts) so the definition of "low credibility"
+// per this data source has exactly one place to change. Returns false
+// (don't reject) for a domain with no MBFC entry at all — no data is not
+// evidence of anything, the same "don't flag on mere unfamiliarity"
+// principle already applied to Gemini's own credibility judgment.
+export function isLowCredibility(lookup: CredibilityLookup | undefined): boolean {
+  if (!lookup) return false;
+  if (lookup.bias && DISQUALIFYING_BIAS_CATEGORIES.has(lookup.bias)) return true;
+  if (lookup.factualRating && DISQUALIFYING_FACTUAL_RATINGS.has(lookup.factualRating)) return true;
+  if (lookup.credibility && DISQUALIFYING_CREDIBILITY.has(lookup.credibility)) return true;
+  return false;
 }
 
 // One SELECT for the whole (small, local) table — loaded once per ingest
@@ -184,7 +154,7 @@ export async function loadCredibilityMap(): Promise<Map<string, CredibilityLooku
   const rows = await db
     .select({
       domain: sourceCredibility.domain,
-      biasRating: sourceCredibility.biasRating,
+      bias: sourceCredibility.bias,
       factualRating: sourceCredibility.factualRating,
       credibility: sourceCredibility.credibility,
     })
