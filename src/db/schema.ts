@@ -563,6 +563,48 @@ export const feedArchive = pgTable(
 export type FeedArchiveRow = typeof feedArchive.$inferSelect;
 export type NewFeedArchiveRow = typeof feedArchive.$inferInsert;
 
+// Local cache of MBFC's (Media Bias/Fact Check) domain-level credibility
+// database (2026-09-11, user request — deterministic source-credibility
+// gating for GDELT, replacing Gemini's own judgment-call version of the
+// same thing). MBFC's own RapidAPI listing is HARD-CAPPED at 3 requests
+// per month total (confirmed live against the real subscribed plan), but
+// its one endpoint (GET /fetch-data, no params at all) returns the
+// ENTIRE ~9,000+ source database in a single call — so this is a bulk
+// sync-then-cache-locally table, never a live per-classification lookup.
+// See src/lib/sourceCredibility.ts for the sync logic; classify.ts reads
+// this table (via an in-memory map loaded once per ingest cycle, not a
+// DB round-trip per item) to gate gdelt sources deterministically.
+export const sourceCredibility = pgTable(
+  "source_credibility",
+  {
+    id: serial("id").primaryKey(),
+    // Hostname, lowercased, no "www." — same normalization as
+    // classifierAudit.ts's extractDomain, so a lookup never misses on a
+    // formatting mismatch between the two.
+    domain: text("domain").notNull().unique(),
+    name: text("name"),
+    biasRating: text("bias_rating"),
+    factualRating: text("factual_rating"),
+    // MBFC's own credibility label for the source, when distinct from
+    // factualRating (their schema sometimes carries both) — nullable
+    // since this is populated from whatever the real API response
+    // actually contains, not assumed in advance.
+    credibility: text("credibility"),
+    country: text("country"),
+    mediaType: text("media_type"),
+    // The raw MBFC record for this domain, JSON-stringified — kept
+    // alongside the extracted columns above so a parsing mistake in this
+    // table's own columns is recoverable without spending another one of
+    // the 3 monthly calls to re-fetch.
+    raw: text("raw"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("source_credibility_domain_idx").on(table.domain)],
+);
+
+export type SourceCredibilityRow = typeof sourceCredibility.$inferSelect;
+export type NewSourceCredibilityRow = typeof sourceCredibility.$inferInsert;
+
 // Lightweight daily counter for Gemini API calls (embeddings now, country
 // briefs next) — NOT a hard billing cap the way translation_usage is.
 // Google Translate has no meaningful free tier, so translationUsage exists

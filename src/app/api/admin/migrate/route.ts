@@ -357,6 +357,21 @@ const STATEMENTS = [
   // leaving them orphaned.
   sql`ALTER TABLE classification_archive DROP COLUMN IF EXISTS native_kept`,
   sql`ALTER TABLE classification_archive DROP COLUMN IF EXISTS native_severity`,
+  // MBFC source-credibility cache (2026-09-11) — see sourceCredibility's
+  // own doc comment in schema.ts.
+  sql`CREATE TABLE IF NOT EXISTS source_credibility (
+    id SERIAL PRIMARY KEY,
+    domain TEXT NOT NULL UNIQUE,
+    name TEXT,
+    bias_rating TEXT,
+    factual_rating TEXT,
+    credibility TEXT,
+    country TEXT,
+    media_type TEXT,
+    raw TEXT,
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS source_credibility_domain_idx ON source_credibility (domain)`,
 ];
 
 export async function GET(req: NextRequest) {
