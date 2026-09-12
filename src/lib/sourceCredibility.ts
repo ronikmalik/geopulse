@@ -129,7 +129,14 @@ export interface CredibilityLookup {
 // (Xinhua/Sputnik/Press TV/Breitbart all carry one of these, Daily Caller
 // does not despite also being politically right-leaning).
 const DISQUALIFYING_BIAS_CATEGORIES = new Set(["Questionable", "Conspiracy-Pseudoscience", "Satire"]);
-const DISQUALIFYING_FACTUAL_RATINGS = new Set(["Low", "Very Low"]);
+// "Mixed" sits below "Mostly Factual" on MBFC's own factual-reporting scale
+// (High/Very High > Mostly Factual > Mixed > Low > Very Low) — it means the
+// source's own fact-checks come back inconsistent, not that it's merely
+// unfamiliar or opinionated. Added 2026-09-11 per real-data review: of 2,379
+// domains rated Mixed, 823 had Medium/High credibility (not already excluded
+// by the credibility check below) — real, if lower-tier, outlets going
+// forward get held to this too, by design, for gdelt specifically.
+const DISQUALIFYING_FACTUAL_RATINGS = new Set(["Low", "Very Low", "Mixed"]);
 const DISQUALIFYING_CREDIBILITY = new Set(["Low"]);
 
 // The single gating decision classify.ts actually needs — kept here
