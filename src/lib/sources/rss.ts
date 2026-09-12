@@ -125,13 +125,15 @@ export const RSS_FEEDS: { name: string; url: string }[] = [
   { name: "yonhap", url: "https://en.yna.co.kr/RSS/news.xml" },
   // Middle East — Washington DC-based, Arab-American-founded, HIGH
   // credibility/HIGH factual per MBFC, no foreign-agent registration
-  // question. Times of Israel gives the Israeli vantage point; this
-  // gives the Arab-world one, without Al Jazeera's baggage.
+  // question. Gives the Arab-world vantage point, without Al Jazeera's
+  // baggage.
   { name: "al-monitor", url: "https://www.al-monitor.com/rss.xml" },
-  { name: "times-of-israel", url: "https://www.timesofisrael.com/feed/" },
-  // Israeli-domestic-critical counterweight to Times of Israel — same
-  // "disclosed lean, still high factual reporting" logic as Meduza/Moscow
-  // Times above. Ownership includes a 25% stake held by Leonid Nevzlin
+  // times-of-israel removed (2026-09-11, user request) — its feed had
+  // been returning a hard 403 (WAF/bot-block) on every single ingest
+  // cycle for the entire session, never once successfully fetched.
+  // Gives the Israeli vantage point on its own now — same "disclosed
+  // lean, still high factual reporting" logic as Meduza/Moscow Times
+  // above. Ownership includes a 25% stake held by Leonid Nevzlin
   // (Russian-Israeli businessman) — disclosed in SOURCE_CREDIBILITY.md.
   { name: "haaretz", url: "https://www.haaretz.com/srv/haaretz-latest-headlines" },
   // Africa

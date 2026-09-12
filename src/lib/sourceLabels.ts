@@ -17,7 +17,6 @@ const RSS_OUTLET_NAMES: Record<string, string> = {
   "cna-world": "CNA",
   "the-hindu": "The Hindu",
   "al-monitor": "Al-Monitor",
-  "times-of-israel": "Times of Israel",
   allafrica: "AllAfrica",
   "premium-times-nigeria": "Premium Times (Nigeria)",
   africanews: "Africanews",

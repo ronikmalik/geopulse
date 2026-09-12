@@ -86,7 +86,6 @@ const RSS_SOURCE_REGION: Record<string, Region> = {
   "rss:rfa": "asia-pacific",
   "rss:yonhap": "asia-pacific",
   "rss:al-monitor": "middle-east",
-  "rss:times-of-israel": "middle-east",
   "rss:haaretz": "middle-east",
   "rss:allafrica": "africa",
   "rss:premium-times-nigeria": "africa",
