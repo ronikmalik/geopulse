@@ -53,7 +53,7 @@ async function fetchDayBuckets(byCategory: boolean): Promise<DayBucketRow[]> {
     })
     .from(events)
     .where(
-      sql`${events.country} is not null and ${events.reviewStatus} = 'approved' and ${events.publishedAt} > now() - interval '${sql.raw(String(LOOKBACK_DAYS + 1))} days'`,
+      sql`${events.country} is not null and ${events.reviewStatus} = 'approved' and ${events.preKillSwitchAt} is null and ${events.publishedAt} > now() - interval '${sql.raw(String(LOOKBACK_DAYS + 1))} days'`,
     )
     .groupBy(
       ...(byCategory

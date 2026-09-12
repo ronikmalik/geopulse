@@ -106,6 +106,20 @@ export const events = pgTable(
     // queried by that pass and stay NULL permanently; harmless, since
     // nothing reads this column as "needs attention" for those rows.
     geocodedAt: timestamp("geocoded_at", { withTimezone: true }),
+    // NULL = a normal, currently-live row. Set to the activation time by
+    // the front-end kill switch (see src/lib/killSwitch.ts and GET/POST
+    // /api/admin/kill-switch, 2026-09-11 user request: "remove all of the
+    // feed and let it recalibrate... the data should remain in archives...
+    // earmarked as pre-kill switched"). Deliberately NOT a delete — every
+    // row stays in this table exactly as classified, just excluded from
+    // every user-facing read path (see NOT_KILL_SWITCHED in stream/route.ts,
+    // risk.ts, eventVolumeAnomaly.ts, and eventDedup.ts's fetchRecentPrimaries
+    // — the last of those matters even though dedup isn't user-facing itself:
+    // without it, a fresh post-switch event could get matched as a duplicate
+    // of a hidden pre-switch primary and inherit its invisibility). Restoring
+    // (POST /api/admin/kill-switch with action=restore) clears this back to
+    // NULL for every row, reversible at any time since nothing was deleted.
+    preKillSwitchAt: timestamp("pre_kill_switch_at", { withTimezone: true }),
   },
   (table) => [
     index("events_created_at_idx").on(table.createdAt),
@@ -115,6 +129,7 @@ export const events = pgTable(
     index("events_primary_event_id_idx").on(table.primaryEventId),
     index("events_review_status_idx").on(table.reviewStatus),
     index("events_geocoded_at_idx").on(table.geocodedAt),
+    index("events_pre_kill_switch_at_idx").on(table.preKillSwitchAt),
     // Added 2026-09-09 alongside the anomaly-detection event-volume
     // signals (src/lib/eventVolumeAnomaly.ts), which GROUP BY
     // date_trunc('day', published_at) — but every date-window query in

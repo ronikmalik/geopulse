@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { events } from "@/db/schema";
 import { desc, gt, isNull, and, eq, sql, getTableColumns } from "drizzle-orm";
 import { withCache } from "@/lib/layerCache";
+import { NOT_KILL_SWITCHED } from "@/lib/killSwitch";
 
 // Cross-outlet duplicates (see src/lib/eventDedup.ts) are hidden from the
 // main feed — only primaries (primaryEventId IS NULL) stream here.
@@ -121,7 +122,7 @@ export async function GET(req: NextRequest) {
         const recent = await db
           .select(withSourceCount)
           .from(events)
-          .where(and(PRIMARY_ONLY, APPROVED_ONLY))
+          .where(and(PRIMARY_ONLY, APPROVED_ONLY, NOT_KILL_SWITCHED))
           .orderBy(desc(events.id))
           .limit(INITIAL_BACKFILL_LIMIT);
         const ordered = recent.reverse();
@@ -153,7 +154,7 @@ export async function GET(req: NextRequest) {
           const candidates = await db
             .select(withSourceCount)
             .from(events)
-            .where(and(gt(events.id, lastId), PRIMARY_ONLY))
+            .where(and(gt(events.id, lastId), PRIMARY_ONLY, NOT_KILL_SWITCHED))
             .orderBy(events.id)
             .limit(50);
 

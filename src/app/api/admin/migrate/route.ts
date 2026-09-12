@@ -380,6 +380,10 @@ const STATEMENTS = [
   sql`ALTER TABLE source_credibility DROP COLUMN IF EXISTS bias_rating`,
   sql`ALTER TABLE source_credibility ADD COLUMN IF NOT EXISTS bias TEXT`,
   sql`ALTER TABLE source_credibility ADD COLUMN IF NOT EXISTS political_bias TEXT`,
+  // Front-end kill switch (2026-09-11) — see events.preKillSwitchAt's own
+  // doc comment in schema.ts.
+  sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS pre_kill_switch_at TIMESTAMPTZ`,
+  sql`CREATE INDEX IF NOT EXISTS events_pre_kill_switch_at_idx ON events (pre_kill_switch_at)`,
 ];
 
 export async function GET(req: NextRequest) {

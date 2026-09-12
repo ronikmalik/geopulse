@@ -2,6 +2,7 @@ import { sql, eq, and, isNull, gt } from "drizzle-orm";
 import { getDb } from "@/db";
 import { events } from "@/db/schema";
 import { COUNTRY_NAME_TO_ALPHA2 } from "./countryNames";
+import { NOT_KILL_SWITCHED } from "./killSwitch";
 
 // Cross-outlet duplicate detection: multiple RSS/GDELT sources often report
 // the exact same real-world incident within the same news cycle. The
@@ -163,6 +164,10 @@ export async function fetchRecentPrimaries(
         eq(events.category, category),
         isNull(events.primaryEventId),
         gt(events.publishedAt, since),
+        // A hidden pre-kill-switch row must never become the primary a
+        // fresh, post-switch event attaches to — that would inherit its
+        // invisibility (see NOT_KILL_SWITCHED's own doc comment).
+        NOT_KILL_SWITCHED,
       ),
     );
   return rows;
