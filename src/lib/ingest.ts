@@ -19,7 +19,7 @@ import {
   type ClassifiedItem,
 } from "./classify";
 import { retryFailedClassificationsViaTranslation } from "./classifyTranslated";
-import { loadCredibilityMap, type CredibilityLookup } from "./sourceCredibility";
+import { loadCredibilityMap } from "./sourceCredibility";
 import { trackFetch, recordSourceHealth, type TrackedFetch } from "./sourceHealth";
 import { correlationGroupId } from "./correlation";
 import { archiveClassifications } from "./classificationArchive";
@@ -432,14 +432,25 @@ export async function runIngest(
   // cache table (~9,000 domains), not a live API call. See classify.ts's
   // own credibilityMap param and sourceCredibility.ts's doc comment for
   // why (the real MBFC API behind it is hard-capped at 3 requests/month
-  // total, so it's synced separately and rarely, never from here). Fails
-  // open (empty map, nothing gets rejected on credibility grounds) if the
-  // read itself fails — a courtesy check, not the only thing standing
-  // between the feed and a bad source, same posture as this codebase's
-  // other budget/courtesy checks.
+  // total, so it's synced separately and rarely, never from here).
+  //
+  // 2026-09-11 (user request: "have your system reject, not accept, the
+  // sources we dont have a reporting on"): classify.ts now rejects any
+  // gdelt domain with no MBFC entry at all, not just a documented-bad one
+  // — a real behavioral flip from "unknown passes" to "unknown rejected".
+  // That makes the distinction below load-bearing in a way it wasn't
+  // before: `undefined` here means "the table itself couldn't be read this
+  // cycle" (classify.ts skips the gate entirely, same graceful-degradation
+  // posture as always — a transient DB hiccup must never silently reject
+  // every gdelt item for a whole cycle), while a real Map — even one that
+  // happens to be empty — now means "checked, and this domain has no
+  // rating" for every lookup miss. Returning `new Map()` on failure here
+  // would be indistinguishable from that and would fail CLOSED instead of
+  // open on every transient error, a far bigger blast radius than the
+  // credibility check itself is meant to have.
   const credibilityMap = await loadCredibilityMap().catch((err) => {
     console.error(`loadCredibilityMap failed: ${err}`);
-    return new Map<string, CredibilityLookup>();
+    return undefined;
   });
 
   let inserted = 0;

@@ -5,7 +5,7 @@ import type { RawItem } from "./sources/gdelt";
 import { resolveCountryFromText } from "./countryNames";
 import { COUNTRY_CENTROIDS } from "./countryCentroids";
 import { isCountryInSourceRegion } from "./regionScope";
-import { normalizeDomain, isLowCredibility, type CredibilityLookup } from "./sourceCredibility";
+import { normalizeDomain, isLowCredibility, lookupCredibility, type CredibilityLookup } from "./sourceCredibility";
 
 // LLM classification only ever assigns news-query-driven categories (plus
 // "other") — the feed-driven categories (earthquake, natural-disaster) are
@@ -770,6 +770,18 @@ export function deriveFieldsForRecovery(
 // caller of this function (classifyTranslated.ts, tests) doesn't need to
 // thread a map through for a check that's specifically about gdelt's
 // wide-open domain universe, not RSS's already-curated source list.
+//
+// FAIL CLOSED as of 2026-09-11 (user request: "have your system reject,
+// not accept, the sources we dont have a reporting on") — a live coverage
+// check found only 56.9% of the current gdelt feed's domains have ANY
+// MBFC entry at all; the other 43.1% used to pass by default just because
+// they were unrated. Now a gdelt domain with no MBFC row (or no parseable
+// domain at all) is rejected exactly like a documented-bad one, not waved
+// through. `credibilityMap === undefined` is the ONLY escape hatch, and it
+// means something specific: the local table itself failed to load this
+// cycle (see ingest.ts's own doc comment) — a transient error, not "this
+// domain has no reporting" — so the gate is skipped entirely rather than
+// rejecting every gdelt item for the whole cycle on a DB hiccup.
 export function classifyByKeywords(
   item: RawItem,
   credibilityMap?: Map<string, CredibilityLookup>,
@@ -781,7 +793,8 @@ export function classifyByKeywords(
   if (item.source === "gdelt" && PERIODIC_REPORT_PATTERNS.test(text)) return null;
   if (item.source === "gdelt" && credibilityMap) {
     const domain = normalizeDomain(item.url);
-    if (domain && isLowCredibility(credibilityMap.get(domain))) return null;
+    const lookup = domain ? lookupCredibility(domain, credibilityMap) : undefined;
+    if (!lookup || isLowCredibility(lookup)) return null;
   }
   const severity = assessIncidentSeverity(text);
   if (severity === null || severity < MIN_SEVERITY_TO_INCLUDE) return null;

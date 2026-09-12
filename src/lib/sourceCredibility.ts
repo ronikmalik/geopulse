@@ -152,6 +152,29 @@ export function isLowCredibility(lookup: CredibilityLookup | undefined): boolean
   return false;
 }
 
+// A live coverage check (2026-09-11) found real state-media evasion: MBFC
+// rates the bare domain "news.cn" as Questionable/Low, but Xinhua's English
+// arm publishes from "english.news.cn" — an exact-match lookup on the full
+// hostname never finds it. Same for "news.antiwar.com" against a listed
+// "antiwar.com". This tries the full hostname first, then progressively
+// strips the leftmost label, stopping once only 2 labels remain (never
+// tries a bare "cn"/"com" — collapsing to a real public-suffix-style TLD
+// would risk matching a coincidental short MBFC row against unrelated
+// sites). Safe by construction: MBFC's ~9k rows are real curated outlet
+// domains, not generic strings, so a false hit on a stripped 2-label
+// candidate (e.g. "co.uk" itself being a listed row) isn't a realistic risk.
+export function lookupCredibility(
+  domain: string,
+  map: Map<string, CredibilityLookup>,
+): CredibilityLookup | undefined {
+  const labels = domain.split(".");
+  for (let i = 0; i <= labels.length - 2; i++) {
+    const hit = map.get(labels.slice(i).join("."));
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
 // One SELECT for the whole (small, local) table — loaded once per ingest
 // cycle by the caller and passed through as a plain Map, not re-queried
 // per candidate. See classify.ts's own use of this.
