@@ -189,7 +189,10 @@ function silhouetteScore(normalized: number[][], assignments: number[], k: numbe
   for (let i = 0; i < n; i++) {
     const ownCluster = assignments[i];
     const ownMembers = byCluster[ownCluster].filter((j) => j !== i);
-    if (ownMembers.length === 0) continue; // a singleton cluster has no defined a(i) — excluded from the average, not treated as 0
+    if (ownMembers.length === 0) {
+      counted++; // Standard silhouette convention: singleton samples contribute zero.
+      continue;
+    }
     const a = ownMembers.reduce((s, j) => s + cosineDistance(normalized[i], normalized[j]), 0) / ownMembers.length;
 
     let b = Infinity;
@@ -201,7 +204,7 @@ function silhouetteScore(normalized: number[][], assignments: number[], k: numbe
     }
     if (b === Infinity) continue; // only one non-empty cluster exists — no "nearest other cluster" to compare against
 
-    const s = (b - a) / Math.max(a, b);
+    const s = Math.max(a, b) === 0 ? 0 : (b - a) / Math.max(a, b);
     total += s;
     counted++;
   }

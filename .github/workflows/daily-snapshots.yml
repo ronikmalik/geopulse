@@ -1,0 +1,53 @@
+name: Daily snapshots
+
+# The once-a-day jobs that used to be vercel.ts cron entries (2026-09-19,
+# moved here with the rest of the pipeline — see scripts/run-job.ts). Each
+# is scheduled at the same UTC time it had on Vercel. They are NOT
+# idempotent (snapshotCountryStates inserts one row per country per call),
+# so they must run from exactly one scheduler — vercel.ts no longer lists
+# them; only the idempotent daily /api/ingest floor stays there.
+#
+#   snapshot          18:00 UTC  country_state_history + risk-model grading
+#   snapshot-flights  18:30 UTC  aircraft/GPS-jamming baselines + anomaly scan
+#   audit-classifier  20:00 UTC  Gemini backlog audit sweep (lowest priority
+#                                consumer of the shared audit budget)
+on:
+  schedule:
+    - cron: "0 18 * * *"
+    - cron: "30 18 * * *"
+    - cron: "0 20 * * *"
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "snapshot | snapshot-flights | audit-classifier"
+        required: true
+        default: snapshot
+
+permissions:
+  contents: read
+
+jobs:
+  pick:
+    runs-on: ubuntu-latest
+    outputs:
+      job: ${{ steps.pick.outputs.job }}
+    steps:
+      - id: pick
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "job=${{ github.event.inputs.job }}" >> "$GITHUB_OUTPUT"
+          else
+            case "${{ github.event.schedule }}" in
+              "0 18 * * *")  echo "job=snapshot" >> "$GITHUB_OUTPUT" ;;
+              "30 18 * * *") echo "job=snapshot-flights" >> "$GITHUB_OUTPUT" ;;
+              "0 20 * * *")  echo "job=audit-classifier" >> "$GITHUB_OUTPUT" ;;
+              *) echo "Unknown schedule '${{ github.event.schedule }}'" && exit 1 ;;
+            esac
+          fi
+  run:
+    needs: pick
+    uses: ./.github/workflows/_run-job.yml
+    with:
+      job: ${{ needs.pick.outputs.job }}
+      timeout-minutes: 10
+    secrets: inherit

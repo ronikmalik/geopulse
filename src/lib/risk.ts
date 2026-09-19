@@ -301,7 +301,7 @@ export async function getCountryThreatDetail(country: string): Promise<CountryTh
 // same FeedPanel/AlertToast components used for the live stream can render
 // it without a shape adapter. The client-side event stream only ever holds
 // the most recent ~100 rows across ALL countries combined (see
-// api/stream/route.ts's INITIAL_BACKFILL_LIMIT), so filtering that buffer
+// api/events/feed/route.ts's INITIAL_LIMIT), so filtering that buffer
 // by country — the previous approach — silently came up empty for any
 // country whose events had aged out of that shared window. This queries
 // the DB directly instead, scoped to one country.
@@ -317,7 +317,7 @@ export async function getEventsByCountry(
   return db
     .select({
       ...getTableColumns(events),
-      sourceCount: sql<number>`(select count(*) from ${events} e2 where e2.primary_event_id = ${events.id})`,
+      sourceCount: sql<number>`(select count(*) from ${events} e2 where e2.primary_event_id = ${events.id} and e2.review_status = 'approved' and e2.pre_kill_switch_at is null)`,
     })
     .from(events)
     .where(
@@ -347,7 +347,7 @@ export async function getEventsByCategories(
   return db
     .select({
       ...getTableColumns(events),
-      sourceCount: sql<number>`(select count(*) from ${events} e2 where e2.primary_event_id = ${events.id})`,
+      sourceCount: sql<number>`(select count(*) from ${events} e2 where e2.primary_event_id = ${events.id} and e2.review_status = 'approved' and e2.pre_kill_switch_at is null)`,
     })
     .from(events)
     .where(

@@ -1,13 +1,16 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getRecentAiUsage } from "@/lib/aiUsage";
+import { isCronAuthorized } from "@/lib/cronAuth";
 
-// Read-only, unauthenticated like /api/admin/translation-usage — same
-// "nothing sensitive, just counts" posture. Not a budget check the way
-// that route is (see the doc comment on the ai_usage table in
-// src/db/schema.ts for why there's no cap here to report against) — just
-// visibility into whether the embedding/brief pipeline is actually
-// running.
-export async function GET() {
+// Read-only. Was unauthenticated ("just counts") until the 2026-09-19
+// security pass — per-kind daily Gemini call counts are still operational
+// telemetry that maps this app's exact quota headroom for anyone probing
+// it, and nothing in the front end reads this route, so there's no reason
+// to leave it open. Same CRON_SECRET gate as every other /api/admin/*.
+export async function GET(req: NextRequest) {
+  if (!isCronAuthorized(req)) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
   const recent = await getRecentAiUsage();
   return NextResponse.json({ checkedAt: new Date().toISOString(), recent });
 }

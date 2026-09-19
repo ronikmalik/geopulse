@@ -3,6 +3,9 @@ name: Train text classifier
 # Weekly, same reasoning as train-risk-model.yml/train-narrative-
 # clusters.yml. Offset from both so the three weekly training jobs don't
 # compete for the same moment.
+# In-process on the runner since 2026-09-19 (see _run-job.yml) — training
+# is the one place the old 55-120s Vercel maxDuration was actually tight;
+# the runner has no such clock.
 on:
   schedule:
     - cron: "0 13 * * 0"
@@ -13,17 +16,8 @@ permissions:
 
 jobs:
   train:
-    runs-on: ubuntu-latest
-    timeout-minutes: 6
-    steps:
-      - name: Call /api/admin/train-text-classifier
-        run: |
-          status=$(curl -sS -o /tmp/body.txt -w "%{http_code}" \
-            -X GET "https://geopulse-green.vercel.app/api/admin/train-text-classifier" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
-          echo "HTTP $status"
-          cat /tmp/body.txt
-          if [ "$status" -ge 300 ]; then
-            echo "Training request failed"
-            exit 1
-          fi
+    uses: ./.github/workflows/_run-job.yml
+    with:
+      job: train-text-classifier
+      timeout-minutes: 15
+    secrets: inherit

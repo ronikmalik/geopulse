@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchOpenMeteoConditions } from "@/lib/sources/openmeteo";
 import { withCache } from "@/lib/layerCache";
+import { cachedJson } from "@/lib/apiParams";
 
 // See src/app/api/layers/flights/route.ts's 2026-09-04 comment.
 export async function GET() {
@@ -10,7 +11,7 @@ export async function GET() {
       5 * 60_000,
       fetchOpenMeteoConditions,
     );
-    return NextResponse.json({ conditions });
+    return cachedJson({ conditions }, 300);
   } catch (err) {
     console.error(`layer:weather failed: ${err}`);
     return NextResponse.json({ conditions: [] });

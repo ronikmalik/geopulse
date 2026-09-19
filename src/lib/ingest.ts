@@ -831,7 +831,7 @@ export async function runIngest(
   }
 
   if (!priorityGdelt) {
-    const [, noveltyResult] = await Promise.allSettled([
+    const [, , noveltyResult] = await Promise.allSettled([
       runEmbeddingBackfillChain(),
       runGeminiAuditChain(),
       // Project 1 (narrative clustering, 2026-09-09) — pure arithmetic

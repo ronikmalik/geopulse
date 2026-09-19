@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
 import { fetchTelegramChannel, TELEGRAM_CHANNELS } from "@/lib/sources/telegram";
 import { withCache } from "@/lib/layerCache";
+import { cachedJson } from "@/lib/apiParams";
 import type { TelegramLayerPost } from "@/lib/dataLayerTypes";
 
 // Unlike the ingest.ts rotation (which spreads the 9 channels across
@@ -61,5 +61,5 @@ export async function GET() {
     return all;
   });
 
-  return NextResponse.json({ posts });
+  return cachedJson({ posts }, 300);
 }

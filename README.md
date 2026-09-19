@@ -15,7 +15,7 @@ Live at: https://geopulse-green.vercel.app
   Political & Governance, Climate & Environment, Natural & Biological
   Hazards, Human & Social, Infrastructure & Connectivity, Supply Chain &
   Resource Security, Cyber & Technology.
-- **Threat Level (1–5) + Momentum (0–100, directional)** per country and
+- **Pulse Level (1–4) + Momentum (0–100, directional)** per country and
   per pillar (`src/lib/threat.ts`, `src/lib/risk.ts`), combined via an
   escalation model rather than an average — see `docs/ROADMAP.md` for the
   full design rationale and what's still ahead.
@@ -49,4 +49,18 @@ pipeline the production cron job runs every ~15 minutes).
 ## Stack
 
 Next.js (App Router) · Postgres via Drizzle ORM (Neon) · globe.gl / three.js
-for the 3D globe · Server-Sent Events for the live feed.
+for the 3D globe · a lightweight CDN-cached poll for the live feed.
+
+## Checks
+
+`npm test` runs the offline regression suite (database calls are mocked).
+Run `npm run lint` and `npx next typegen && npx tsc --noEmit --incremental false`
+for lint and type checks. Route type generation is needed on a fresh checkout.
+
+## Scheduled pipeline
+
+Every scheduled job (ingest, pre-publish review, briefs, daily snapshots,
+weekly model training) runs in-process on GitHub Actions runners via
+`scripts/run-job.ts` — not on Vercel — see `.github/workflows/` and
+`docs/ARCHITECTURE.md` §10. Run any job locally with
+`npm run job -- <name>` (e.g. `npm run job -- review-pending`).

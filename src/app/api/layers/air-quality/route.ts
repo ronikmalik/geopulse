@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchAirQuality } from "@/lib/sources/openMeteoAirQuality";
 import { withCache } from "@/lib/layerCache";
+import { cachedJson } from "@/lib/apiParams";
 
 // See src/app/api/layers/flights/route.ts's 2026-09-04 comment. Switched
 // from OpenAQ to Open-Meteo 2026-09-09 — OPENAQ_API_KEY had never actually
@@ -13,7 +14,7 @@ export async function GET() {
     const readings = await withCache("layer:air-quality", 30 * 60_000, () =>
       fetchAirQuality(),
     );
-    return NextResponse.json({ readings });
+    return cachedJson({ readings }, 300);
   } catch (err) {
     console.error(`layer:air-quality failed: ${err}`);
     return NextResponse.json({ readings: [] });

@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
 // route performs. See src/lib/killSwitch.ts for what each actually does
 // (a hide, and its exact reverse — never a delete).
 export async function POST(req: NextRequest) {
-  if (!isCronAuthorized(req)) {
+  if (!isCronAuthorized(req, { headerOnly: true })) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const action = req.nextUrl.searchParams.get("action");

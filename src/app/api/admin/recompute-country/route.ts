@@ -48,7 +48,7 @@ export const maxDuration = 55;
 const TEXT_CLASSIFIED_SOURCES = ["gdelt", "usgs", "eonet"];
 
 export async function GET(req: NextRequest) {
-  if (!isCronAuthorized(req)) {
+  if (!isCronAuthorized(req, { headerOnly: true })) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const apply = req.nextUrl.searchParams.get("apply") === "true";

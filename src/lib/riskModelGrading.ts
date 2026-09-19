@@ -1,7 +1,7 @@
 import { and, isNull, lte, eq, gte } from "drizzle-orm";
 import { getDb } from "@/db";
 import { riskPredictions, countryStateHistory } from "@/db/schema";
-import { findClosestSnapshot } from "@/lib/riskModel";
+import { findClosestSnapshot, MATCH_TOLERANCE_MS } from "@/lib/riskModel";
 
 // Daily grading pass (called from /api/admin/snapshot, right after that
 // route's own snapshot write — grading a prediction whose window ends
@@ -42,6 +42,7 @@ export async function gradeResolvedPredictions(): Promise<GradingResult> {
     { snapshotAt: Date; score: number; threatLevel: number }[]
   >();
   for (const country of countries) {
+    const targetTimes = resolvable.filter((p) => p.country === country).map((p) => p.resolvesAt.getTime());
     const rows = await db
       .select({
         snapshotAt: countryStateHistory.snapshotAt,
@@ -56,7 +57,8 @@ export async function gradeResolvedPredictions(): Promise<GradingResult> {
           // country could plausibly resolve — bounding this avoids
           // pulling a country's entire history just to grade one recent
           // prediction.
-          gte(countryStateHistory.snapshotAt, new Date(Date.now() - 30 * 86_400_000)),
+          gte(countryStateHistory.snapshotAt, new Date(Math.min(...targetTimes) - MATCH_TOLERANCE_MS)),
+          lte(countryStateHistory.snapshotAt, new Date(Math.max(...targetTimes) + MATCH_TOLERANCE_MS)),
         ),
       )
       .orderBy(countryStateHistory.snapshotAt);

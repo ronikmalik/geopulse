@@ -220,7 +220,12 @@ export async function getDuplicatesOf(primaryId: number): Promise<DuplicateSourc
       publishedAt: events.publishedAt,
     })
     .from(events)
-    .where(eq(events.primaryEventId, primaryId))
+    .where(and(
+      eq(events.primaryEventId, primaryId),
+      eq(events.reviewStatus, "approved"),
+      NOT_KILL_SWITCHED,
+      sql`exists (select 1 from ${events} primary_event where primary_event.id = ${primaryId} and primary_event.review_status = 'approved' and primary_event.pre_kill_switch_at is null)`,
+    ))
     .orderBy(sql`${events.publishedAt} asc`);
   return rows.map((r) => ({ ...r, publishedAt: r.publishedAt.toISOString() }));
 }

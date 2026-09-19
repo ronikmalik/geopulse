@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchElevatedAdvisories } from "@/lib/sources/travelAdvisories";
 import { withCache } from "@/lib/layerCache";
+import { cachedJson } from "@/lib/apiParams";
 
 // State Dept updates this feed a few times a week, not continuously — a
 // long cache (same order as GDP/population's daily World Bank data) avoids
@@ -10,7 +11,7 @@ export async function GET() {
     const advisories = await withCache("layer:travel-advisories", 6 * 60 * 60_000, () =>
       fetchElevatedAdvisories(15),
     );
-    return NextResponse.json({ advisories });
+    return cachedJson({ advisories }, 300);
   } catch (err) {
     console.error(`layer:travel-advisories failed: ${err}`);
     return NextResponse.json({ advisories: [] });

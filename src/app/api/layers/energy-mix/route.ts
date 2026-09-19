@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { fetchOwidEnergyMix } from "@/lib/sources/owidEnergy";
 import { fetchWorldBankIndicator } from "@/lib/sources/worldbank";
 import { withCache } from "@/lib/layerCache";
+import { cachedJson } from "@/lib/apiParams";
 
 const MIN_POPULATION = 5_000_000;
 
@@ -45,7 +46,7 @@ export async function GET() {
       .sort((a, b) => b.value - a.value)
       .slice(0, 10);
 
-    return NextResponse.json({ countries: top });
+    return cachedJson({ countries: top }, 300);
   } catch (err) {
     console.error(`layer:energy-mix failed: ${err}`);
     return NextResponse.json({ countries: [] });

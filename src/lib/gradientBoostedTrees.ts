@@ -173,18 +173,14 @@ export interface GbmTrainOutput {
   selectedMaxDepth: number;
 }
 
-// `x`/`y` = the OUTER training set, already time-split by the caller
-// (riskModel.ts) — same leak-free discipline as linearRegression.ts.
-// Selects (nEstimators, maxDepth) jointly via a nested split of ITS OWN,
-// never the real backtest split, then refits on the full outer set with
-// the winning pair. Trees are scale-invariant to monotonic feature
-// transforms, so unlike linear regression this doesn't standardize
-// features first — there's no equivalent benefit here, and skipping it is
-// a real simplification, not an oversight.
+// Select tree count/depth on the caller's inner split, then refit on all
+// outer training rows. riskModel supplies a purged temporal split; generic
+// callers retain deterministic every-Nth validation. Trees need no scaling.
 export function trainGradientBoostedTrees(
   x: number[][],
   y: number[],
   config: GbmTrainConfig = DEFAULT_GBM_CONFIG,
+  validationSplit?: { train: number[]; test: number[] },
 ): GbmTrainOutput {
   const n = x.length;
   const step = Math.max(1, Math.round(1 / config.validationFraction));
@@ -193,10 +189,10 @@ export function trainGradientBoostedTrees(
   const valX: number[][] = [];
   const valY: number[] = [];
   for (let i = 0; i < n; i++) {
-    if (i % step === 0) {
+    if (validationSplit ? validationSplit.test.includes(i) : i % step === 0) {
       valX.push(x[i]);
       valY.push(y[i]);
-    } else {
+    } else if (!validationSplit || validationSplit.train.includes(i)) {
       innerTrainX.push(x[i]);
       innerTrainY.push(y[i]);
     }

@@ -5,153 +5,153 @@ import type { GeoEvent } from "@/lib/types";
 
 export type ConnectionState = "connecting" | "live" | "disconnected";
 
-const INITIAL_RECONNECT_MS = 1000;
-const MAX_RECONNECT_MS = 15_000;
+// Polling client for GET /api/events/feed (2026-09-19) — replaces the old
+// EventSource client for /api/stream. Same hook contract (`events`,
+// `status`, `incoming`, `dismissIncoming`) so nothing above this file
+// changed; see the route's own header comment for why SSE-on-serverless
+// was the wrong shape for this app's compute budget.
+//
+// Cadence: POLL_INTERVAL_MS while the tab is visible, HIDDEN_POLL_INTERVAL_MS
+// once it's backgrounded (the browser throttles timers there anyway, and
+// nobody is looking — this is where an "always open" monitoring tab used
+// to quietly burn the most). Switching back to the tab polls immediately.
+// Every RECONCILE_EVERY_N_POLLS-th poll re-fetches the whole recent window
+// instead of a delta: that is how later approvals, country/severity
+// corrections and kill-switch removals reach an open tab, since an
+// insertion-id cursor can't represent any of those.
+const POLL_INTERVAL_MS = 12_000;
+const HIDDEN_POLL_INTERVAL_MS = 60_000;
+const RECONCILE_EVERY_N_POLLS = 10;
+const INITIAL_RETRY_MS = 3_000;
+const MAX_RETRY_MS = 60_000;
 
 // This app is explicitly designed to be left open for extended live
-// monitoring (see api/stream/route.ts's background-ingest trigger) — with
-// no cap, `events` and `seenIds` below grow for as long as the tab stays
-// open, degrading render cost over a long session and making the feed-count
-// badge (Dashboard.tsx's `props.events.length`) climb forever instead of
-// reflecting a recent window. Bounded well above the server's own 100-item
-// initial backfill so normal scrollback never feels truncated.
+// monitoring — with no cap, `events` grows for as long as the tab stays
+// open, degrading render cost over a long session and making the feed-
+// count badge (Dashboard.tsx's `props.events.length`) climb forever
+// instead of reflecting a recent window. Bounded well above the server's
+// own 100-item initial window so normal scrollback never feels truncated.
 const MAX_BUFFERED_EVENTS = 500;
+const MAX_INCOMING_EVENTS = 20;
+
+interface FeedResponse {
+  events: GeoEvent[];
+  cursor: number;
+  reconcile: boolean;
+}
+
+function trimBuffer(next: GeoEvent[]): GeoEvent[] {
+  return next.length <= MAX_BUFFERED_EVENTS ? next : next.slice(next.length - MAX_BUFFERED_EVENTS);
+}
 
 export function useEventStream() {
   const [events, setEvents] = useState<GeoEvent[]>([]);
   const [status, setStatus] = useState<ConnectionState>("connecting");
   const [incoming, setIncoming] = useState<GeoEvent[]>([]);
-  const seenIds = useRef<Set<number>>(new Set());
-  const lastIdRef = useRef(0);
-
-  // Batches individual "event" SSE messages into one state update per
-  // animation frame instead of one per message. Matters most exactly when
-  // the user reports lag: switching back to a backgrounded tab. The
-  // browser pauses requestAnimationFrame for hidden tabs, so every row
-  // that streams in (or trickles in via the reconnect poll loop —
-  // api/stream/route.ts sends up to 50 rows per 4s poll, individually, not
-  // batched) while the tab is hidden just accumulates here with zero
-  // re-renders; the moment the tab becomes visible again, rAF resumes and
-  // the whole backlog — which could be 50-100+ rows after a long-hidden
-  // tab during a busy news cycle — applies as exactly ONE setEvents/
-  // setIncoming update instead of one per row. Same rAF-coalescing idiom
-  // Globe.tsx's refreshPolygons already uses for the identical reason.
-  const pendingRowsRef = useRef<GeoEvent[]>([]);
-  const flushScheduledRef = useRef(false);
-  const flushFrameRef = useRef<number | null>(null);
+  const cursorRef = useRef(0);
+  const pollCountRef = useRef(0);
+  const knownIds = useRef<Set<number>>(new Set());
 
   useEffect(() => {
-    let source: EventSource | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let reconnectDelay = INITIAL_RECONNECT_MS;
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let inFlight = false;
+    let retryDelay = INITIAL_RETRY_MS;
+    let hasLoaded = false;
 
-    function scheduleFlush() {
-      if (flushScheduledRef.current) return;
-      flushScheduledRef.current = true;
-      flushFrameRef.current = requestAnimationFrame(() => {
-        flushScheduledRef.current = false;
-        if (cancelled || pendingRowsRef.current.length === 0) return;
-        const batch = pendingRowsRef.current;
-        pendingRowsRef.current = [];
-        setEvents((prev) => {
-          const next = [...prev, ...batch];
-          if (next.length <= MAX_BUFFERED_EVENTS) return next;
-          const trimmed = next.slice(next.length - MAX_BUFFERED_EVENTS);
-          // seenIds must track exactly what's still buffered — otherwise a
-          // dropped-off-the-front event's id stays "seen" forever, so if it
-          // were ever re-sent (e.g. a future backfill window) it would be
-          // silently ignored instead of being added back.
-          seenIds.current = new Set(trimmed.map((e) => e.id));
-          return trimmed;
-        });
-        setIncoming((prev) => [...prev, ...batch]);
-      });
+    function schedule(ms: number) {
+      if (cancelled) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(poll, ms);
     }
 
-    // The server (api/stream/route.ts) closes each connection cleanly
-    // after ~45s to stay under serverless duration limits rather than
-    // risking an abrupt platform kill. We take ownership of reconnecting
-    // here (instead of relying on the browser's built-in EventSource
-    // retry) so we can resume from the last event id — no re-backfill
-    // flicker — and back off if a reconnect attempt itself keeps failing.
-    function connect() {
-      if (cancelled) return;
-      setStatus((prev) => (prev === "live" ? prev : "connecting"));
+    function nextInterval(): number {
+      return typeof document !== "undefined" && document.visibilityState === "hidden"
+        ? HIDDEN_POLL_INTERVAL_MS
+        : POLL_INTERVAL_MS;
+    }
 
-      const url = lastIdRef.current
-        ? `/api/stream?since=${lastIdRef.current}`
-        : "/api/stream";
-      const es = new EventSource(url);
-      source = es;
+    // Full-window reconcile: the server's recent window replaces whatever
+    // the client holds for that id range (so removed/killed rows vanish and
+    // corrected rows update in place), while anything OLDER than the window
+    // is kept as scrollback. Rows that are new to the client still surface
+    // as toasts, same as a delta would. `fresh` is computed from knownIds
+    // (a ref mirror of what's buffered) BEFORE the state updates, never
+    // inside a setState updater — an updater has to be pure (React may
+    // re-run it), and setIncoming from inside one would double-toast.
+    function applyReconcile(window: GeoEvent[]) {
+      if (window.length === 0) return;
+      const windowStart = window[0].id;
+      const fresh = window.filter((e) => !knownIds.current.has(e.id));
+      setEvents((prev) => {
+        const older = prev.filter((e) => e.id < windowStart);
+        const next = trimBuffer([...older, ...window]);
+        knownIds.current = new Set(next.map((e) => e.id));
+        return next;
+      });
+      if (fresh.length > 0 && hasLoaded) {
+        setIncoming((cur) => [...cur, ...fresh].slice(-MAX_INCOMING_EVENTS));
+      }
+    }
 
-      es.addEventListener("backfill", (e) => {
-        const rows = JSON.parse((e as MessageEvent).data) as GeoEvent[];
-        for (const r of rows) seenIds.current.add(r.id);
-        if (rows.length > 0) {
-          lastIdRef.current = Math.max(
-            lastIdRef.current,
-            rows[rows.length - 1].id,
-          );
+    function applyDelta(rows: GeoEvent[]) {
+      const fresh = rows.filter((e) => !knownIds.current.has(e.id));
+      if (fresh.length === 0) return;
+      for (const e of fresh) knownIds.current.add(e.id);
+      setEvents((prev) => {
+        const next = trimBuffer([...prev, ...fresh]);
+        if (next.length < prev.length + fresh.length) {
+          knownIds.current = new Set(next.map((e) => e.id));
         }
-        setEvents(rows);
-        setStatus("live");
-        reconnectDelay = INITIAL_RECONNECT_MS;
+        return next;
       });
+      setIncoming((cur) => [...cur, ...fresh].slice(-MAX_INCOMING_EVENTS));
+    }
 
-      es.addEventListener("event", (e) => {
-        const row = JSON.parse((e as MessageEvent).data) as GeoEvent;
-        lastIdRef.current = Math.max(lastIdRef.current, row.id);
+    async function poll() {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      const wantReconcile = !hasLoaded || pollCountRef.current % RECONCILE_EVERY_N_POLLS === 0;
+      pollCountRef.current += 1;
+      const url = wantReconcile ? "/api/events/feed" : `/api/events/feed?since=${cursorRef.current}`;
+      try {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as FeedResponse;
+        if (cancelled) return;
+        if (data.reconcile) applyReconcile(data.events);
+        else applyDelta(data.events);
+        // The cursor only ever moves forward: a reconcile's cursor is the
+        // window's newest id, which a delta may already have passed.
+        cursorRef.current = Math.max(cursorRef.current, data.cursor);
+        hasLoaded = true;
+        retryDelay = INITIAL_RETRY_MS;
         setStatus("live");
-        reconnectDelay = INITIAL_RECONNECT_MS;
-        if (seenIds.current.has(row.id)) return;
-        seenIds.current.add(row.id);
-        pendingRowsRef.current.push(row);
-        scheduleFlush();
-      });
-
-      es.addEventListener("ping", (e) => {
-        setStatus("live");
-        reconnectDelay = INITIAL_RECONNECT_MS;
-        try {
-          const data = JSON.parse((e as MessageEvent).data) as {
-            lastId?: number;
-          };
-          if (typeof data.lastId === "number") {
-            lastIdRef.current = Math.max(lastIdRef.current, data.lastId);
-          }
-        } catch {
-          // Malformed ping payload — harmless, the connection is still live.
-        }
-      });
-
-      es.onopen = () => {
-        setStatus("live");
-        reconnectDelay = INITIAL_RECONNECT_MS;
-      };
-
-      // Fires for both a real network error and the server's routine
-      // self-close — either way, close out this connection and reopen
-      // from lastIdRef with capped exponential backoff.
-      es.onerror = () => {
-        es.close();
-        if (source === es) source = null;
+        schedule(nextInterval());
+      } catch {
         if (cancelled) return;
         setStatus("disconnected");
-        reconnectTimer = setTimeout(() => {
-          reconnectDelay = Math.min(reconnectDelay * 1.5, MAX_RECONNECT_MS);
-          connect();
-        }, reconnectDelay);
-      };
+        schedule(retryDelay);
+        retryDelay = Math.min(retryDelay * 2, MAX_RETRY_MS);
+      } finally {
+        inFlight = false;
+      }
     }
 
-    connect();
+    function onVisibilityChange() {
+      // Coming back to the tab: poll now rather than waiting out a 60s
+      // hidden-cadence timer. Going hidden: let the current timer run out,
+      // the next schedule() picks the slower cadence on its own.
+      if (document.visibilityState === "visible") schedule(0);
+    }
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    poll();
 
     return () => {
       cancelled = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (flushFrameRef.current !== null) cancelAnimationFrame(flushFrameRef.current);
-      source?.close();
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 

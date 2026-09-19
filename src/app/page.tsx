@@ -121,7 +121,7 @@ export default function Home() {
   // This fetches from the DB (via /api/events) instead of filtering the
   // live SSE buffer: that buffer only ever holds the ~100 most recently
   // inserted events across ALL countries combined (see useEventStream.ts /
-  // api/stream/route.ts), so a country whose events had aged out of that
+  // api/events/feed/route.ts), so a country whose events had aged out of that
   // shared window would filter to nothing and show "Listening for
   // signals…" even with real history in the DB.
   useEffect(() => {

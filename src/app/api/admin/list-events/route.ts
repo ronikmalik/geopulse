@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 // Read-only counterpart to /api/admin/purge — built for the same kind of
 // one-off need: auditing already-stored rows against the current
 // classifier standard (see classify.ts) to decide what to purge, without
-// guessing from the ~100-item /api/stream buffer or iterating every
+// guessing from the ~100-item /api/events/feed buffer or iterating every
 // country through /api/events?country=. Scoped to `source` (exact) or
 // `sourcePrefix` (LIKE 'prefix%', for multi-outlet sources like
 // "rss:meduza"/"telegram:presstv") and a `days` lookback (default matches

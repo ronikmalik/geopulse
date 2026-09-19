@@ -3,7 +3,7 @@ import { fetchEonetHistorical } from "./sources/eonet";
 import { insertDirectItems } from "./ingest";
 
 // One-off/occasional historical backfill — NOT part of the regular ~10-
-// minute live ingest cycle (see src/app/api/stream/route.ts). Populates
+// minute live ingest cycle (see .github/workflows/ingest.yml). Populates
 // real historical events for the Natural & Biological Hazards and Climate
 // & Environment pillars so countries with no *recent* activity still show
 // genuine history rather than an empty "no events" state.

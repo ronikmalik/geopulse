@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchForexRates } from "@/lib/sources/forex";
 import { withCache } from "@/lib/layerCache";
+import { cachedJson } from "@/lib/apiParams";
 
 // See src/app/api/layers/flights/route.ts's 2026-09-04 comment. This one
 // backs the always-on Forex ticker (not gated behind a layer toggle), so a
@@ -9,7 +10,7 @@ import { withCache } from "@/lib/layerCache";
 export async function GET() {
   try {
     const rates = await withCache("layer:forex", 5 * 60_000, fetchForexRates);
-    return NextResponse.json({ rates });
+    return cachedJson({ rates }, 300);
   } catch (err) {
     console.error(`layer:forex failed: ${err}`);
     return NextResponse.json({ rates: [] });

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { anomalyFindings } from "@/db/schema";
+import { cachedJson } from "@/lib/apiParams";
 
 export interface AnomalyFindingResponse {
   signalType: string;
@@ -65,7 +66,7 @@ export async function GET() {
       .from(anomalyFindings)
       .where(eq(anomalyFindings.detectedAt, new Date(latest.detectedAt)));
 
-    return NextResponse.json({ detectedAt: latest.detectedAt, findings: rows });
+    return cachedJson({ detectedAt: latest.detectedAt, findings: rows }, 300);
   } catch (err) {
     console.error(`anomalies fetch failed: ${err}`);
     return NextResponse.json({ detectedAt: null, findings: [] });

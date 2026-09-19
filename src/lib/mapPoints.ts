@@ -1,4 +1,5 @@
 import type { TrackedAircraft } from "@/lib/sources/adsblol";
+import { html } from "./html";
 import type { WeatherSnapshot } from "@/lib/sources/openmeteo";
 import type { JammedRegion } from "@/lib/sources/gpsjam";
 import type { CableCountryExposure } from "@/lib/sources/submarineCables";
@@ -81,7 +82,7 @@ export function flightsToPoints(aircraft: TrackedAircraft[]): ExtraMapPoint[] {
     lon: a.lon,
     color: FLIGHT_COLOR,
     radius: 0.22,
-    label: `<b>${a.flight ?? a.registration ?? a.hex}</b><br/>${a.type ?? "Unknown type"}${
+    label: html`<b>${a.flight ?? a.registration ?? a.hex}</b><br/>${a.type ?? "Unknown type"}${
       a.altitudeFt != null ? ` · ${a.altitudeFt.toLocaleString()} ft` : ""
     }${a.groundSpeedKt != null ? ` · ${Math.round(a.groundSpeedKt)} kt` : ""}`,
   }));
@@ -97,7 +98,7 @@ export function commercialFlightsToPoints(
     lon: a.lon,
     color: COMMERCIAL_FLIGHT_COLOR,
     radius: 0.16,
-    label: `<b>${a.flight ?? a.hex}</b><br/>${a.category ?? "Unknown origin"}${
+    label: html`<b>${a.flight ?? a.hex}</b><br/>${a.category ?? "Unknown origin"}${
       a.altitudeFt != null ? ` · ${a.altitudeFt.toLocaleString()} ft` : ""
     }${a.groundSpeedKt != null ? ` · ${Math.round(a.groundSpeedKt)} kt` : ""}`,
   }));
@@ -111,7 +112,7 @@ export function weatherToPoints(conditions: WeatherSnapshot[]): ExtraMapPoint[] 
     lon: c.location.lon,
     color: WEATHER_COLOR,
     radius: 0.3,
-    label: `<b>${c.location.name}</b><br/>${c.temperatureC.toFixed(1)}°C · wind ${Math.round(
+    label: html`<b>${c.location.name}</b><br/>${c.temperatureC.toFixed(1)}°C · wind ${Math.round(
       c.windSpeedKmh,
     )} km/h${c.precipitationMm > 0 ? ` · ${c.precipitationMm.toFixed(1)}mm precip` : ""}`,
   }));
@@ -137,7 +138,7 @@ export function gpsJammingToPoints(regions: JammedRegion[]): ExtraMapPoint[] {
         lon: c.lon,
         color: GPS_JAMMING_COLOR,
         radius: scaleRadius(r.badAircraftCount, maxCount, 0.18, 0.5),
-        label: `<b>${r.countryName}</b><br/>GPS/GNSS jamming — ${r.badAircraftCount} aircraft reports (${r.badCellCount} cells)`,
+        label: html`<b>${r.countryName}</b><br/>GPS/GNSS jamming — ${r.badAircraftCount} aircraft reports (${r.badCellCount} cells)`,
       };
     })
     .filter((p): p is ExtraMapPoint => p !== null);
@@ -156,7 +157,7 @@ export function submarineCablesToPoints(countries: CableCountryExposure[]): Extr
         lon: c.lon,
         color: SUBMARINE_CABLE_COLOR,
         radius: scaleRadius(country.landingPointCount, maxCount, 0.18, 0.45),
-        label: `<b>${country.countryName}</b><br/>${country.landingPointCount} submarine cable landing points`,
+        label: html`<b>${country.countryName}</b><br/>${country.landingPointCount} submarine cable landing points`,
       };
     })
     .filter((p): p is ExtraMapPoint => p !== null);
@@ -179,7 +180,7 @@ export function travelAdvisoriesToPoints(advisories: TravelAdvisory[]): ExtraMap
         lon: c.lon,
         color: travelAdvisoryColor(a.level),
         radius: a.level >= 4 ? 0.32 : 0.24,
-        label: `<b>${a.countryName}</b><br/>US Travel Advisory Level ${a.level}: ${a.levelLabel}`,
+        label: html`<b>${a.countryName}</b><br/>US Travel Advisory Level ${a.level}: ${a.levelLabel}`,
       };
     })
     .filter((p): p is ExtraMapPoint => p !== null);
@@ -199,7 +200,7 @@ export function gridLossToPoints(countries: WorldBankObservation[]): ExtraMapPoi
         lon: c.lon,
         color: GRID_LOSS_COLOR,
         radius: scaleRadius(country.value, maxValue, 0.18, 0.45),
-        label: `<b>${country.countryName}</b><br/>Power grid loss: ${country.value.toFixed(1)}% of output (${country.year})`,
+        label: html`<b>${country.countryName}</b><br/>Power grid loss: ${country.value.toFixed(1)}% of output (${country.year})`,
       };
     })
     .filter((p): p is ExtraMapPoint => p !== null);
@@ -219,7 +220,7 @@ export function energyMixToPoints(countries: OwidEnergyCountry[]): ExtraMapPoint
         lon: c.lon,
         color: ENERGY_MIX_COLOR,
         radius: scaleRadius(country.value, maxValue, 0.18, 0.45),
-        label: `<b>${country.countryName}</b><br/>${country.value.toFixed(0)}% fossil-fuel electricity (${country.year})`,
+        label: html`<b>${country.countryName}</b><br/>${country.value.toFixed(0)}% fossil-fuel electricity (${country.year})`,
       };
     })
     .filter((p): p is ExtraMapPoint => p !== null);
@@ -238,7 +239,7 @@ export function tradeBalanceToPoints(countries: CountryTradeSummary[]): ExtraMap
         lon: c.lon,
         color: TRADE_BALANCE_COLOR,
         radius: 0.28,
-        label: `<b>${country.reporterName}</b><br/>Top export partner (${country.period}): ${
+        label: html`<b>${country.reporterName}</b><br/>Top export partner (${country.period}): ${
           topPartner ? `${topPartner.partnerName} ($${(topPartner.exportValueUsd / 1e9).toFixed(1)}B)` : "no data"
         }`,
       };
@@ -255,7 +256,7 @@ export function portCongestionToPoints(chokepoints: ChokepointTransit[]): ExtraM
     lon: c.lon,
     color: PORT_CONGESTION_COLOR,
     radius: scaleRadius(c.totalVessels, maxVessels, 0.18, 0.5),
-    label: `<b>${c.name}</b><br/>${c.totalVessels} vessel transits (${c.date}) — ${c.cargoVessels} cargo, ${c.tankerVessels} tanker`,
+    label: html`<b>${c.name}</b><br/>${c.totalVessels} vessel transits (${c.date}) — ${c.cargoVessels} cargo, ${c.tankerVessels} tanker`,
   }));
 }
 
@@ -281,7 +282,7 @@ export function airQualityToPoints(readings: AirQualityReading[]): ExtraMapPoint
       lon: r.location.lon,
       color: pm25Color(r.pm25!),
       radius: 0.24,
-      label: `<b>${r.location.name}</b><br/>PM2.5: ${r.pm25} ${r.unit}${r.stationName ? ` (${r.stationName})` : ""}`,
+      label: html`<b>${r.location.name}</b><br/>PM2.5: ${r.pm25} ${r.unit}${r.stationName ? ` (${r.stationName})` : ""}`,
     }));
 }
 
@@ -367,7 +368,7 @@ export function cisaKevToPoints(vulnerabilities: KevEntry[]): ExtraMapPoint[] {
         lon: c.lon,
         color: CYBER_COLOR,
         radius: scaleRadius(agg.count, maxCount, 0.18, 0.45),
-        label: `<b>${COUNTRY_CENTROIDS[iso2]?.name ?? iso2}-based vendors</b><br/>${agg.count} actively exploited vulnerabilities (CISA KEV)${
+        label: html`<b>${COUNTRY_CENTROIDS[iso2]?.name ?? iso2}-based vendors</b><br/>${agg.count} actively exploited vulnerabilities (CISA KEV)${
           agg.ransomwareCount > 0 ? `, ${agg.ransomwareCount} tied to ransomware` : ""
         }<br/>${vendorList}`,
       };

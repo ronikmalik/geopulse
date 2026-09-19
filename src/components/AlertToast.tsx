@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import type { GeoEvent } from "@/lib/types";
 import { CATEGORY_LABELS, type Category } from "@/lib/categories";
+import { stripOutletSuffix } from "@/lib/displayText";
 
 interface AlertToastProps {
   event: GeoEvent;
@@ -49,7 +50,7 @@ export default function AlertToast({
         {event.location}
       </div>
       <div className="mt-1 text-sm leading-snug text-neutral-200">
-        {event.summary}
+        {stripOutletSuffix(event.summary)}
       </div>
     </button>
   );

@@ -1,15 +1,22 @@
 name: Ingest live events
 
-# This schedule did not fire even once between 2026-08-27 (when it was
-# first added) and 2026-09-04, despite the workflow showing "active" via
-# the GitHub API and no other explanation found (public, Actions enabled,
-# no billing/permissions issue, no ongoing GitHub incident). The cron
-# expression was changed on 2026-09-04 specifically to force GitHub to
-# re-register the schedule, on the chance the original registration was
-# stuck — and it worked: confirmed firing on schedule the same day (run
-# history shows event=schedule completions). cron-job.org remains the
-# primary trigger (see docs/ARCHITECTURE.md) since it's been reliable
-# throughout, but this backup is now actually live, not theoretical.
+# The primary ingest cadence (every 15 min). Since 2026-09-19 this runs
+# runIngest() IN-PROCESS on the Actions runner (see _run-job.yml and
+# scripts/run-job.ts) instead of curl-ing /api/ingest on Vercel — the
+# Vercel route still exists as a manual/fallback entry point (and as the
+# once-daily vercel.ts floor), but the scheduled work no longer spends
+# Vercel's metered compute.
+#
+# History worth keeping: this schedule did not fire even once between
+# 2026-08-27 and 2026-09-04 despite showing "active"; changing the cron
+# expression forced GitHub to re-register it and it has fired reliably
+# since. If it ever goes quiet again, that is the fix — edit the minutes.
+#
+# cron-job.org used to be the primary trigger for the same route, at
+# :00/:15/:30/:45, on top of this workflow at :04/:19/:34/:49 and a self-
+# trigger from the old SSE stream — three overlapping schedulers were why
+# /api/ingest ran ~260x/day instead of ~96x. Disable the cron-job.org
+# ingest/review-pending jobs (or drop them to hourly as a pure backstop).
 on:
   schedule:
     - cron: "4,19,34,49 * * * *"
@@ -20,17 +27,8 @@ permissions:
 
 jobs:
   ingest:
-    runs-on: ubuntu-latest
-    timeout-minutes: 6
-    steps:
-      - name: Call /api/ingest
-        run: |
-          status=$(curl -sS -o /tmp/body.txt -w "%{http_code}" \
-            -X GET "https://geopulse-green.vercel.app/api/ingest" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}")
-          echo "HTTP $status"
-          cat /tmp/body.txt
-          if [ "$status" -ge 300 ]; then
-            echo "Ingest request failed"
-            exit 1
-          fi
+    uses: ./.github/workflows/_run-job.yml
+    with:
+      job: ingest
+      timeout-minutes: 10
+    secrets: inherit

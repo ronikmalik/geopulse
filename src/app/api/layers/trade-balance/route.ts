@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchTopTradePartners } from "@/lib/sources/comtrade";
 import { withCache } from "@/lib/layerCache";
+import { cachedJson } from "@/lib/apiParams";
 
 // A small, geopolitically-representative curated set — not "top N by
 // GDP", specifically countries whose trade DEPENDENCIES are themselves a
@@ -31,7 +32,7 @@ export async function GET() {
       }
       return results;
     });
-    return NextResponse.json({ countries: summaries });
+    return cachedJson({ countries: summaries }, 300);
   } catch (err) {
     console.error(`layer:trade-balance failed: ${err}`);
     return NextResponse.json({ countries: [] });

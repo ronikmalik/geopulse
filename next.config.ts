@@ -23,8 +23,11 @@ import type { NextConfig } from "next";
 // run. The clean fix is a per-request nonce via middleware, which is more
 // fragile to keep correct across Next upgrades than the risk this weakens:
 // nothing in this app renders raw HTML from user/feed content (no
-// dangerouslySetInnerHTML anywhere in src/), so there's no injection point
-// for an attacker-controlled inline <script> to exploit in the first place.
+// dangerouslySetInnerHTML anywhere in src/; the one innerHTML sink —
+// globe.gl's hover tooltips — is built through the auto-escaping `html`
+// tag in src/lib/html.ts since 2026-09-19, when it was found interpolating
+// raw headline text), so there's no injection point for an attacker-
+// controlled inline <script> to exploit in the first place.
 // The rest of the policy (no external script/style/img/font/connect hosts,
 // no plugins, no framing of this site by others) still holds.
 const CSP = [
@@ -51,6 +54,11 @@ const nextConfig: NextConfig = {
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          // Vercel sets HSTS on *.vercel.app itself; stating it here keeps
+          // the custom domain (geopulseanalytics.com) covered too, and
+          // `preload` makes the site eligible for browsers' built-in
+          // HTTPS-only list. Two years, per the preload list's minimum.
+          { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
           {
             key: "Permissions-Policy",
             value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()",

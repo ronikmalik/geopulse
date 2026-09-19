@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchAdsbLolMilitary } from "@/lib/sources/adsblol";
 import { withCache } from "@/lib/layerCache";
+import { cachedJson } from "@/lib/apiParams";
 
 // 2026-09-04: audit found every /api/layers/* route except telegram's (the
 // one that already loops with its own per-item try/catch) had no error
@@ -13,7 +14,7 @@ import { withCache } from "@/lib/layerCache";
 export async function GET() {
   try {
     const aircraft = await withCache("layer:flights", 15_000, fetchAdsbLolMilitary);
-    return NextResponse.json({ aircraft });
+    return cachedJson({ aircraft }, 15);
   } catch (err) {
     console.error(`layer:flights failed: ${err}`);
     return NextResponse.json({ aircraft: [] });

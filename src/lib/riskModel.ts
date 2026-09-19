@@ -14,6 +14,7 @@ import {
   DEFAULT_GBM_CONFIG,
 } from "@/lib/gradientBoostedTrees";
 import { weightToThreatLevel } from "@/lib/threat";
+import { splitByAvailableOutcome, predictionTargetAt } from "@/lib/temporalSplit";
 
 // Project 4 (2026-09-09) — the two model types trainHorizon fits and
 // compares for every horizon, champion/challenger-style (see
@@ -60,7 +61,7 @@ const BURN_IN_DAYS = 7;
 // jitter in practice is much smaller than this, and it's still generous
 // enough to absorb a genuinely late cron without risking a match against
 // the wrong day.
-const MATCH_TOLERANCE_MS = 6 * 60 * 60_000;
+export const MATCH_TOLERANCE_MS = 6 * 60 * 60_000;
 
 const ANOMALY_WINDOW_DAYS = 7;
 
@@ -186,6 +187,7 @@ export function findClosestSnapshot<T extends { snapshotAt: Date }>(
 export interface RegressionExample {
   country: string;
   snapshotAt: Date;
+  targetAt: Date;
   features: number[]; // FEATURE_NAMES order
   targetScore: number;
 }
@@ -250,6 +252,7 @@ export function buildRegressionExamples(
       examples.push({
         country: s.country,
         snapshotAt: s.snapshotAt,
+        targetAt: target.snapshotAt,
         features: featuresFor(s, anomalies),
         targetScore: target.score,
       });
@@ -290,6 +293,14 @@ async function fitAndRecordModel(
   const testX = testSet.map((e) => e.features);
   const testY = testSet.map((e) => e.targetScore);
   const naivePredictions = testSet.map((e) => e.features[SCORE_FEATURE_INDEX]); // naive: "no change" from today's score
+  const inner = splitByAvailableOutcome(
+    trainSet.map((example, index) => ({ ...example, index })),
+    modelType === "linear-regression" ? DEFAULT_TRAIN_CONFIG.validationFraction : DEFAULT_GBM_CONFIG.validationFraction,
+  );
+  const validationSplit = {
+    train: inner.train.map((example) => example.index),
+    test: inner.test.map((example) => example.index),
+  };
 
   let modelParams: unknown;
   let selectedL2: number | null = null;
@@ -298,14 +309,14 @@ async function fitAndRecordModel(
   let hyperparamNote: string;
 
   if (modelType === "linear-regression") {
-    const { model, selectedL2: l2 } = trainLinearRegression(trainX, trainY, DEFAULT_TRAIN_CONFIG);
+    const { model, selectedL2: l2 } = trainLinearRegression(trainX, trainY, DEFAULT_TRAIN_CONFIG, validationSplit);
     modelParams = model;
     selectedL2 = l2;
     backtest = evaluateRegressionBacktest(model, testX, testY, naivePredictions);
     predictOne = (features) => predict(model, features);
     hyperparamNote = `L2=${l2}`;
   } else {
-    const { model, selectedNEstimators, selectedMaxDepth } = trainGradientBoostedTrees(trainX, trainY, DEFAULT_GBM_CONFIG);
+    const { model, selectedNEstimators, selectedMaxDepth } = trainGradientBoostedTrees(trainX, trainY, DEFAULT_GBM_CONFIG, validationSplit);
     modelParams = model;
     backtest = evaluateGbmBacktest(model, testX, testY, naivePredictions);
     predictOne = (features) => predictGbm(model, features);
@@ -353,8 +364,11 @@ async function fitAndRecordModel(
   }
 
   const generatedAt = new Date();
-  const resolvesAt = new Date(generatedAt.getTime() + horizonDays * 86_400_000);
-  const predictionRows = [...latestByCountry.values()].map((s) => {
+  const predictionRows = [...latestByCountry.values()].filter((s) =>
+    s.snapshotAt <= generatedAt &&
+    generatedAt.getTime() - s.snapshotAt.getTime() <= 86_400_000 + MATCH_TOLERANCE_MS &&
+    predictionTargetAt(s.snapshotAt, horizonDays) > generatedAt,
+  ).map((s) => {
     const features = featuresFor(s, anomalies);
     const predictedScore = predictOne(features);
     return {
@@ -364,7 +378,7 @@ async function fitAndRecordModel(
       predictedScore,
       predictedThreatLevel: weightToThreatLevel(predictedScore),
       inputFeatures: JSON.stringify(features),
-      resolvesAt,
+      resolvesAt: predictionTargetAt(s.snapshotAt, horizonDays),
     };
   });
 
@@ -396,9 +410,10 @@ async function trainHorizon(
 ): Promise<HorizonTrainResult[]> {
   const db = getDb();
   const examples = buildRegressionExamples(allSnapshots, anomalies, horizonDays);
+  const { train: trainSet, test: testSet } = splitByAvailableOutcome(examples, TEST_SPLIT_FRACTION);
 
-  if (examples.length < MIN_TRAINING_SAMPLE) {
-    const notes = `insufficient data: ${examples.length} labeled example(s) available (need ${MIN_TRAINING_SAMPLE}+) for the ${horizonDays}-day horizon.`;
+  if (trainSet.length < MIN_TRAINING_SAMPLE || testSet.length === 0) {
+    const notes = `insufficient data after temporal purging: ${trainSet.length} training example(s) (need ${MIN_TRAINING_SAMPLE}+) and ${testSet.length} held-out example(s) for the ${horizonDays}-day horizon.`;
     const results: HorizonTrainResult[] = [];
     for (const modelType of MODEL_TYPES) {
       const [row] = await db
@@ -419,16 +434,7 @@ async function trainHorizon(
     return results;
   }
 
-  // Time-based split, not random — a random split would leak future
-  // information into training, defeating the point of backtesting a
-  // forecasting task. Built ONCE and shared by both model types below —
-  // the whole point of a champion/challenger comparison is that neither
-  // side gets an easier or different split.
-  const sortedByTime = [...examples].sort((a, b) => a.snapshotAt.getTime() - b.snapshotAt.getTime());
-  const splitIndex = Math.floor(sortedByTime.length * (1 - TEST_SPLIT_FRACTION));
-  const trainSet = sortedByTime.slice(0, splitIndex);
-  const testSet = sortedByTime.slice(splitIndex);
-
+  // Both candidates use the same outcome-purged split.
   const results: HorizonTrainResult[] = [];
   for (const modelType of MODEL_TYPES) {
     results.push(await fitAndRecordModel(modelType, horizonDays, trainSet, testSet, allSnapshots, anomalies));

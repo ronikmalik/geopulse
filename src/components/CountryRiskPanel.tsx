@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { stripOutletSuffix } from "@/lib/displayText";
 import { useWatchlist } from "@/lib/useWatchlist";
 import type { CountryRiskScore } from "@/lib/useCountryRisk";
 import type { AnomalyFindingResponse } from "@/lib/useAnomalies";
@@ -520,7 +521,7 @@ export default function CountryRiskPanel({
                             </span>
                           </div>
                           <p className="mt-0.5 line-clamp-2 text-[11px] text-neutral-300">
-                            {e.summary}
+                            {stripOutletSuffix(e.summary)}
                           </p>
                           <span className="mt-0.5 block font-mono text-[9px] text-neutral-600">
                             Source: {sourceLabel(e.source)}

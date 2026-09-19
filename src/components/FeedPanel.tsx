@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { GeoEvent } from "@/lib/types";
 import { CATEGORY_LABELS, type Category } from "@/lib/categories";
 import { sourceLabel } from "@/lib/sourceLabels";
+import { stripOutletSuffix } from "@/lib/displayText";
 
 interface FeedPanelProps {
   events: GeoEvent[];
@@ -184,20 +185,24 @@ export default function FeedPanel({
           const isSelected = selectedId === event.id;
           const sourceCount = event.sourceCount ?? 0;
           return (
-          <button
+          <article
             key={event.id}
+            className={`border-b border-red-950 ${isSelected ? "bg-red-950/40" : ""}`}
+          >
+          <button
+            type="button"
             ref={isSelected ? selectedRef : undefined}
             onClick={() => onSelect(event)}
-            className={`block w-full border-b border-red-950 px-4 py-3 text-left transition hover:bg-red-950/30 ${
-              isSelected ? "bg-red-950/40" : ""
-            }`}
+            aria-expanded={isSelected}
+            aria-controls={isSelected ? `event-details-${event.id}` : undefined}
+            className="block w-full px-4 py-3 text-left transition hover:bg-red-950/30 focus-visible:outline-2 focus-visible:outline-red-400 focus-visible:outline-offset-[-2px]"
           >
             <div className="flex items-center justify-between gap-2">
               <span className="font-mono text-[10px] uppercase tracking-wider text-red-500">
                 {CATEGORY_LABELS[event.category as Category] ??
                   event.category}
               </span>
-              <span className="font-mono text-[10px] text-neutral-600">
+              <span className="font-mono text-[10px] text-neutral-400">
                 {timeAgo(event.publishedAt)}
               </span>
             </div>
@@ -215,9 +220,10 @@ export default function FeedPanel({
               )}
             </div>
             <p className={`mt-1 text-sm text-neutral-300 ${isSelected ? "" : "line-clamp-2"}`}>
-              {event.summary}
+              {stripOutletSuffix(event.summary)}
             </p>
-            <div className="mt-1.5 flex gap-0.5">
+            <p className="mt-1.5 text-[11px] text-neutral-400">{sourceLabel(event.source)}</p>
+            <div className="mt-1.5 flex gap-0.5" role="img" aria-label={`Event severity ${event.severity} of 5`}>
               {Array.from({ length: 5 }).map((_, i) => (
                 <span
                   key={i}
@@ -227,8 +233,9 @@ export default function FeedPanel({
                 />
               ))}
             </div>
+          </button>
             {isSelected && (
-              <div className="mt-2 border-t border-red-950/70 pt-2">
+              <div id={`event-details-${event.id}`} className="mx-4 mb-3 border-t border-red-950/70 pt-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-mono text-[10px] uppercase tracking-wider text-neutral-500">
                     Source: <span className="text-neutral-300">{sourceLabel(event.source)}</span>
@@ -247,7 +254,7 @@ export default function FeedPanel({
                 <RelatedEvents eventId={event.id} />
               </div>
             )}
-          </button>
+          </article>
           );
         })}
       </div>

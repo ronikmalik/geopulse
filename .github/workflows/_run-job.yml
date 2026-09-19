@@ -1,0 +1,78 @@
+name: Run pipeline job
+
+# Reusable workflow (2026-09-19) — every scheduled pipeline job in this repo
+# calls this with a `job` name, and it runs that job IN-PROCESS on the
+# Actions runner via scripts/run-job.ts against Neon directly. Nothing hits
+# Vercel. See scripts/run-job.ts's header comment for why the pipeline
+# moved off Vercel's metered compute (Hobby Active-CPU budget was exceeded;
+# this repo is public so Actions minutes are free and unlimited).
+#
+# Secrets are the same names Vercel holds (see .env.example) and come in via
+# `secrets: inherit` from each caller. Only DATABASE_URL is required — every
+# other key soft-no-ops in the code the same way it does on Vercel.
+#
+# node_modules is cached on the lockfile hash and `npm ci` is skipped on a
+# hit, so a routine run is ~20-30s of runner time instead of ~90s. Minutes
+# are free either way; the point is keeping each run comfortably shorter
+# than the 15-minute cadence so consecutive runs never overlap.
+
+on:
+  workflow_call:
+    inputs:
+      job:
+        description: "Job name understood by scripts/run-job.ts"
+        required: true
+        type: string
+      timeout-minutes:
+        description: "Runner-level ceiling for the whole job"
+        required: false
+        type: number
+        default: 10
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    # One run of a given job at a time; a late-starting schedule queues
+    # behind the current one instead of running two ingests concurrently
+    # (the DB-side dedup handles that safely, but it doubles the work for
+    # nothing).
+    concurrency:
+      group: pipeline-${{ inputs.job }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Restore node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node22-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.modules.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --no-fund
+
+      - name: Run ${{ inputs.job }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_TRANSLATE_API_KEY: ${{ secrets.GOOGLE_TRANSLATE_API_KEY }}
+          FIRMS_MAP_KEY: ${{ secrets.FIRMS_MAP_KEY }}
+          EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+          MBFC_RAPIDAPI_KEY: ${{ secrets.MBFC_RAPIDAPI_KEY }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          GEMINI_EMBED_MODEL: ${{ secrets.GEMINI_EMBED_MODEL }}
+          GEMINI_BRIEF_MODEL: ${{ secrets.GEMINI_BRIEF_MODEL }}
+          GEMINI_AUDIT_MODEL: ${{ secrets.GEMINI_AUDIT_MODEL }}
+          GEMINI_GEOCODE_MODEL: ${{ secrets.GEMINI_GEOCODE_MODEL }}
+          NODE_ENV: production
+        run: npx tsx scripts/run-job.ts "${{ inputs.job }}"

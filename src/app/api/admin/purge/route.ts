@@ -31,7 +31,7 @@ export const maxDuration = 55;
 // re-fetch of the same still-in-window Telegram post will correctly be
 // rejected by the now-fixed classifier and won't reinsert it.
 export async function GET(req: NextRequest) {
-  if (!isCronAuthorized(req)) {
+  if (!isCronAuthorized(req, { headerOnly: true })) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const source = req.nextUrl.searchParams.get("source");

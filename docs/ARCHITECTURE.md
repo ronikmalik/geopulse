@@ -354,47 +354,65 @@ evidence, not a guessed calendar date.
 routes), Postgres via Neon, no separate worker service.
 
 The brief recommends *not* relying on Vercel alone for persistent ingestion workers.
-That recommendation is correct, and this project hit exactly the failure mode it
-warns about: the originally-intended scheduling mechanism (a GitHub Actions cron
-calling `/api/ingest`) went **entirely silent for over a week** (added 2026-08-27,
-first fired 2026-09-04) before a forced re-registration of its schedule fixed it. It's
-now firing reliably and kept as a real backup, alongside:
+That recommendation is correct, and this project hit it twice: first when the GitHub
+Actions cron went silent for a week (2026-08-27 → 09-04, fixed by re-registering the
+schedule), then when Vercel Hobby's Fluid compute allowance was **exceeded** (4h49m of
+a 4h/month Active-CPU budget in the 30 days to 2026-09-19 — ~65% of it `/api/ingest`,
+~26% the old SSE `/api/stream`, everything else seconds).
 
-- **cron-job.org** (the actual primary trigger) — an external scheduler hitting
-  `/api/ingest` directly, authenticating via `?secret=` (see `cronAuth.ts`). Its
-  schedule lives in cron-job.org's own dashboard, not in this repo. One hard,
-  non-configurable constraint shaped `src/lib/ingest.ts` and `src/lib/sources/gdelt.ts`:
-  a 30s request timeout.
-- **Self-triggering from the live stream** — every new SSE connection
-  (`src/app/api/stream/route.ts`) opportunistically kicks off a background ingest run,
-  gated to at most once per ~10 minutes per warm instance, via Next's `after()` API.
-  "Someone has the site open" is sufficient to keep the feed live.
-- **A daily Vercel cron floor** (`vercel.ts`) — Vercel Hobby plan caps custom cron
-  frequency at once/day, so this is a floor, not a primary mechanism. `vercel.ts` also
-  schedules the four other daily admin jobs: `snapshot`, `snapshot-flights`,
-  `generate-briefs`, and `audit-classifier` (all real cron entries, not just ingest).
-- **`.github/workflows/ingest-priority.yml`** (added 2026-09-09) — a second, separate
-  GitHub Actions trigger, every ~15 min, calling `/api/ingest?priority=1`. Exists
-  specifically to route around cron-job.org's 30s timeout: that constraint limits the
-  main rotation to one GDELT category per cycle, which was starving the two
-  region-agnostic categories (`political-instability`/`humanitarian` — the only GDELT
-  path into any country outside the 5 named flashpoints) to ~1-in-7 cycles (~105 min).
-  `runIngest`'s `priorityGdelt` option runs `PRIORITY_GDELT_QUERIES`
-  (`src/lib/categories.ts`) — those two plus several new targeted queries (South/
-  Central Asia, Bangladesh/Nepal/Sri Lanka, Guyana-Venezuela) — sequentially every
-  cycle instead, and skips every other source (RSS/USGS/etc. already run fine on the
-  main rotation's own cadence).
+**Since 2026-09-19 the pipeline runs on GitHub Actions runners, not on Vercel.** This
+repo is public, so Actions minutes are unlimited and free. Every scheduled job calls the
+reusable `.github/workflows/_run-job.yml`, which checks out the repo, restores
+`node_modules` from cache, and runs `npx tsx scripts/run-job.ts <job>` — the exact same
+`src/lib/*` function the corresponding `/api/admin/*` route calls, in-process on the
+runner, against Neon directly. Secrets (`DATABASE_URL`, `GEMINI_API_KEY`, …) are GitHub
+Actions secrets with the same names Vercel holds. Vercel is left serving the UI and the
+CDN-cached read routes, which is all a Hobby plan is really for.
+
+| Job | Workflow | Cadence (UTC) |
+| --- | --- | --- |
+| `ingest` | `ingest.yml` | :04/:19/:34/:49 |
+| `review-pending` | `review-pending.yml` | :07/:22/:37/:52 |
+| `generate-briefs` | `generate-briefs.yml` | :10/:25/:40/:55 |
+| `snapshot`, `snapshot-flights`, `audit-classifier` | `daily-snapshots.yml` | 18:00, 18:30, 20:00 |
+| `train-risk-model`, `train-narrative-clusters`, `train-text-classifier` | `train-*.yml` | Sunday 12:00, 12:30, 13:00 |
+
+What remains on Vercel's side of scheduling:
+
+- **A daily `/api/ingest` floor** (`vercel.ts`, 06:00 UTC) — the one job that is fully
+  idempotent (events dedupe by URL) and whose silence would be user-visible fastest if
+  GitHub's schedule trigger ever went quiet again. The daily snapshot jobs are
+  deliberately NOT mirrored there: `snapshotCountryStates` inserts one row per country
+  per call, so they must run from exactly one scheduler.
+- **The `/api/admin/*` routes themselves** — kept as the manual/one-off entry points
+  (`.github/workflows/admin-call.yml`) and as the fallback the floor above uses.
+
+What was removed:
+
+- **cron-job.org** used to hit `/api/ingest` and `/api/admin/review-pending` at
+  :00/:15/:30/:45 on top of the Actions schedule — that overlap (plus the stream
+  self-trigger below) is why ingest ran ~260×/day instead of ~96×. Its jobs should be
+  disabled, or dropped to hourly as a pure backstop. Its 30s hard request timeout is
+  what originally forced `runIngest` into a one-GDELT-category-per-cycle rotation;
+  the runner has no such clock, but the rotation is kept because it also paces
+  upstream request volume.
+- **Self-triggering from the live stream.** The SSE route (`/api/stream`) is gone
+  entirely — replaced by `GET /api/events/feed`, a stateless poll the client
+  (`src/lib/useEventStream.ts`) calls every ~12s (60s when the tab is hidden). One
+  ~40ms invocation per poll and nothing while idle, versus a function pinned open for
+  45s per viewer.
 
 Moving ingestion to a dedicated always-on worker (Railway/Fly.io/Render, per the
-brief) is still the cleaner long-term architecture and stays on the roadmap, but three
-independent real-time-ish triggers covering for each other means it's no longer a
-single point of failure the way it was before 2026-09-04.
+brief) is no longer necessary: an Actions runner per job is that worker, minus the
+hosting bill. Supabase's free tier was considered as a home for the pipeline and
+rejected — it would mean migrating the database off Neon for no compute the Actions
+runners don't already provide (its Realtime product could replace the feed poll with a
+Postgres-changes websocket, but only for a Supabase-hosted database).
 
 **Serverless duration**: Vercel Hobby-tier functions are commonly documented at a 60s
-ceiling; this project's Fluid Compute setting has empirically allowed a full ~60–90s
-ingest cycle to complete. `/api/ingest` and `/api/stream` are both written defensively
-regardless (short internal timeouts, fast per-source failure, self-closing streams)
-rather than assuming a generous budget.
+ceiling; the `/api/admin/*` fallback routes keep their defensive `maxDuration` values
+and short internal timeouts. On the runner, `scripts/run-job.ts` enforces its own
+8-minute ceiling per job.
 
 ## 11. Deployment
 

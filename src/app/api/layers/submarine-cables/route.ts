@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchSubmarineCableSummary } from "@/lib/sources/submarineCables";
 import { withCache } from "@/lib/layerCache";
+import { cachedJson } from "@/lib/apiParams";
 
 // Static infrastructure metadata (cable/landing-point registry), not a
 // live feed — TeleGeography updates it on their own schedule, not
@@ -11,7 +12,7 @@ export async function GET() {
     const summary = await withCache("layer:submarine-cables", 6 * 60 * 60_000, () =>
       fetchSubmarineCableSummary(10),
     );
-    return NextResponse.json({ summary });
+    return cachedJson({ summary }, 300);
   } catch (err) {
     console.error(`layer:submarine-cables failed: ${err}`);
     return NextResponse.json({ summary: null });

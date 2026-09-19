@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchCisaKev } from "@/lib/sources/cisakev";
 import { withCache } from "@/lib/layerCache";
+import { cachedJson } from "@/lib/apiParams";
 
 // See src/app/api/layers/flights/route.ts's 2026-09-04 comment.
 export async function GET() {
@@ -8,7 +9,7 @@ export async function GET() {
     const vulnerabilities = await withCache("layer:cyber", 30 * 60_000, () =>
       fetchCisaKev(10),
     );
-    return NextResponse.json({ vulnerabilities });
+    return cachedJson({ vulnerabilities }, 300);
   } catch (err) {
     console.error(`layer:cyber failed: ${err}`);
     return NextResponse.json({ vulnerabilities: [] });

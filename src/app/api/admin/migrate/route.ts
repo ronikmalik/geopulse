@@ -387,7 +387,7 @@ const STATEMENTS = [
 ];
 
 export async function GET(req: NextRequest) {
-  if (!isCronAuthorized(req)) {
+  if (!isCronAuthorized(req, { headerOnly: true })) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const db = getDb();

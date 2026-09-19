@@ -72,7 +72,7 @@ export const events = pgTable(
     // classified sources (RSS/GDELT/Telegram — wherever classifyByKeywords/
     // classifyGdeltItem run) are inserted "pending" and stay invisible to
     // every public read path (see the reviewStatus filter in
-    // /api/stream, risk.ts, similarEvents.ts) until
+    // /api/events/feed, risk.ts, similarEvents.ts) until
     // reviewPendingEvents (classifierAudit.ts) promotes or rejects them,
     // almost always within the same or next ~15min ingest cycle. Direct
     // structural sources (USGS/EONET/GDACS/IODA/FIRMS) skip the gate
@@ -86,7 +86,7 @@ export const events = pgTable(
     // deliberately excluded from auto-promotion and can stay "pending"
     // indefinitely until a real Gemini review reaches them — see
     // PENDING_REVIEW_MAX_AGE_MINUTES's doc comment in classifierAudit.ts.
-    // /api/stream accounts for this specifically (a gdelt row can't block
+    // /api/events/feed accounts for this specifically (a gdelt row can't block
     // its ordering cursor the way any other still-resolving-within-30min
     // source's pending row can); risk.ts/similarEvents.ts need no special
     // handling since they're stateless reads, not an incremental cursor.

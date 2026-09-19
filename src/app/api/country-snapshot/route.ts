@@ -1,17 +1,18 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { currencyForCountry } from "@/lib/countryCurrency";
 import { stockIndexForCountry } from "@/lib/countryStockIndex";
 import { fetchUsdRateFor } from "@/lib/sources/forex";
 import { fetchIndexQuote, FinnhubNotConfiguredError } from "@/lib/sources/finnhub";
 import { fetchCountryDossier } from "@/lib/countryDossier";
 import { withCache } from "@/lib/layerCache";
+import { badRequest, cachedJson, parseCountryParam } from "@/lib/apiParams";
 
 export async function GET(req: NextRequest) {
-  const country = req.nextUrl.searchParams.get("country");
-  if (!country) {
-    return NextResponse.json({ error: "missing ?country=" }, { status: 400 });
-  }
-  const iso2 = country.toUpperCase();
+  // Validated to a strict 2-letter code (2026-09-19): this value is
+  // interpolated into upstream World Bank / forex request URLs by
+  // fetchCountryDossier/fetchUsdRateFor, so it must never be free text.
+  const iso2 = parseCountryParam(req.nextUrl.searchParams.get("country"));
+  if (!iso2) return badRequest("country must be a 2-letter ISO code");
 
   const snapshot = await withCache(`country-snapshot:${iso2}`, 5 * 60_000, async () => {
     const currencyCode = currencyForCountry(iso2);
@@ -45,5 +46,5 @@ export async function GET(req: NextRequest) {
     fetchCountryDossier(iso2).catch(() => null),
   );
 
-  return NextResponse.json({ ...snapshot, dossier });
+  return cachedJson({ ...snapshot, dossier }, 300);
 }

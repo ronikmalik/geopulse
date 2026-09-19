@@ -37,6 +37,28 @@ export function prepareLabeledExamples(
   return raw.map((r) => ({ ...r, embedding: normalize(r.embedding) }));
 }
 
+// Neighbor vote weighting (2026-09-19 upgrade). "uniform" is classic
+// majority vote — every one of the k neighbors counts the same whether
+// it's a near-duplicate of the query or barely inside the k-radius.
+// "distance" is inverse-distance weighting (sklearn's weights="distance"):
+// a neighbor at cosine distance d votes with weight 1/(d + WEIGHT_EPS), so
+// an almost-identical archived article (d ~ 0.01) dominates a handful of
+// loosely-related ones (d ~ 0.3) instead of being outvoted by them. That
+// is exactly the situation a news classifier hits constantly — the same
+// story re-reported by another outlet — and where plain majority vote is
+// known to under-perform. WEIGHT_EPS keeps an exact-duplicate's weight
+// finite and bounds how much one neighbor can dominate (at most ~100x a
+// neighbor at d=1). NEITHER is assumed better: chooseBestK cross-
+// validates both against the same folds and picks the winner jointly
+// with k, and the run's notes record which one won.
+export type KnnWeighting = "uniform" | "distance";
+export const KNN_WEIGHTINGS: readonly KnnWeighting[] = ["uniform", "distance"];
+const WEIGHT_EPS = 0.01;
+
+function neighborWeight(distance: number, weighting: KnnWeighting): number {
+  return weighting === "distance" ? 1 / (distance + WEIGHT_EPS) : 1;
+}
+
 export interface ClassificationPrediction {
   relevant: boolean;
   category: string | null;
@@ -55,21 +77,27 @@ export function classifyViaKnn(
   queryEmbedding: number[],
   labeled: LabeledExample[],
   k: number,
+  weighting: KnnWeighting = "uniform",
 ): ClassificationPrediction {
   const withDistance = labeled
     .map((ex) => ({ ex, distance: cosineDistance(queryEmbedding, ex.embedding) }))
     .sort((a, b) => a.distance - b.distance)
-    .slice(0, k);
+    .slice(0, k)
+    .map((n) => ({ ...n, weight: neighborWeight(n.distance, weighting) }));
 
-  const keptCount = withDistance.filter((n) => n.ex.kept).length;
-  const relevant = keptCount > withDistance.length / 2;
-  const confidence = Math.max(keptCount, withDistance.length - keptCount) / withDistance.length;
+  const totalWeight = withDistance.reduce((s, n) => s + n.weight, 0);
+  const keptWeight = withDistance.filter((n) => n.ex.kept).reduce((s, n) => s + n.weight, 0);
+  const relevant = keptWeight > totalWeight / 2;
+  // Fraction of the (weighted) vote that went to the winning side — 0.5 is
+  // a coin flip, 1.0 is unanimous. Under uniform weighting this is exactly
+  // the old "fraction of neighbors that agreed" number.
+  const confidence = totalWeight === 0 ? 0 : Math.max(keptWeight, totalWeight - keptWeight) / totalWeight;
 
   const keptNeighbors = withDistance.filter((n) => n.ex.kept);
   const categoryVotes = new Map<string, number>();
   for (const n of keptNeighbors) {
     if (!n.ex.category) continue;
-    categoryVotes.set(n.ex.category, (categoryVotes.get(n.ex.category) ?? 0) + 1);
+    categoryVotes.set(n.ex.category, (categoryVotes.get(n.ex.category) ?? 0) + n.weight);
   }
   let category: string | null = null;
   let bestVotes = 0;
@@ -81,8 +109,8 @@ export function classifyViaKnn(
   }
 
   const severity =
-    keptNeighbors.length > 0
-      ? Math.round(keptNeighbors.reduce((s, n) => s + n.ex.severity, 0) / keptNeighbors.length)
+    keptWeight > 0
+      ? Math.round(keptNeighbors.reduce((s, n) => s + n.ex.severity * n.weight, 0) / keptWeight)
       : withDistance.length > 0
         ? withDistance[0].ex.severity
         : 1;
@@ -122,6 +150,7 @@ function subsampleDeterministic<T>(items: T[], maxSize: number): T[] {
 
 export interface KSelectionResult {
   k: number;
+  weighting: KnnWeighting;
   accuracy: number; // held-out relevance-prediction accuracy, averaged across CV_FOLDS folds
 }
 
@@ -130,27 +159,55 @@ export interface KSelectionResult {
 // handles (unlike category, which is only defined for kept items and
 // heavily class-imbalanced — see this session's own live audit of real
 // category volumes). Real, data-driven model selection, not a guessed k.
+// Selects (k, weighting) JOINTLY: every candidate pair is scored against
+// the identical folds, so the comparison between uniform and distance-
+// weighted voting is apples to apples. Ties go to the earlier candidate
+// (smaller k, uniform first) — the simpler model, when the data can't
+// tell them apart.
 export function chooseBestK(labeled: LabeledExample[], candidates: number[]): KSelectionResult {
   const sample = subsampleDeterministic(labeled, MAX_CV_SAMPLE);
   const folds = assignFolds(sample, CV_FOLDS);
 
-  let best: KSelectionResult | null = null;
-  for (const k of candidates) {
-    let correct = 0;
-    let total = 0;
-    for (let holdout = 0; holdout < CV_FOLDS; holdout++) {
-      const testSet = folds[holdout];
-      const trainSet = folds.filter((_, i) => i !== holdout).flat();
-      if (trainSet.length < k) continue; // this k isn't even evaluable against this fold's training pool
-      for (const item of testSet) {
-        const prediction = classifyViaKnn(item.embedding, trainSet, k);
-        if (prediction.relevant === item.kept) correct++;
-        total++;
+  const validCandidates = candidates.filter((k) => Number.isInteger(k) && k > 0);
+  const metricKey = (k: number, weighting: KnnWeighting) => `${weighting}:${k}`;
+  const metrics = new Map<string, { correct: number; total: number }>();
+  for (const weighting of KNN_WEIGHTINGS) {
+    for (const k of validCandidates) metrics.set(metricKey(k, weighting), { correct: 0, total: 0 });
+  }
+  // Neighbor ordering is independent of k AND of weighting. Compute
+  // distances once per holdout item, then evaluate every (k, weighting)
+  // vote against that one sorted order via prefix sums.
+  for (let holdout = 0; holdout < CV_FOLDS; holdout++) {
+    const testSet = folds[holdout];
+    const trainSet = folds.filter((_, i) => i !== holdout).flat();
+    for (const item of testSet) {
+      const neighbors = trainSet.map((example) => ({ example, distance: cosineDistance(item.embedding, example.embedding) }))
+        .sort((a, b) => a.distance - b.distance);
+      for (const weighting of KNN_WEIGHTINGS) {
+        const keptPrefix = [0];
+        const totalPrefix = [0];
+        for (const neighbor of neighbors) {
+          const w = neighborWeight(neighbor.distance, weighting);
+          keptPrefix.push(keptPrefix[keptPrefix.length - 1] + (neighbor.example.kept ? w : 0));
+          totalPrefix.push(totalPrefix[totalPrefix.length - 1] + w);
+        }
+        for (const k of validCandidates) {
+          if (trainSet.length < k) continue;
+          const metric = metrics.get(metricKey(k, weighting))!;
+          if ((keptPrefix[k] > totalPrefix[k] / 2) === item.kept) metric.correct++;
+          metric.total++;
+        }
       }
     }
-    if (total === 0) continue;
-    const accuracy = correct / total;
-    if (!best || accuracy > best.accuracy) best = { k, accuracy };
+  }
+  let best: KSelectionResult | null = null;
+  for (const weighting of KNN_WEIGHTINGS) {
+    for (const k of validCandidates) {
+      const metric = metrics.get(metricKey(k, weighting))!;
+      if (metric.total === 0) continue;
+      const accuracy = metric.correct / metric.total;
+      if (!best || accuracy > best.accuracy) best = { k, weighting, accuracy };
+    }
   }
 
   if (!best) throw new Error(`no valid k candidates for ${labeled.length} labeled examples (candidates: ${candidates.join(",")})`);

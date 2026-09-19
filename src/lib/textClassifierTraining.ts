@@ -4,22 +4,13 @@ import { classificationArchive, classifierAudit, textClassifierRuns } from "@/db
 import { chooseBestK, classifyViaKnn, prepareLabeledExamples, type LabeledExample } from "@/lib/textClassifier";
 import { normalize } from "@/lib/narrativeClustering";
 
-// Weekly training/backtest for Project 3 (2026-09-09) — see textClassifier.ts
-// for the k-NN design itself. This module is the data-loading + evaluation
-// layer: pulls classification_archive's embedded, labeled corpus, selects k
-// via cross-validation, then backtests against the highest-trust ground
-// truth this app has — classifier_audit rows where Gemini flagged a
-// disagreement with the keyword classifier AND Claude independently
-// reviewed and confirmed/corrected it (status IN 'applied'/'approved').
-// That set answers the user's own question directly: does reusing that
-// review work actually produce a better classifier than the one it was
-// reviewing? See NarrativeTrainingResult-style shadow-mode discipline
-// (riskModel.ts) — this ships as a logged comparison, never live-facing,
-// until it demonstrably beats the keyword classifier on that same ground
-// truth.
+// Shadow evaluation of the embedded classification archive. Select k within
+// the reference pool, then measure agreement with held-out audit corrections.
+// Applied/approved status can come from automatic review; these selected
+// corrections are not independent, representative ground truth and cannot
+// authorize automatic promotion.
 const K_CANDIDATES = [5, 10, 15, 20, 25];
 const MIN_TRAINING_SAMPLE = 100;
-const PROMOTION_MIN_BACKTEST_SAMPLE = 30;
 
 interface RawLabeledRow {
   id: number;
@@ -46,7 +37,7 @@ async function fetchLabeledExamplesWithEmbeddings(): Promise<LabeledExample[]> {
   return prepareLabeledExamples(withEmbeddings);
 }
 
-interface DoublyVettedFinding {
+interface AuditCorrection {
   archiveId: number;
   kind: string;
   embedding: number[];
@@ -59,7 +50,7 @@ interface DoublyVettedFinding {
 // relevance-accuracy data point (this classifier's severity output is
 // evaluated separately below, but only among items where relevance itself
 // is settled).
-async function fetchDoublyVettedRelevanceFindings(): Promise<DoublyVettedFinding[]> {
+async function fetchAuditCorrections(): Promise<AuditCorrection[]> {
   const db = getDb();
   const rows = await db
     .select({
@@ -77,7 +68,7 @@ async function fetchDoublyVettedRelevanceFindings(): Promise<DoublyVettedFinding
       ),
     );
   return rows
-    .filter((r): r is DoublyVettedFinding & { embedding: number[] } => r.embedding !== null)
+    .filter((r): r is AuditCorrection & { embedding: number[] } => r.embedding !== null)
     .map((r) => ({ archiveId: r.archiveId, kind: r.kind, embedding: r.embedding }));
 }
 
@@ -101,47 +92,51 @@ export async function trainAndEvaluateTextClassifier(): Promise<TextClassifierRu
     return { trained: false, sampleSize: labeled.length, k: 0, cvAccuracy: 0, backtestSampleSize: 0, backtestAgreementRate: 0, promoted: false, notes };
   }
 
-  const kSelection = chooseBestK(labeled, K_CANDIDATES.filter((k) => k < labeled.length));
-
-  const vettedFindings = await fetchDoublyVettedRelevanceFindings();
+  const auditCorrections = await fetchAuditCorrections();
+  // Keep the entire correction challenge set out of both k selection and
+  // neighbor pools. Leave-one-out alone lets other evaluation labels leak.
+  const challengeIds = new Set(auditCorrections.map((finding) => finding.archiveId));
+  const training = labeled.filter((example) => !challengeIds.has(example.id));
+  if (training.length < MIN_TRAINING_SAMPLE) {
+    const result = { trained: false, sampleSize: training.length, k: 0, cvAccuracy: 0, backtestSampleSize: auditCorrections.length, backtestAgreementRate: 0, promoted: false, notes: "Insufficient training data after excluding the correction challenge set." };
+    await recordRun(result);
+    return result;
+  }
+  const kSelection = chooseBestK(training, K_CANDIDATES.filter((k) => k < training.length));
   let correct = 0;
   let evaluated = 0;
-  for (const f of vettedFindings) {
+  for (const f of auditCorrections) {
     // Exclude the item being tested from its own reference pool — testing
     // a point against a pool that includes itself would trivially "find"
     // itself as the nearest neighbor and report perfect, meaningless
     // accuracy.
-    const referencePool = labeled.filter((ex) => ex.id !== f.archiveId);
+    const referencePool = training;
     const queryEmbedding = normalize(f.embedding);
-    const prediction = classifyViaKnn(queryEmbedding, referencePool, kSelection.k);
+    const prediction = classifyViaKnn(queryEmbedding, referencePool, kSelection.k, kSelection.weighting);
 
-    // Ground truth for a CONFIRMED false_positive is "should NOT be
-    // relevant"; for a CONFIRMED false_negative, "SHOULD be relevant" —
-    // that's the literal definition of each finding kind once it reaches
-    // applied/approved status (Gemini flagged the keyword classifier's
-    // original decision as wrong on this exact axis, Claude confirmed it).
+    // The audit decision supplies a challenge label, not independently
+    // verified truth. Report agreement with that decision.
     const groundTruthRelevant = f.kind === "false_negative";
     if (prediction.relevant === groundTruthRelevant) correct++;
     evaluated++;
   }
 
   const backtestAgreementRate = evaluated > 0 ? correct / evaluated : 0;
-  const promoted = evaluated >= PROMOTION_MIN_BACKTEST_SAMPLE && backtestAgreementRate > 0.5;
+  // Approved/applied status includes automatic reviews. This selected set
+  // measures correction agreement, not independent population accuracy.
+  // A representative evaluation with reviewer provenance is needed before
+  // this shadow classifier can earn promotion.
+  const promoted = false;
 
   const notes =
-    `trained k=${kSelection.k} on ${labeled.length} labeled examples (CV accuracy ${(kSelection.accuracy * 100).toFixed(1)}%). ` +
-    `Backtested on ${evaluated} doubly-vetted classifier_audit correction(s) (Gemini-flagged, Claude-confirmed false_positive/false_negative findings) — ` +
-    `agreement with the CONFIRMED CORRECT answer: ${(backtestAgreementRate * 100).toFixed(1)}%. ` +
-    `Note: the keyword classifier's own agreement rate on this exact set is ~0% by construction (a finding only reaches applied/approved status because the keyword classifier's original decision on it was confirmed wrong) — this is the honest baseline this number is being compared against, not an invented one. ` +
-    (promoted
-      ? "Promoted (shadow-only — not user-facing): backtest sample meets the floor and beats a coin flip on confirmed corrections."
-      : evaluated < PROMOTION_MIN_BACKTEST_SAMPLE
-        ? `Not promoted: backtest sample (${evaluated}) below the ${PROMOTION_MIN_BACKTEST_SAMPLE}-example floor.`
-        : "Not promoted: doesn't yet beat a coin flip on confirmed corrections.");
+    `trained k=${kSelection.k} (${kSelection.weighting} vote weighting, selected jointly with k by 3-fold CV) on ${training.length} labeled examples (CV agreement with archived labels ${(kSelection.accuracy * 100).toFixed(1)}%). ` +
+    `Evaluated on ${evaluated} audit corrections (may include automatic reviews) — ` +
+    `agreement with audit decisions: ${(backtestAgreementRate * 100).toFixed(1)}%. ` +
+    "This corrections-only challenge set does not measure overall accuracy. Shadow only: independent representative evaluation and reviewer provenance are required for promotion.";
 
   const result: TextClassifierRunResult = {
     trained: true,
-    sampleSize: labeled.length,
+    sampleSize: training.length,
     k: kSelection.k,
     cvAccuracy: kSelection.accuracy,
     backtestSampleSize: evaluated,

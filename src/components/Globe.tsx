@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { html } from "@/lib/html";
+import { stripOutletSuffix } from "@/lib/displayText";
 import * as topojson from "topojson-client";
 import countries110m from "world-atlas/countries-110m.json";
 import type { GeoEvent } from "@/lib/types";
@@ -209,7 +211,7 @@ export default function GlobeView({
           const p = d as GlobePoint;
           const body = isExtraPoint(p)
             ? p.label
-            : `<b>${p.location}</b><br/>${p.summary}`;
+            : html`<b>${p.location}</b><br/>${stripOutletSuffix(p.summary)}`;
           return `<div style="font-family:monospace;color:#ff5555;background:#0a0000;border:1px solid #ff2d2d;padding:6px 8px;border-radius:2px;max-width:260px">
               ${body}
             </div>`;

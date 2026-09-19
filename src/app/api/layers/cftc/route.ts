@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchCftcPositioning } from "@/lib/sources/cftc";
 import { withCache } from "@/lib/layerCache";
+import { cachedJson } from "@/lib/apiParams";
 
 // See src/app/api/layers/flights/route.ts's 2026-09-04 comment.
 export async function GET() {
@@ -11,7 +12,7 @@ export async function GET() {
       6 * 60 * 60_000,
       fetchCftcPositioning,
     );
-    return NextResponse.json({ positions });
+    return cachedJson({ positions }, 300);
   } catch (err) {
     console.error(`layer:cftc failed: ${err}`);
     return NextResponse.json({ positions: [] });

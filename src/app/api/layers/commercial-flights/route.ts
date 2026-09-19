@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchAdsbLolCommercial } from "@/lib/sources/adsblol";
 import { withCache } from "@/lib/layerCache";
+import { cachedJson } from "@/lib/apiParams";
 
 // Switched from OpenSky to adsb.lol 2026-09-09 — OpenSky's bounding-box
 // endpoint was confirmed live to be blocked/empty specifically from
@@ -17,7 +18,7 @@ export async function GET() {
       20_000,
       fetchAdsbLolCommercial,
     );
-    return NextResponse.json({ aircraft });
+    return cachedJson({ aircraft }, 20);
   } catch (err) {
     console.error(`layer:commercial-flights failed: ${err}`);
     return NextResponse.json({ aircraft: [], error: String(err) });

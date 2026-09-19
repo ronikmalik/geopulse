@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchWorldBankIndicator } from "@/lib/sources/worldbank";
 import { withCache } from "@/lib/layerCache";
+import { cachedJson } from "@/lib/apiParams";
 
 // EG.ELC.LOSS.ZS — electric power transmission & distribution losses, %
 // of output. Same World Bank Indicators API src/lib/sources/worldbank.ts
@@ -20,7 +21,7 @@ export async function GET() {
       .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
       .slice(0, 10);
 
-    return NextResponse.json({ countries: top });
+    return cachedJson({ countries: top }, 300);
   } catch (err) {
     console.error(`layer:grid-loss failed: ${err}`);
     return NextResponse.json({ countries: [] });

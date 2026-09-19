@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { fetchGpsJammingSummary } from "@/lib/sources/gpsjam";
 import { withCache } from "@/lib/layerCache";
+import { cachedJson } from "@/lib/apiParams";
 
 // gpsjam.org publishes once per day (UTC), so an hourly cache floor is
 // purely about not hammering their CSV endpoints on every panel open —
@@ -10,7 +11,7 @@ export async function GET() {
     const summary = await withCache("layer:gps-jamming", 60 * 60_000, () =>
       fetchGpsJammingSummary(10),
     );
-    return NextResponse.json({ summary });
+    return cachedJson({ summary }, 300);
   } catch (err) {
     console.error(`layer:gps-jamming failed: ${err}`);
     return NextResponse.json({ summary: null });

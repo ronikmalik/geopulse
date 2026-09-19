@@ -142,13 +142,14 @@ export async function runStoryDedupPass(candidates: DedupCandidate[], apiKey: st
   // safe to apply unconditionally.
   const targetIds = new Set(
     verdicts
-      .map((v) => (typeof v.duplicateOfId === "number" ? v.duplicateOfId : null))
+      .map((v) => (v && typeof v.duplicateOfId === "number" ? v.duplicateOfId : null))
       .filter((id): id is number => id !== null),
   );
 
   const db = getDb();
   let merged = 0;
   for (const v of verdicts) {
+    if (!v || typeof v !== "object") continue;
     if (typeof v.id !== "number" || typeof v.duplicateOfId !== "number") continue;
     if (v.duplicateOfId === v.id) continue;
     if (targetIds.has(v.id)) continue;
@@ -161,12 +162,16 @@ export async function runStoryDedupPass(candidates: DedupCandidate[], apiKey: st
     const pool = poolsByKey.get(poolKey(candidate.country, candidate.category)) ?? [];
     if (!pool.some((p) => p.id === v.duplicateOfId)) continue;
 
-    await db
+    const updated = await db
       .update(events)
       .set({ primaryEventId: v.duplicateOfId })
       .where(and(eq(events.id, candidate.id), isNull(events.primaryEventId)))
-      .catch((err) => console.error(`storyDedup update failed for event ${candidate.id}: ${err}`));
-    merged++;
+      .returning({ id: events.id })
+      .catch((err) => {
+        console.error(`storyDedup update failed for event ${candidate.id}: ${err}`);
+        return [];
+      });
+    merged += updated.length;
   }
 
   return { checked: withPool.length, merged };

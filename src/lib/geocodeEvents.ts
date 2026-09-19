@@ -1,4 +1,5 @@
 import { COUNTRY_CENTROIDS } from "./countryCentroids";
+import { countryFromLatLon } from "./geoResolve";
 
 // Real per-story geocoding for RSS/Telegram events, added 2026-09-09.
 // classify.ts's classifyByKeywords only ever resolves which COUNTRY a
@@ -150,6 +151,7 @@ export async function resolveLocationsBatch(
   const results = new Map<number, GeocodeResult>();
 
   for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
     if (typeof item.id !== "number") continue;
     const candidate = byId.get(item.id);
     if (!candidate) continue;
@@ -157,6 +159,12 @@ export async function resolveLocationsBatch(
     if (!Number.isFinite(item.lat) || !Number.isFinite(item.lon)) continue;
     if (item.lat < -90 || item.lat > 90 || item.lon < -180 || item.lon > 180) continue;
     if (typeof item.location !== "string" || !item.location) continue;
+    // A broad centroid radius can cross a national border (e.g. Kyiv is
+    // close enough to Moscow). Keep the fallback when geometry explicitly
+    // contradicts the already-reviewed country. Coastline gaps return null
+    // from the coarse atlas and do not cause an automatic rejection.
+    const locatedCountry = countryFromLatLon(item.lat, item.lon);
+    if (locatedCountry && locatedCountry !== candidate.country) continue;
 
     const centroid = COUNTRY_CENTROIDS[candidate.country];
     if (centroid) {

@@ -1,19 +1,19 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getCountryHistory, summarizeHistory } from "@/lib/history";
+import { badRequest, cachedJson, parseBoundedInt, parseCountryParam } from "@/lib/apiParams";
 
 // Backs the Trends tab: a country's daily country_state_history snapshots
 // plus a deterministic, computed-from-the-numbers summary (see
 // summarizeHistory in src/lib/history.ts) — not a free-text/LLM answer.
+// Snapshots are written once a day, so a 5-minute CDN cache can never
+// hide a real change for long.
 export async function GET(req: NextRequest) {
-  const country = req.nextUrl.searchParams.get("country");
-  if (!country) {
-    return NextResponse.json({ error: "country is required" }, { status: 400 });
-  }
-  const daysParam = req.nextUrl.searchParams.get("days");
-  const days = daysParam ? Math.min(730, Math.max(1, Number(daysParam) || 365)) : 365;
+  const country = parseCountryParam(req.nextUrl.searchParams.get("country"));
+  if (!country) return badRequest("country must be a 2-letter ISO code");
+  const days = parseBoundedInt(req.nextUrl.searchParams.get("days"), 365, 1, 730);
 
   const history = await getCountryHistory(country, days);
   const summary = summarizeHistory(country, history);
 
-  return NextResponse.json({ history, summary });
+  return cachedJson({ history, summary }, 300);
 }
