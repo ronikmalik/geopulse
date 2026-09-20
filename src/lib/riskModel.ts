@@ -288,19 +288,46 @@ async function fitAndRecordModel(
   anomalies: AnomalyRow[],
 ): Promise<HorizonTrainResult> {
   const db = getDb();
+  // The models predict the CHANGE in score over the horizon, not the
+  // level (2026-09-20). Score is heavy-tailed (one country in the
+  // thousands, most under ten) and today's score is already the single
+  // best predictor of the future one, so a level model has to spend all
+  // of its capacity re-learning "output ≈ input" before any other
+  // feature can matter — ten depth-1 boosting stumps cannot do that at
+  // all, and a ridge fit does it only until regularisation shrinks the
+  // weight. Modelling the delta makes persistence the zero model: a
+  // prediction of 0 IS the naive baseline, every feature only has to
+  // explain the residual, and the backtest question "does it beat
+  // persistence" becomes "is MAE(delta) < MAE(0)". The level is added
+  // back when a prediction is stored, so nothing downstream changes.
+  const currentScoreOf = (e: RegressionExample) => e.features[SCORE_FEATURE_INDEX];
   const trainX = trainSet.map((e) => e.features);
-  const trainY = trainSet.map((e) => e.targetScore);
+  const trainY = trainSet.map((e) => e.targetScore - currentScoreOf(e));
   const testX = testSet.map((e) => e.features);
-  const testY = testSet.map((e) => e.targetScore);
-  const naivePredictions = testSet.map((e) => e.features[SCORE_FEATURE_INDEX]); // naive: "no change" from today's score
+  const testY = testSet.map((e) => e.targetScore - currentScoreOf(e));
+  const naivePredictions = testSet.map(() => 0); // naive: "no change" from today's score
   const inner = splitByAvailableOutcome(
     trainSet.map((example, index) => ({ ...example, index })),
     modelType === "linear-regression" ? DEFAULT_TRAIN_CONFIG.validationFraction : DEFAULT_GBM_CONFIG.validationFraction,
   );
-  const validationSplit = {
-    train: inner.train.map((example) => example.index),
-    test: inner.test.map((example) => example.index),
-  };
+  // The purged inner split is only usable when both sides have enough
+  // rows to compare candidates on. With a training set that spans a
+  // single snapshot day (all of 2026-09's early runs — one day of
+  // countries), the time boundary lands on that day and one side is
+  // empty; passing that through made both trainers take their
+  // "conservative" fallback (L2=10 / 10 stumps) for want of anything to
+  // select on. Passing undefined instead lets them use their built-in
+  // interleaved split — a cross-sectional split across countries within
+  // the same day, which leaks nothing across time because there is no
+  // time to leak across.
+  const MIN_INNER_SPLIT = 4;
+  const validationSplit =
+    inner.train.length >= MIN_INNER_SPLIT && inner.test.length >= MIN_INNER_SPLIT
+      ? {
+          train: inner.train.map((example) => example.index),
+          test: inner.test.map((example) => example.index),
+        }
+      : undefined;
 
   let modelParams: unknown;
   let selectedL2: number | null = null;
@@ -370,7 +397,8 @@ async function fitAndRecordModel(
     predictionTargetAt(s.snapshotAt, horizonDays) > generatedAt,
   ).map((s) => {
     const features = featuresFor(s, anomalies);
-    const predictedScore = predictOne(features);
+    // Model output is the horizon delta; the stored prediction is a level.
+    const predictedScore = Math.max(0, features[SCORE_FEATURE_INDEX] + predictOne(features));
     return {
       generatedAt,
       modelRunId: run.id,

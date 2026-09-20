@@ -29,14 +29,6 @@ export interface TrainConfig {
   // given horizon's data actually has, which nothing here should assume
   // in advance.
   l2Candidates: number[];
-  maxIterations: number;
-  learningRate: number;
-  // Early stopping, not a fixed iteration count — checked every N
-  // iterations, stops once improvement falls below tolerance. Robust to
-  // horizons that converge faster or slower than each other, rather than
-  // one guessed count assumed to suit all of them equally.
-  convergenceCheckEvery: number;
-  convergenceTolerance: number;
   // Fraction of the (already time-split, leak-free) outer training set
   // held out — deterministically, not randomly (see trainLinearRegression)
   // — for L2 selection only. Never the real backtest split.
@@ -45,10 +37,6 @@ export interface TrainConfig {
 
 export const DEFAULT_TRAIN_CONFIG: TrainConfig = {
   l2Candidates: [0.01, 0.1, 1, 3, 10],
-  maxIterations: 2000,
-  learningRate: 0.1,
-  convergenceCheckEvery: 25,
-  convergenceTolerance: 1e-5,
   validationFraction: 0.25,
 };
 
@@ -89,45 +77,66 @@ interface FitResult {
   bias: number;
 }
 
-// Batch gradient descent on squared error + L2, both in already-
-// standardized space. Early-stops rather than always running the full
-// iteration cap.
+// Exact ridge solution (2026-09-20) — replaced the batch gradient descent
+// that was here. Objective is unchanged: minimize (1/n)·Σ(x·w + b − y)² +
+// l2·‖w‖² in already-standardized space, which in closed form is
+// w = (XᵀX/n + l2·I)⁻¹ Xᵀy/n with b = 0 (both sides are zero-mean). With
+// at most a few dozen features this is a tiny symmetric solve, so there
+// is no learning rate, no iteration cap and no convergence tolerance to
+// tune — and no way for them to interact badly. That interaction was
+// real: the old update w ← w − lr·(grad + l2·w) with lr = 0.1 and l2 = 10
+// multiplied the weights by exactly zero every step, so the "safest"
+// fallback candidate produced a model that could only predict the mean
+// (MAE 31.7 vs. persistence 2.98 on 2026-09-20's run). The fallback is
+// still the largest candidate; it is just now a real ridge fit.
 function fitOnce(
   x: number[][],
   y: number[],
   l2: number,
-  config: TrainConfig,
+  _config: TrainConfig,
 ): FitResult {
   const n = x.length;
   const dims = x[0]?.length ?? 0;
-  let weights = new Array(dims).fill(0);
-  let bias = 0;
-  let prevLoss = Infinity;
+  if (n === 0 || dims === 0) return { weights: new Array(dims).fill(0), bias: 0 };
 
-  for (let iter = 0; iter < config.maxIterations; iter++) {
-    const weightGrad = new Array(dims).fill(0);
-    let biasGrad = 0;
-    let sqErrSum = 0;
-
-    for (let i = 0; i < n; i++) {
-      const pred = x[i].reduce((sum, v, j) => sum + v * weights[j], bias);
-      const error = pred - y[i];
-      sqErrSum += error * error;
-      for (let j = 0; j < dims; j++) weightGrad[j] += (error * x[i][j]) / n;
-      biasGrad += error / n;
-    }
-
-    weights = weights.map((w, j) => w - config.learningRate * (weightGrad[j] + l2 * w));
-    bias = bias - config.learningRate * biasGrad;
-
-    if ((iter + 1) % config.convergenceCheckEvery === 0) {
-      const loss = sqErrSum / n;
-      if (Math.abs(prevLoss - loss) < config.convergenceTolerance) break;
-      prevLoss = loss;
+  // A = XᵀX/n + l2·I, rhs = Xᵀy/n
+  const a: number[][] = Array.from({ length: dims }, () => new Array(dims).fill(0));
+  const rhs = new Array(dims).fill(0);
+  for (let i = 0; i < n; i++) {
+    const row = x[i];
+    for (let j = 0; j < dims; j++) {
+      rhs[j] += (row[j] * y[i]) / n;
+      for (let k = j; k < dims; k++) a[j][k] += (row[j] * row[k]) / n;
     }
   }
+  for (let j = 0; j < dims; j++) {
+    for (let k = 0; k < j; k++) a[j][k] = a[k][j];
+    a[j][j] += l2;
+  }
+  return { weights: solveSymmetric(a, rhs), bias: 0 };
+}
 
-  return { weights, bias };
+// Gaussian elimination with partial pivoting on a small dense system.
+// The ridge term makes A strictly positive definite, so a zero pivot can
+// only come from a degenerate all-constant feature — those are already
+// mapped to a unit std-dev by standardize(), and a truly zero row gets a
+// zero weight rather than NaN.
+function solveSymmetric(a: number[][], b: number[]): number[] {
+  const n = b.length;
+  const m = a.map((row, i) => [...row, b[i]]);
+  for (let col = 0; col < n; col++) {
+    let pivot = col;
+    for (let r = col + 1; r < n; r++) if (Math.abs(m[r][col]) > Math.abs(m[pivot][col])) pivot = r;
+    if (Math.abs(m[pivot][col]) < 1e-12) continue;
+    [m[col], m[pivot]] = [m[pivot], m[col]];
+    for (let r = 0; r < n; r++) {
+      if (r === col) continue;
+      const f = m[r][col] / m[col][col];
+      if (f === 0) continue;
+      for (let c = col; c <= n; c++) m[r][c] -= f * m[col][c];
+    }
+  }
+  return m.map((row, i) => (Math.abs(row[i]) < 1e-12 ? 0 : row[n] / row[i]));
 }
 
 function meanAbsErrorOf(fit: FitResult, x: number[][], y: number[]): number {

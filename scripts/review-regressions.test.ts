@@ -90,6 +90,25 @@ test("both forecasting models fit finite predictions with a purged inner split",
   assert.ok(Math.abs(predictGbm(gbm, [20, 1]) - 43) < 8);
 });
 
+test("closed-form ridge recovers an exact linear relation and the largest L2 still fits, not zeroes", () => {
+  // 2026-09-20: the old gradient-descent update w -= lr*(grad + l2*w)
+  // with lr=0.1, l2=10 multiplied weights by exactly zero each step, so the
+  // "conservative" candidate could only predict the mean. Both candidates
+  // must now produce a real fit of y = 2x + 3.
+  const x = Array.from({ length: 50 }, (_, i) => [i, (i * 7) % 11]);
+  const y = x.map(([a, b]) => 2 * a + 0.5 * b + 3);
+  const tight = trainLinearRegression(x, y, { l2Candidates: [1e-6], validationFraction: 0.25 }).model;
+  assert.ok(Math.abs(predict(tight, [20, 3]) - 44.5) < 1e-3);
+  const heavy = trainLinearRegression(x, y, { l2Candidates: [10], validationFraction: 0.25 }).model;
+  // L2=10 on unit-variance features is a heavy shrink (weights ≈ 1/11 of
+  // OLS) — the point is that it still moves off the mean in the right
+  // direction, where the old optimizer left the weights at exactly zero.
+  const meanY = y.reduce((s, v) => s + v, 0) / y.length;
+  const high = predict(heavy, [45, 3]);
+  assert.ok(high > meanY + 1 && high < 94.5);
+  assert.ok(predict(heavy, [0, 3]) < meanY - 1);
+});
+
 test("small purged inner sets select conservative defaults without empty-data fits", () => {
   const x = [[1], [2], [3], [4], [5]];
   const y = [7, 7, 7, 7, 7];
