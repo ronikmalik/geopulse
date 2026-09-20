@@ -1,6 +1,7 @@
-import { isNull, eq, desc } from "drizzle-orm";
+import { isNull, eq, desc, notInArray, and } from "drizzle-orm";
 import { getDb } from "@/db";
 import { feedArchive } from "@/db/schema";
+import { STRUCTURAL_SOURCES } from "./structuralSources";
 import { embedBatch } from "./embeddings";
 
 // Deliberately decoupled from the insert path (src/lib/feedArchive.ts's
@@ -55,7 +56,8 @@ export async function backfillFeedArchiveEmbeddings(): Promise<BackfillResult> {
     const rows = await db
       .select({ id: feedArchive.id, title: feedArchive.title, summary: feedArchive.summary })
       .from(feedArchive)
-      .where(isNull(feedArchive.embedding))
+      // Structural sources are never embedded — see structuralSources.ts.
+      .where(and(isNull(feedArchive.embedding), notInArray(feedArchive.source, [...STRUCTURAL_SOURCES])))
       .orderBy(desc(feedArchive.id))
       .limit(BACKFILL_BATCH_SIZE);
 

@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { classificationArchive, events, gateReviewSamples } from "@/db/schema";
+import { STRUCTURAL_SOURCES } from "./structuralSources";
 
 // The pre-publish gate's ground-truth channel (2026-09-20). See
 // gateReviewSamples's doc comment in schema.ts for why this exists: every
@@ -63,7 +64,7 @@ export async function sampleGateDecisions(): Promise<SampleResult> {
       .where(
         sql`${events.reviewStatus} = ${decision}
           and ${events.createdAt} > now() - interval '${sql.raw(String(SAMPLE_WINDOW_HOURS))} hours'
-          and ${events.source} not in ('usgs','eonet','gdacs','ioda','firms')
+          and ${events.source} not in (${sql.join(STRUCTURAL_SOURCES.map((s) => sql`${s}`), sql`, `)})
           and not exists (select 1 from ${gateReviewSamples} g where g.event_id = ${events.id})`,
       )
       .orderBy(sql`random()`)

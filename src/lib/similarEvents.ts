@@ -1,15 +1,40 @@
-import { sql, eq } from "drizzle-orm";
+import { sql, eq, and, ne, isNull, notInArray, inArray, gte, lte, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import { events, feedArchive } from "@/db/schema";
+import { NOT_KILL_SWITCHED } from "./killSwitch";
+import { STRUCTURAL_SOURCES, isStructuralSource } from "./structuralSources";
 
-// Backs GET /api/events/[id]/similar — semantic "similar events" via
-// pgvector cosine distance, reading from feed_archive rather than events
-// (see the doc comment on feed_archive.embedding in src/db/schema.ts for
-// why: it's the durable full corpus, so a story that's aged out of
-// events' 30-day window can still be found as a similar past occurrence).
-// Looked up by url, the one column both tables share as a stable join
-// key, rather than assuming any id correspondence between them.
+// Backs GET /api/events/similar?id= — the "Related:" list under an expanded
+// feed card. Two strategies, chosen by the event's source:
+//
+//   news (RSS/GDELT/Telegram): semantic nearest neighbours via pgvector
+//   cosine distance over feed_archive (the durable full corpus, so a story
+//   that has aged out of events' 30-day window can still surface as a
+//   similar past occurrence — see feed_archive.embedding's doc comment in
+//   schema.ts). Looked up by url, the one column both tables share.
+//
+//   structural (usgs/eonet/gdacs/ioda/firms): a structured lookup instead
+//   (2026-09-20) — see structuralSources.ts for why these rows are no
+//   longer embedded at all. What a reader wants next to a quake, an outage
+//   signal or a satellite fire cluster is the NEWS about it, and that is a
+//   question of place and time, not of text similarity: approved news
+//   events in the same country (or within a ~3° box of the coordinates,
+//   for the coordinate-bearing sources) published within ±48h, same
+//   category first, then closest in time. Two ways to qualify, either
+//   suffices: inside the coordinate box (the event and the story are
+//   physically near each other — news rows carry a geocoded point since
+//   geocodeBackfill.ts, or the country centroid before that), or same
+//   country AND a hazard-family category. Bare "same country" is NOT
+//   enough: live test on a Xinjiang quake surfaced a Beijing tariff story
+//   at time-proximity 0.09, which is the opposite of related.
 const SIMILAR_LIMIT = 5;
+const RELATED_WINDOW_HOURS = 48;
+const RELATED_DEGREE_BOX = 3; // ~330 km at the equator; coarse on purpose
+// News categories that can plausibly be ABOUT a structural event (a quake,
+// a fire, an outage, a disaster alert). Deliberately excludes the conflict
+// and politics categories — a quake and a coup in the same country in the
+// same 48h are not related.
+const HAZARD_FAMILY_CATEGORIES = ["earthquake", "natural-disaster", "climate-hazard", "infrastructure-outage", "humanitarian"] as const;
 
 export interface SimilarEvent {
   id: number;
@@ -19,6 +44,9 @@ export interface SimilarEvent {
   country: string | null;
   severity: number;
   publishedAt: string;
+  // Cosine similarity for the semantic path; for the structural path a
+  // time-proximity score in the same 0..1 range (1 = same moment). The
+  // UI does not currently render it either way.
   similarity: number;
 }
 
@@ -33,16 +61,27 @@ export async function getSimilarEvents(eventId: number): Promise<SimilarEvent[]>
   const db = getDb();
 
   const eventRow = await db
-    .select({ url: events.url })
+    .select({
+      url: events.url,
+      source: events.source,
+      country: events.country,
+      category: events.category,
+      lat: events.lat,
+      lon: events.lon,
+      publishedAt: events.publishedAt,
+    })
     .from(events)
     .where(eq(events.id, eventId))
     .limit(1);
   if (eventRow.length === 0) return [];
+  const event = eventRow[0];
+
+  if (isStructuralSource(event.source)) return relatedStructuralEvents(eventId, event);
 
   const archiveRow = await db
     .select({ embedding: feedArchive.embedding })
     .from(feedArchive)
-    .where(eq(feedArchive.url, eventRow[0].url))
+    .where(eq(feedArchive.url, event.url))
     .limit(1);
   const embedding = archiveRow[0]?.embedding;
   if (!embedding) return [];
@@ -61,7 +100,12 @@ export async function getSimilarEvents(eventId: number): Promise<SimilarEvent[]>
     })
     .from(feedArchive)
     .where(
-      sql`${feedArchive.embedding} is not null and ${feedArchive.url} != ${eventRow[0].url}`,
+      and(
+        sql`${feedArchive.embedding} is not null and ${feedArchive.url} != ${event.url}`,
+        // Older structural rows may still carry an embedding from before
+        // 2026-09-20; they'd rarely rank anyway, but keep the list to news.
+        notInArray(feedArchive.source, [...STRUCTURAL_SOURCES]),
+      ),
     )
     .orderBy(sql`${feedArchive.embedding} <=> ${vectorLiteral}::vector`)
     .limit(SIMILAR_LIMIT);
@@ -75,5 +119,66 @@ export async function getSimilarEvents(eventId: number): Promise<SimilarEvent[]>
     severity: r.severity,
     publishedAt: r.publishedAt.toISOString(),
     similarity: 1 - Number(r.distance),
+  }));
+}
+
+async function relatedStructuralEvents(
+  eventId: number,
+  event: { country: string | null; category: string; lat: number; lon: number; publishedAt: Date },
+): Promise<SimilarEvent[]> {
+  const db = getDb();
+  const windowMs = RELATED_WINDOW_HOURS * 60 * 60_000;
+  const from = new Date(event.publishedAt.getTime() - windowMs);
+  const to = new Date(event.publishedAt.getTime() + windowMs);
+
+  const insideBox = and(
+    gte(events.lat, event.lat - RELATED_DEGREE_BOX),
+    lte(events.lat, event.lat + RELATED_DEGREE_BOX),
+    gte(events.lon, event.lon - RELATED_DEGREE_BOX),
+    lte(events.lon, event.lon + RELATED_DEGREE_BOX),
+  );
+  const sameCountryHazard = event.country
+    ? and(eq(events.country, event.country), inArray(events.category, [...HAZARD_FAMILY_CATEGORIES]))
+    : undefined;
+  const nearby = sameCountryHazard ? or(insideBox, sameCountryHazard) : insideBox;
+
+  const rows = await db
+    .select({
+      id: events.id,
+      source: events.source,
+      url: events.url,
+      title: events.title,
+      country: events.country,
+      severity: events.severity,
+      publishedAt: events.publishedAt,
+    })
+    .from(events)
+    .where(
+      and(
+        ne(events.id, eventId),
+        eq(events.reviewStatus, "approved"),
+        isNull(events.primaryEventId),
+        NOT_KILL_SWITCHED,
+        notInArray(events.source, [...STRUCTURAL_SOURCES]),
+        gte(events.publishedAt, from),
+        lte(events.publishedAt, to),
+        nearby,
+      ),
+    )
+    .orderBy(
+      sql`(${events.category} = ${event.category}) desc`,
+      sql`abs(extract(epoch from (${events.publishedAt} - ${event.publishedAt}::timestamptz)))`,
+    )
+    .limit(SIMILAR_LIMIT);
+
+  return rows.map((r) => ({
+    id: r.id,
+    source: r.source,
+    url: r.url,
+    title: r.title,
+    country: r.country,
+    severity: r.severity,
+    publishedAt: r.publishedAt.toISOString(),
+    similarity: Math.max(0, 1 - Math.abs(r.publishedAt.getTime() - event.publishedAt.getTime()) / windowMs),
   }));
 }

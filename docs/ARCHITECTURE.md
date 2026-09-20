@@ -195,6 +195,15 @@ one non-generative translation API — all direct REST calls, no SDK:
   expire — that graduation step is the one piece of this that's still manual, since it
   means editing and redeploying code, not just writing a database row.
 
+- **Structural sources are not embedded (2026-09-20)** — usgs/eonet/gdacs/ioda/firms
+  rows are templated text, so every row of a source embeds to nearly the same vector:
+  "similar events" for a FIRMS cluster returned other FIRMS clusters, clustering got a
+  meaningless blob, novelty could never fire, and it cost 13% of the embedding budget.
+  `structuralSources.ts` lists them; the backfill, clustering corpus and novelty scorer
+  all skip them, and `similarEvents.ts` gives them a structured "related" lookup
+  instead (news within ±48h that is either inside a ~3° box of the coordinates or same
+  country + a hazard-family category).
+
 - **Loop hardening (2026-09-20)** — the corroboration bar proves a lesson is
   *recurring*; it says nothing about whether it's *right*. Ten days of production data
   showed both failure modes: (a) the loop auto-promoted "exclude Gaza/West Bank

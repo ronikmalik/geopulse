@@ -1,6 +1,7 @@
-import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, sql, notInArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { feedArchive, narrativeClusters, narrativeNoveltyFindings } from "@/db/schema";
+import { STRUCTURAL_SOURCES } from "./structuralSources";
 import { cosineDistance, normalize } from "@/lib/narrativeClustering";
 
 // Runs BETWEEN weekly training runs (src/lib/narrativeTraining.ts) — scores
@@ -52,7 +53,7 @@ export async function scoreNewNarrativeItems(): Promise<NoveltyScoringResult> {
     .select({ id: feedArchive.id, embedding: feedArchive.embedding })
     .from(feedArchive)
     .leftJoin(narrativeNoveltyFindings, eq(narrativeNoveltyFindings.feedArchiveId, feedArchive.id))
-    .where(and(isNotNull(feedArchive.embedding), isNull(narrativeNoveltyFindings.id)))
+    .where(and(isNotNull(feedArchive.embedding), isNull(narrativeNoveltyFindings.id), notInArray(feedArchive.source, [...STRUCTURAL_SOURCES])))
     .limit(BATCH_SIZE);
 
   if (unscored.length === 0) return { scored: 0, novel: 0, skipped: false };

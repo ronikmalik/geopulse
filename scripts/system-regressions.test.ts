@@ -203,3 +203,9 @@ test("calibration loop: merge threshold, drift-guard parsing and promotion rule"
   assert.equal(parseGuardVerdict("narrows"), null);
   assert.equal(parseGuardVerdict({ verdict: "new" })?.verdict, "new");
 });
+
+test("structural sources are identified by exact name", async () => {
+  const { isStructuralSource, STRUCTURAL_SOURCES } = await import("../src/lib/structuralSources");
+  for (const s of STRUCTURAL_SOURCES) assert.equal(isStructuralSource(s), true);
+  for (const s of ["gdelt", "rss:al-jazeera", "telegram:presstv", "usgs2", ""]) assert.equal(isStructuralSource(s), false);
+});
