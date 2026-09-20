@@ -1,11 +1,27 @@
 name: Ingest live events
 
-# The primary ingest cadence (every 15 min). Since 2026-09-19 this runs
-# runIngest() IN-PROCESS on the Actions runner (see _run-job.yml and
+# The primary ingest cadence. Since 2026-09-19 this runs runIngest()
+# IN-PROCESS on the Actions runner (see _run-job.yml and
 # scripts/run-job.ts) instead of curl-ing /api/ingest on Vercel — the
 # Vercel route still exists as a manual/fallback entry point (and as the
 # once-daily vercel.ts floor), but the scheduled work no longer spends
 # Vercel's metered compute.
+#
+# 2026-09-20, every 10 min + review chained in the same run: measured
+# against the runs of the previous 31 hours, GitHub starts a scheduled run
+# a median 10.5 min (p90 13.4) after its cron slot and silently drops ~4%
+# of slots outright — so a 15-minute schedule really delivers new rows at
+# 13-31 minute intervals (max gap per hour in the events table: 15 min
+# flat while cron-job.org was still firing at :00/:15/:30/:45, 19-43 min
+# once it was turned off). Users noticed the feed going quiet. Denser
+# slots shrink the gap; the delay itself doesn't matter while it's
+# consistent. review-pending runs as a second job right after ingest
+# (rather than on its own, independently-jittered schedule — see
+# review-pending.yml) so RSS/Telegram/GDELT rows are reviewed ~1 min after
+# they're inserted instead of 0-15 min later at random. The Gemini daily
+# caps in src/lib/aiUsage.ts are unchanged and enforced in the DB, so the
+# denser cadence cannot spend more than before; it can only spend it
+# earlier in the day.
 #
 # History worth keeping: this schedule did not fire even once between
 # 2026-08-27 and 2026-09-04 despite showing "active"; changing the cron
@@ -15,11 +31,11 @@ name: Ingest live events
 # cron-job.org used to be the primary trigger for the same route, at
 # :00/:15/:30/:45, on top of this workflow at :04/:19/:34/:49 and a self-
 # trigger from the old SSE stream — three overlapping schedulers were why
-# /api/ingest ran ~260x/day instead of ~96x. Disable the cron-job.org
-# ingest/review-pending jobs (or drop them to hourly as a pure backstop).
+# /api/ingest ran ~260x/day instead of ~96x. Those are off; this is now
+# the only scheduler apart from the daily Vercel floor.
 on:
   schedule:
-    - cron: "4,19,34,49 * * * *"
+    - cron: "1,11,21,31,41,51 * * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -31,4 +47,17 @@ jobs:
     with:
       job: ingest
       timeout-minutes: 10
+    secrets: inherit
+
+  # Runs after ingest whether or not ingest succeeded (a partial ingest
+  # still leaves pending rows worth reviewing; only a cancelled run skips
+  # it). Its own concurrency group in _run-job.yml queues it behind any
+  # manual review-pending dispatch rather than running two at once.
+  review-pending:
+    needs: ingest
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/_run-job.yml
+    with:
+      job: review-pending
+      timeout-minutes: 6
     secrets: inherit

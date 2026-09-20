@@ -5,8 +5,9 @@ name: Generate country briefs
 # pulse/risk-score order). Generates exactly ONE country's brief per call
 # (see src/lib/countryBriefs.ts) and needs a cadence like this to reach
 # 50/day; GEMINI_LITE_DAILY_CAPS.brief in src/lib/aiUsage.ts is what stops
-# it at 50. Offset from ingest (:04...) and review-pending (:07...) so none
-# of the three fire in the same minute. In-process on the runner since
+# it at 50. Offset from ingest (:01, :11, ... — review-pending is chained
+# inside that run since 2026-09-20) so the two never fire in the same
+# minute. In-process on the runner since
 # 2026-09-19 (see _run-job.yml).
 on:
   schedule:

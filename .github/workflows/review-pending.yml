@@ -1,18 +1,20 @@
 name: Review pending events
 
-# Dedicated cadence for the pre-publish Gemini gate (2026-09-10, explicit
-# user instruction: prioritize reviewPendingEvents over the backlog sweep,
-# give it real leeway, decouple it from ingest). See
-# PENDING_REVIEW_DEADLINE_MS in src/lib/classifierAudit.ts for the real AI
-# Studio RPD/RPM numbers (490/500, 18/15) that ruled out just giving it
-# MORE total daily requests. Runs in-process on the runner since
-# 2026-09-19 (see _run-job.yml).
+# Manual-dispatch entry point for the pre-publish Gemini gate. Since
+# 2026-09-20 the scheduled review runs as the second job of ingest.yml,
+# chained directly after each ingest, so a review pass always lands about
+# a minute after fresh pending rows exist — the two used to be separate
+# schedules (:04... and :07...) that GitHub jittered independently by
+# ~10 min each, so in practice new rows waited anywhere from 0 to 15 min
+# for review. This file stays for one-off runs (e.g. to drain a backlog
+# after a Gemini outage) and keeps the workflow registered so old run
+# history stays browsable.
 #
-# Offset from ingest.yml's :04/:19/:34/:49 so a review pass always lands a
-# few minutes after fresh pending rows exist.
+# See PENDING_REVIEW_DEADLINE_MS in src/lib/classifierAudit.ts for the real
+# AI Studio RPD/RPM numbers (490/500, 18/15) that ruled out just giving it
+# MORE total daily requests, and GEMINI_LITE_DAILY_CAPS in src/lib/aiUsage.ts
+# for the cap that bounds it regardless of how often it runs.
 on:
-  schedule:
-    - cron: "7,22,37,52 * * * *"
   workflow_dispatch: {}
 
 permissions:
