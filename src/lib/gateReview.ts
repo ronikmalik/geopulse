@@ -242,3 +242,43 @@ export async function getHumanLabelledExamples(): Promise<HumanLabelledExample[]
     gateCorrect: r.verdict === "correct",
   }));
 }
+
+// Weekly fail-loud check (2026-09-20). Every model gated on human ground
+// truth — the shadow text classifier, gate precision/recall, and the
+// active-learning sampler the ML roadmap plans — is only as good as the
+// grades that exist, and for the first week of this channel that number
+// was zero. This is not a metric; it is an alarm. It returns the counts
+// and THROWS when a week passed with ungraded samples piling up and no
+// grade landing, so the GitHub Actions job that calls it goes red and
+// GitHub emails the repo owner. A run with nothing to grade is fine.
+export interface GradingCheckResult {
+  gradedLast7d: number;
+  gradedTotal: number;
+  ungraded: number;
+  oldestUngradedDays: number | null;
+}
+
+export async function checkGradingProgress(): Promise<GradingCheckResult> {
+  const db = getDb();
+  const [row] = await db
+    .select({
+      gradedLast7d: sql<number>`count(*) filter (where ${gateReviewSamples.gradedAt} > now() - interval '7 days')::int`,
+      gradedTotal: sql<number>`count(${gateReviewSamples.gradedAt})::int`,
+      ungraded: sql<number>`count(*) filter (where ${gateReviewSamples.humanVerdict} is null)::int`,
+      oldestUngradedDays: sql<number | null>`extract(epoch from (now() - min(${gateReviewSamples.sampledAt}) filter (where ${gateReviewSamples.humanVerdict} is null))) / 86400`,
+    })
+    .from(gateReviewSamples);
+  const result: GradingCheckResult = {
+    gradedLast7d: Number(row.gradedLast7d),
+    gradedTotal: Number(row.gradedTotal),
+    ungraded: Number(row.ungraded),
+    oldestUngradedDays: row.oldestUngradedDays === null ? null : Number(Number(row.oldestUngradedDays).toFixed(1)),
+  };
+  if (result.gradedLast7d === 0 && result.ungraded > 0) {
+    throw new Error(
+      `No gate-review grades in the last 7 days while ${result.ungraded} samples wait (oldest ${result.oldestUngradedDays} days). ` +
+        `Grade them at /admin/gate-review — the shadow classifier cannot be evaluated, let alone promoted, until at least 50 exist (currently ${result.gradedTotal}).`,
+    );
+  }
+  return result;
+}

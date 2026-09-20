@@ -6,6 +6,7 @@ import {
   getEventVolumeAnomalyOutcomes,
   getEventVolumeByCategoryAnomalyOutcomes,
 } from "@/lib/eventVolumeAnomaly";
+import { getNarrativeNoveltyAnomalyOutcomes } from "@/lib/narrativeNoveltyAnomaly";
 import {
   getCountryStateMultivariateAnomalyOutcomes,
   MULTIVARIATE_FEATURE_NAMES,
@@ -123,6 +124,11 @@ export async function runAnomalyScan(): Promise<AnomalyScanResult> {
       category: o.category,
       outcome: o.outcome,
     })),
+  );
+  // Sixth signal (2026-09-20): share of a country's articles matching no
+  // known narrative cluster — see narrativeNoveltyAnomaly.ts.
+  await runSignal("narrative-novelty", async () =>
+    (await getNarrativeNoveltyAnomalyOutcomes()).map((o) => ({ country: o.country, outcome: o.outcome })),
   );
 
   // Project 2 (2026-09-09) — kept separate from the shared runSignal

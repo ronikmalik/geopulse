@@ -23,7 +23,7 @@ const HALF_LIFE_DAYS = 3;
 const LOOKBACK_DAYS = 30;
 const DECAY_RATE = Math.LN2 / HALF_LIFE_DAYS;
 
-interface CountryCategoryRow {
+export interface CountryCategoryRow {
   country: string;
   category: string;
   decayedWeight: number;
@@ -39,7 +39,7 @@ interface CountryCategoryRow {
 // (pillar rollups, Threat Level, Momentum) is pure JS aggregation over
 // these rows, so the scoring model lives in one place (src/lib/threat.ts)
 // rather than being re-derived in SQL.
-async function getCountryCategoryRows(country?: string): Promise<CountryCategoryRow[]> {
+export async function getCountryCategoryRows(country?: string): Promise<CountryCategoryRow[]> {
   const db = getDb();
   const countryFilter = country
     ? sql`and ${events.country} = ${country.toUpperCase()}`
@@ -77,7 +77,7 @@ async function getCountryCategoryRows(country?: string): Promise<CountryCategory
     }));
 }
 
-interface PillarAgg {
+export interface PillarAgg {
   decayedWeight: number;
   recent24h: number;
   prior24h: number;
@@ -101,7 +101,7 @@ function emptyAgg(): PillarAgg {
 
 // Groups the flat (country, category) rows into country -> pillar -> agg,
 // summing every category that rolls up into the same pillar.
-function aggregateByCountryAndPillar(
+export function aggregateByCountryAndPillar(
   rows: CountryCategoryRow[],
 ): Map<string, Map<PillarId, PillarAgg>> {
   const byCountry = new Map<string, Map<PillarId, PillarAgg>>();

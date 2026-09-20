@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { snapshotCountryStates } from "@/lib/history";
+import { snapshotCountryFeatures } from "@/lib/countryFeatures";
 import { gradeResolvedPredictions } from "@/lib/riskModelGrading";
 import { isCronAuthorized } from "@/lib/cronAuth";
 
@@ -21,9 +22,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const snapshot = await snapshotCountryStates();
+  // Wide feature table (countryFeatures.ts) — logged on failure, never
+  // allowed to mask the history write. Same shape as scripts/run-job.ts.
+  const features = await snapshotCountryFeatures().catch((err) => {
+    console.error(`snapshotCountryFeatures failed: ${err}`);
+    return null;
+  });
   const grading = await gradeResolvedPredictions().catch((err) => {
     console.error(`riskModelGrading failed: ${err}`);
     return { graded: 0, ungraded: 0 };
   });
-  return NextResponse.json({ snapshot, grading });
+  return NextResponse.json({ snapshot, features, grading });
 }

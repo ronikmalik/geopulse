@@ -199,6 +199,92 @@ export const countryStateHistory = pgTable(
 export type CountryStateHistoryRow = typeof countryStateHistory.$inferSelect;
 export type NewCountryStateHistoryRow = typeof countryStateHistory.$inferInsert;
 
+// The wide daily feature snapshot (2026-09-20) — the training table every
+// forecasting model reads, written once a day by the `snapshot` job right
+// after country_state_history. country_state_history stays as the narrow
+// five-column series the Trends tab charts; this is the ~20-column
+// companion the shadow risk model was starved of (six features, ten times
+// worse than persistence — see docs/ARCHITECTURE.md §9a and the ML
+// roadmap). Every column is derivable from tables that already exist, but
+// NOT retroactively: `events` is a rolling 30-day window and the anomaly/
+// novelty tables only hold their own recent state, so a feature not
+// snapshotted today cannot be back-filled later. That is the whole reason
+// this lands before any model that would use it.
+//
+// One row per (country, snapshot_date), UPSERTED — unlike
+// country_state_history's plain insert, re-running the job on the same
+// day overwrites rather than duplicates, so this table is safe under two
+// schedulers or a manual re-run. Lagged features (t-1, t-3, t-7) are NOT
+// stored: they are a self-join away at training time and storing them
+// would only bake in one choice of lag.
+//
+// Nullable columns are "no data for this country today" (no aircraft
+// tracked, no articles to score for novelty), distinct from 0.
+export const countryFeatureDaily = pgTable(
+  "country_feature_daily",
+  {
+    id: serial("id").primaryKey(),
+    country: text("country").notNull(),
+    snapshotDate: text("snapshot_date").notNull(), // YYYY-MM-DD (UTC)
+    snapshotAt: timestamp("snapshot_at", { withTimezone: true }).notNull().defaultNow(),
+    // Headline state, duplicated from country_state_history so a training
+    // query never has to join on a fuzzy timestamp match.
+    score: doublePrecision("score").notNull(),
+    threatLevel: smallint("threat_level").notNull(),
+    momentum: smallint("momentum").notNull(),
+    momentumDirection: smallint("momentum_direction").notNull(),
+    eventCount: integer("event_count").notNull(),
+    // Decayed severity weight per pillar (PILLAR_IDS order in pillars.ts) —
+    // the sub-scores that sum to `score`. Escalation is pillar-specific;
+    // one total hides which pillar is moving.
+    pillarGeopoliticalSecurity: doublePrecision("pillar_geopolitical_security").notNull().default(0),
+    pillarPoliticalGovernance: doublePrecision("pillar_political_governance").notNull().default(0),
+    pillarClimateEnvironment: doublePrecision("pillar_climate_environment").notNull().default(0),
+    pillarNaturalBiologicalHazards: doublePrecision("pillar_natural_biological_hazards").notNull().default(0),
+    pillarHumanSocial: doublePrecision("pillar_human_social").notNull().default(0),
+    pillarInfrastructureConnectivity: doublePrecision("pillar_infrastructure_connectivity").notNull().default(0),
+    pillarSupplyChainResource: doublePrecision("pillar_supply_chain_resource").notNull().default(0),
+    pillarCyberTechnology: doublePrecision("pillar_cyber_technology").notNull().default(0),
+    // Volume and intensity over rolling windows ending at snapshot time.
+    events24h: integer("events_24h").notNull().default(0),
+    events7d: integer("events_7d").notNull().default(0),
+    severityMean24h: doublePrecision("severity_mean_24h"),
+    severityMax24h: smallint("severity_max_24h"),
+    severityMean7d: doublePrecision("severity_mean_7d"),
+    // Source diversity and mix over 7d — cross-confirmed stories precede
+    // sustained rises; Telegram is the early, noisy channel.
+    distinctSources7d: integer("distinct_sources_7d").notNull().default(0),
+    distinctFamilies7d: integer("distinct_families_7d").notNull().default(0),
+    telegramShare7d: doublePrecision("telegram_share_7d"),
+    gdeltShare7d: doublePrecision("gdelt_share_7d"),
+    // Narrative novelty over the last 24h, from narrative_novelty_findings:
+    // share of this country's scored articles that matched no known
+    // cluster, and their mean distance to the nearest one.
+    noveltyItems24h: integer("novelty_items_24h").notNull().default(0),
+    novelShare24h: doublePrecision("novel_share_24h"),
+    noveltyMeanDistance24h: doublePrecision("novelty_mean_distance_24h"),
+    // Air/GNSS picture: latest daily value and its z-score against the
+    // prior 14 days of the same series (null until 14 samples exist).
+    aircraftMilitaryLatest: integer("aircraft_military_latest"),
+    aircraftMilitaryZ14: doublePrecision("aircraft_military_z14"),
+    aircraftCommercialLatest: integer("aircraft_commercial_latest"),
+    aircraftCommercialZ14: doublePrecision("aircraft_commercial_z14"),
+    gpsJammingLatest: integer("gps_jamming_latest"),
+    gpsJammingZ14: doublePrecision("gps_jamming_z14"),
+    // Recency of structural break: days since this country's last anomaly
+    // finding of any signal type (null = never).
+    daysSinceAnomaly: doublePrecision("days_since_anomaly"),
+    anomalyCount7d: integer("anomaly_count_7d").notNull().default(0),
+  },
+  (table) => [
+    unique("country_feature_daily_country_date_key").on(table.country, table.snapshotDate),
+    index("country_feature_daily_snapshot_date_idx").on(table.snapshotDate),
+  ],
+);
+
+export type CountryFeatureDailyRow = typeof countryFeatureDaily.$inferSelect;
+export type NewCountryFeatureDailyRow = typeof countryFeatureDaily.$inferInsert;
+
 // One row per country per daily snapshot of currently-tracked aircraft
 // (see src/lib/flightBaseline.ts and the /api/admin/snapshot-flights
 // cron) — the same "record it now, judge it later" pattern as

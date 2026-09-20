@@ -1,0 +1,24 @@
+name: Grading check
+
+# Weekly alarm (2026-09-20): fails loudly when a week has passed with
+# ungraded gate-review samples and no human grade landing. Everything on
+# the ML roadmap that needs ground truth — shadow classifier promotion,
+# gate precision/recall, active learning — is gated on grades existing,
+# and the channel produced zero in its first week. A red run here is the
+# nudge; there is nothing to fix in code when it fires, only rows to grade
+# at /admin/gate-review. Mondays 15:00 UTC so it lands in a working day.
+on:
+  schedule:
+    - cron: "0 15 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  grading-check:
+    uses: ./.github/workflows/_run-job.yml
+    with:
+      job: grading-check
+      timeout-minutes: 3
+    secrets: inherit

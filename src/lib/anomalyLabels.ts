@@ -16,6 +16,8 @@ export function signalName(signalType: string): string {
       return "news volume";
     case "event-volume-category":
       return "category news volume";
+    case "narrative-novelty":
+      return "share of coverage matching no known narrative (%)";
     default:
       return signalType;
   }

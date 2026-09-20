@@ -37,6 +37,8 @@ import { runIngest } from "../src/lib/ingest";
 import { reviewPendingEvents, runClassifierAudit } from "../src/lib/classifierAudit";
 import { generateBriefsForActiveCountries } from "../src/lib/countryBriefs";
 import { snapshotCountryStates } from "../src/lib/history";
+import { snapshotCountryFeatures } from "../src/lib/countryFeatures";
+import { applyMigrations } from "../src/lib/migrations";
 import { gradeResolvedPredictions } from "../src/lib/riskModelGrading";
 import { snapshotAircraftCounts, snapshotCommercialAircraftCounts } from "../src/lib/flightBaseline";
 import { snapshotGpsJamming } from "../src/lib/gpsJammingHistory";
@@ -45,7 +47,7 @@ import { trainAndShadowPredict } from "../src/lib/riskModel";
 import { trainNarrativeClusters } from "../src/lib/narrativeTraining";
 import { trainAndEvaluateTextClassifier } from "../src/lib/textClassifierTraining";
 import { syncSourceCredibility } from "../src/lib/sourceCredibility";
-import { sampleGateDecisions } from "../src/lib/gateReview";
+import { sampleGateDecisions, checkGradingProgress } from "../src/lib/gateReview";
 
 // Hard ceiling on any single job so a hung upstream can never pin a runner
 // for the workflow's full timeout-minutes. Derived from the caller's own
@@ -70,11 +72,17 @@ const JOBS: Record<string, () => Promise<unknown>> = {
   // must never mask a successful snapshot write.
   snapshot: async () => {
     const snapshot = await snapshotCountryStates();
+    // The wide feature table (countryFeatures.ts) rides on the same job;
+    // its failure is logged, never allowed to mask the history write.
+    const features = await snapshotCountryFeatures().catch((err) => {
+      console.error(`snapshotCountryFeatures failed: ${err}`);
+      return null;
+    });
     const grading = await gradeResolvedPredictions().catch((err) => {
       console.error(`riskModelGrading failed: ${err}`);
       return { graded: 0, ungraded: 0 };
     });
-    return { snapshot, grading };
+    return { snapshot, features, grading };
   },
   // Mirrors src/app/api/admin/snapshot-flights/route.ts.
   "snapshot-flights": async () => {
@@ -112,6 +120,12 @@ const JOBS: Record<string, () => Promise<unknown>> = {
   "train-narrative-clusters": () => trainNarrativeClusters(),
   "train-text-classifier": () => trainAndEvaluateTextClassifier(),
   "sync-source-credibility": () => syncSourceCredibility(),
+  // Applies src/lib/migrations.ts — idempotent, safe to run any time a
+  // schema change ships (the /api/admin/migrate route does the same).
+  migrate: () => applyMigrations(),
+  // Weekly alarm, not a metric: throws (and so fails the workflow) when a
+  // week passed with no human gate grades — see checkGradingProgress.
+  "grading-check": () => checkGradingProgress(),
 };
 
 async function main() {

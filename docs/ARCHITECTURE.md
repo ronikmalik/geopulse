@@ -415,10 +415,12 @@ CDN-cached read routes, which is all a Hobby plan is really for.
 
 | Job | Workflow | Cadence (UTC) |
 | --- | --- | --- |
-| `ingest` | `ingest.yml` | :04/:19/:34/:49 |
-| `review-pending` | `review-pending.yml` | :07/:22/:37/:52 |
+| `ingest` then `review-pending` (chained, same run) | `ingest.yml` | :01, :11, :21, :31, :41, :51 (since 2026-09-20 — GitHub starts scheduled runs a median ~10 min late and drops ~4% of slots, so a 15-min schedule delivered rows at 13-31 min gaps; review is chained so it lands ~1 min after the rows it reviews) |
+| `review-pending` (manual only) | `review-pending.yml` | dispatch |
 | `generate-briefs` | `generate-briefs.yml` | :10/:25/:40/:55 |
-| `snapshot`, `snapshot-flights`, `audit-classifier` | `daily-snapshots.yml` | 18:00, 18:30, 20:00 |
+| `snapshot` (+ `country_feature_daily`, + prediction grading), `snapshot-flights` (+ anomaly scan), `audit-classifier` (+ gate sample) | `daily-snapshots.yml` | 18:00, 18:30, 20:00 |
+| `grading-check` | `grading-check.yml` | Monday 15:00 — fails loudly if a week passed with no human gate grades |
+| `migrate` | (manual: `npx tsx scripts/run-job.ts migrate`, or `/api/admin/migrate`) | after a schema change |
 | `train-risk-model`, `train-narrative-clusters`, `train-text-classifier` | `train-*.yml` | Sunday 12:00, 12:30, 13:00 |
 
 What remains on Vercel's side of scheduling:
@@ -491,3 +493,31 @@ RSS/Telegram source; `docs/TELEGRAM_SOURCES.md` and `src/lib/sources/README.md` 
 per-source integration notes and rejected-source reasoning; `docs/API_SOURCES.md`
 carries the licensing table itself. This document is the map of how those pieces fit
 together.
+
+## 11. ML training inputs (2026-09-20)
+
+Phase 0 of the ML roadmap — the pieces that have to exist *before* any model,
+because they are the data no later date can back-fill:
+
+- **`country_feature_daily`** (`src/lib/countryFeatures.ts`) — the wide daily feature
+  snapshot, one upserted row per (country, UTC date), written by the `snapshot` job
+  right after `country_state_history`. ~35 columns: the headline state, decayed weight
+  per pillar, 24h/7d volume and severity, source diversity and Telegram/GDELT share,
+  narrative novelty (share of the day's articles matching no learned cluster), latest
+  aircraft/GNSS-jamming values with 14-day z-scores, and anomaly recency. Nothing here
+  is modelled — every column is a `GROUP BY` over an existing table, so a model trained
+  on it can be audited back to rows. `country_state_history` is untouched and stays the
+  narrow series the Trends tab charts. Lags are not stored; they are a self-join at
+  training time.
+- **`narrative-novelty` anomaly signal** (`src/lib/narrativeNoveltyAnomaly.ts`) — the
+  sixth signal in the daily scan: percent of a country's scored articles in a rolling
+  24h bucket whose nearest cluster was further than that cluster's own threshold, z-
+  scored against the country's prior days (≥ 3 articles per bucket, 14-day baseline,
+  rises only, ≥ 25-point jump). Uses the novel/matched *verdict* rather than raw
+  distance because the cluster map is retrained weekly and raw distances are not
+  stationary across a retrain.
+- **`grading-check`** — the weekly alarm that keeps the one non-Gemini feedback channel
+  (human gate grades, §6) from silently producing nothing.
+- **`migrate` job** — `src/lib/migrations.ts` now holds the idempotent statement list
+  the `/api/admin/migrate` route always applied, so it can also run on the Actions
+  runner.
