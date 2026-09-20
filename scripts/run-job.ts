@@ -48,11 +48,19 @@ import { syncSourceCredibility } from "../src/lib/sourceCredibility";
 import { sampleGateDecisions } from "../src/lib/gateReview";
 
 // Hard ceiling on any single job so a hung upstream can never pin a runner
-// for the workflow's full timeout-minutes. Generous relative to the Vercel
-// routes' 55-120s maxDuration — there's no serverless clock to fight here,
-// so the jobs get the room their internal deadlines were always sized
-// against, plus real margin.
-const JOB_TIMEOUT_MS = 8 * 60_000;
+// for the workflow's full timeout-minutes. Derived from the caller's own
+// ceiling (JOB_TIMEOUT_MINUTES, set by _run-job.yml from its
+// timeout-minutes input) minus a minute of margin, so this guard always
+// fires BEFORE the runner's — a fixed 8 minutes was longer than the 6-minute
+// review-pending/generate-briefs ceilings, and the one hang seen since the
+// move (review-pending, 2026-09-20 02:54 UTC, six minutes of silence) ended
+// as a bare "cancelled" with no message from this process at all. Generous
+// relative to the Vercel routes' 55-120s maxDuration either way — there's
+// no serverless clock to fight here.
+const JOB_TIMEOUT_MS = (() => {
+  const minutes = Number(process.env.JOB_TIMEOUT_MINUTES);
+  return Number.isFinite(minutes) && minutes > 1 ? (minutes - 1) * 60_000 : 8 * 60_000;
+})();
 
 const JOBS: Record<string, () => Promise<unknown>> = {
   ingest: () => runIngest(),

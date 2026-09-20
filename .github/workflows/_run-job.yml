@@ -75,4 +75,5 @@ jobs:
           GEMINI_AUDIT_MODEL: ${{ secrets.GEMINI_AUDIT_MODEL }}
           GEMINI_GEOCODE_MODEL: ${{ secrets.GEMINI_GEOCODE_MODEL }}
           NODE_ENV: production
+          JOB_TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
         run: npx tsx scripts/run-job.ts "${{ inputs.job }}"
