@@ -5,6 +5,8 @@
 // circular import between the two modules (storyDedup.ts needs to call
 // Gemini the exact same way; classifierAudit.ts needs to call
 // storyDedup.ts's runStoryDedupPass from within reviewPendingEvents).
+import { SlidingWindowLimiter } from "./slidingWindowLimiter";
+
 const AUDIT_MODEL = process.env.GEMINI_AUDIT_MODEL || "gemini-3.5-flash-lite";
 const GENERATE_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${AUDIT_MODEL}:generateContent`;
 // 20s -> 28s (2026-09-11, live-caught): BATCH_SIZE went 6->18 the same day
@@ -31,7 +33,24 @@ const REQUEST_TIMEOUT_MS = 28_000;
 // table or a live feed mutation) — see classifierAudit.ts's
 // maybeAutoPromote and storyDedup.ts's pool-membership check for two
 // concrete examples.
+
+// Process-wide sliding-window throttle (2026-09-20). classifierAudit.ts
+// paces its MAIN rounds at CONCURRENCY=2 per ROUND_SPACING_MS=10s (12
+// RPM), but the drift-guard calls (maybeAutoPromote) and the story-dedup
+// call (storyDedup.ts) go through this same function and were not counted
+// against that pacing — the 2026-09-20 20:05 UTC backlog sweep fired four
+// guard calls inside one minute of full-rate rounds, crossed the 15 RPM
+// free-tier ceiling, and the last three main calls came back 429. Counting
+// EVERY call here, whoever makes it, is the only place that can hold the
+// line. Reservations are serialised through a promise chain so two
+// concurrent callers cannot both see "one slot left" and both take it.
+// 12/min, not 15: generate-briefs and the ingest-time geocode pass run
+// in other processes against the same model and need the remaining
+// headroom.
+const limiter = new SlidingWindowLimiter(12, 60_000);
+
 export async function callGeminiJson<T>(prompt: string, apiKey: string): Promise<T[] | null> {
+  await limiter.reserve();
   let res: Response;
   try {
     res = await fetch(`${GENERATE_ENDPOINT}?key=${apiKey}`, {

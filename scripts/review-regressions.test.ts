@@ -5,6 +5,7 @@ import { neonConfig } from "@neondatabase/serverless";
 import { splitByAvailableOutcome, predictionTargetAt } from "../src/lib/temporalSplit";
 import { buildRegressionExamples, findClosestSnapshot, type Snapshot } from "../src/lib/riskModel";
 import { trainLinearRegression, predict } from "../src/lib/linearRegression";
+import { SlidingWindowLimiter } from "../src/lib/slidingWindowLimiter";
 import { trainGradientBoostedTrees, predictGbm } from "../src/lib/gradientBoostedTrees";
 import { isCronAuthorized } from "../src/lib/cronAuth";
 import { parseCountryParam, parseIdParam, parseCategoriesParam, parseBoundedInt, cachedJson } from "../src/lib/apiParams";
@@ -184,4 +185,30 @@ test("public duplicate lookup constrains both child and primary visibility", asy
     if (originalUrl === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = originalUrl;
   }
+});
+
+test("sliding-window limiter holds the 13th call in a minute until the oldest slot expires", async () => {
+  let clock = 0;
+  const sleeps: number[] = [];
+  const limiter = new SlidingWindowLimiter(12, 60_000, () => clock, async (ms) => {
+    sleeps.push(ms);
+    clock += ms;
+  });
+  for (let i = 0; i < 12; i++) {
+    await limiter.reserve();
+    clock += 1_000; // one call per second: 12 calls span 0..11s
+  }
+  assert.equal(sleeps.length, 0);
+  await limiter.reserve(); // 13th at t=12s must wait until t=60s+ (oldest slot at t=0 expires)
+  assert.equal(sleeps.length, 1);
+  assert.ok(clock >= 60_000);
+  // Concurrent reservations serialise: two at once never both slip through a single free slot.
+  clock = 200_000;
+  const fresh = new SlidingWindowLimiter(1, 60_000, () => clock, async (ms) => {
+    clock += ms;
+  });
+  const a = fresh.reserve();
+  const b = fresh.reserve();
+  await Promise.all([a, b]);
+  assert.ok(clock >= 260_000);
 });
