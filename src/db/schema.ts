@@ -1160,3 +1160,38 @@ export type NewRiskPredictionRow = typeof riskPredictions.$inferInsert;
 
 export type ClassifierCalibrationRow = typeof classifierCalibration.$inferSelect;
 export type ClassifierCalibrationEvidenceRow = typeof classifierCalibrationEvidence.$inferSelect;
+
+// The model registry (2026-09-20, ML roadmap phase 1) — one row per
+// training run of ANY model family, written best-effort by each trainer
+// after its own run table. The family-specific tables (risk_model_runs,
+// text_classifier_runs, narrative_clusters) keep the full detail; this is
+// the one place that can answer "what models exist, which are promoted,
+// and what did each score against its naive baseline" without knowing
+// every family's schema — which is what the public /models page reads.
+// A registry write failing never fails a trainer (see recordModelRun).
+export const modelRegistry = pgTable(
+  "model_registry",
+  {
+    id: serial("id").primaryKey(),
+    trainedAt: timestamp("trained_at", { withTimezone: true }).notNull().defaultNow(),
+    family: text("family").notNull(), // "risk-score-delta" | "text-classifier" | "narrative-clusters" | ...
+    variant: text("variant").notNull(), // e.g. "linear-regression/1d", "knn/k=15", "kmeans/k=50"
+    sampleSize: integer("sample_size").notNull(),
+    backtestSampleSize: integer("backtest_sample_size").notNull().default(0),
+    featureNames: text("feature_names"), // JSON string[]
+    metrics: text("metrics").notNull(), // JSON object — the model's own held-out numbers
+    baseline: text("baseline"), // JSON object — the naive alternative's numbers on the same held-out set
+    trained: boolean("trained").notNull().default(true),
+    promoted: boolean("promoted").notNull().default(false),
+    notes: text("notes"),
+    sourceTable: text("source_table"), // which family table holds the detail row
+    sourceId: integer("source_id"),
+  },
+  (table) => [
+    index("model_registry_family_idx").on(table.family),
+    index("model_registry_trained_at_idx").on(table.trainedAt),
+  ],
+);
+
+export type ModelRegistryRow = typeof modelRegistry.$inferSelect;
+export type NewModelRegistryRow = typeof modelRegistry.$inferInsert;

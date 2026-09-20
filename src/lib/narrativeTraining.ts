@@ -1,5 +1,6 @@
 import { and, gte, isNotNull, eq, sql, notInArray } from "drizzle-orm";
 import { getDb } from "@/db";
+import { recordModelRun } from "@/lib/modelRegistry";
 import { feedArchive, narrativeClusters, narrativeNoveltyFindings } from "@/db/schema";
 import { STRUCTURAL_SOURCES } from "./structuralSources";
 import { chooseBestK } from "@/lib/narrativeClustering";
@@ -150,6 +151,22 @@ export async function trainNarrativeClusters(): Promise<NarrativeTrainingResult>
     findingsInserted = insertedFindings.length;
   }
 
+  const notes = `trained k=${result.k} clusters on ${items.length} embedded items (silhouette ${result.silhouetteScore.toFixed(3)}).`;
+  // Clustering has no naive baseline to beat — its quality measure is the
+  // silhouette (−1..1, near 0 = clusters barely better than random), and
+  // the registry shows that number as-is rather than dressing it up.
+  await recordModelRun({
+    family: "narrative-clusters",
+    variant: `kmeans/k=${result.k}`,
+    sampleSize: items.length,
+    featureNames: ["embedding(768)"],
+    metrics: { silhouette: result.silhouetteScore, clusters: insertedClusters.length },
+    baseline: { name: "silhouette of random assignment", silhouette: 0 },
+    promoted: true, // the newest cluster map is always the live one — there is no shadow mode here
+    notes,
+    sourceTable: "narrative_clusters",
+  });
+
   return {
     trained: true,
     sampleSize: items.length,
@@ -157,7 +174,7 @@ export async function trainNarrativeClusters(): Promise<NarrativeTrainingResult>
     silhouetteScore: result.silhouetteScore,
     clustersInserted: insertedClusters.length,
     findingsInserted,
-    notes: `trained k=${result.k} clusters on ${items.length} embedded items (silhouette ${result.silhouetteScore.toFixed(3)}).`,
+    notes,
   };
 }
 

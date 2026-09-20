@@ -15,6 +15,7 @@ import {
 } from "@/lib/gradientBoostedTrees";
 import { weightToThreatLevel } from "@/lib/threat";
 import { splitByAvailableOutcome, predictionTargetAt } from "@/lib/temporalSplit";
+import { recordModelRun } from "@/lib/modelRegistry";
 
 // Project 4 (2026-09-09) — the two model types trainHorizon fits and
 // compares for every horizon, champion/challenger-style (see
@@ -379,6 +380,20 @@ async function fitAndRecordModel(
     })
     .returning({ id: riskModelRuns.id });
 
+  await recordModelRun({
+    family: "risk-score-delta",
+    variant: `${modelType}/${horizonDays}d`,
+    sampleSize: trainSet.length + testSet.length,
+    backtestSampleSize: backtest.sampleSize,
+    featureNames: [...FEATURE_NAMES],
+    metrics: { mae: backtest.mae, rmse: backtest.rmse, hyperparams: hyperparamNote },
+    baseline: { name: "persistence (no change)", mae: backtest.naiveMae },
+    promoted,
+    notes,
+    sourceTable: "risk_model_runs",
+    sourceId: run.id,
+  });
+
   // Shadow predictions — one per country, from each country's MOST
   // RECENT snapshot, logged regardless of promotion (the whole point is
   // accumulating a genuinely out-of-sample, prospectively-graded track
@@ -448,6 +463,17 @@ async function trainHorizon(
         .insert(riskModelRuns)
         .values({ modelType, horizonDays, sampleSize: examples.length, backtestSampleSize: 0, promoted: false, notes })
         .returning({ id: riskModelRuns.id });
+      await recordModelRun({
+        family: "risk-score-delta",
+        variant: `${modelType}/${horizonDays}d`,
+        sampleSize: examples.length,
+        featureNames: [...FEATURE_NAMES],
+        metrics: {},
+        trained: false,
+        notes,
+        sourceTable: "risk_model_runs",
+        sourceId: row.id,
+      });
       results.push({
         horizonDays,
         modelType,

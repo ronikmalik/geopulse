@@ -521,3 +521,20 @@ because they are the data no later date can back-fill:
 - **`migrate` job** — `src/lib/migrations.ts` now holds the idempotent statement list
   the `/api/admin/migrate` route always applied, so it can also run on the Actions
   runner.
+- **Model registry + `/models` page** (`src/lib/modelRegistry.ts`, `model_registry`
+  table, `GET /api/models`, `/models`) — every trainer writes one summary row per run
+  (family, variant, held-out metrics, the naive baseline's metrics on the same rows,
+  promoted flag, pointer to the family table's detail row), best-effort so a registry
+  failure never fails a trainer. The public page lists the latest run per variant next
+  to its baseline, the live graded track record of the shadow forecasts (with
+  persistence MAE on the same graded rows), and the human gate-grading numbers. The
+  rule it enforces: a model is shown next to what it had to beat, or not as a model.
+- **Risk-model fix (2026-09-20)** — the shadow regressor was losing to persistence by
+  10× because (a) the gradient-descent update with lr=0.1 and L2=10 multiplied weights
+  by exactly zero each step, and that "conservative" candidate was the fallback
+  whenever the purged inner split was empty — always, for a one-day training set; and
+  (b) it predicted the score *level*, spending all capacity re-learning output ≈ input.
+  Now: exact closed-form ridge, interleaved inner split when the temporal one is
+  empty, and both models predict the horizon *change* (persistence = the zero model).
+  Dry run on live data: MAE 2.98 vs. persistence 2.98 — at par, weights ≈ 0, the honest
+  result until `country_feature_daily` accumulates.

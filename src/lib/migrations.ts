@@ -458,6 +458,25 @@ export const MIGRATION_STATEMENTS = [
     CONSTRAINT country_feature_daily_country_date_key UNIQUE (country, snapshot_date)
   )`,
   sql`CREATE INDEX IF NOT EXISTS country_feature_daily_snapshot_date_idx ON country_feature_daily (snapshot_date)`,
+  // 2026-09-20: model registry — see modelRegistry's doc comment in schema.ts.
+  sql`CREATE TABLE IF NOT EXISTS model_registry (
+    id SERIAL PRIMARY KEY,
+    trained_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    family TEXT NOT NULL,
+    variant TEXT NOT NULL,
+    sample_size INTEGER NOT NULL,
+    backtest_sample_size INTEGER NOT NULL DEFAULT 0,
+    feature_names TEXT,
+    metrics TEXT NOT NULL,
+    baseline TEXT,
+    trained BOOLEAN NOT NULL DEFAULT true,
+    promoted BOOLEAN NOT NULL DEFAULT false,
+    notes TEXT,
+    source_table TEXT,
+    source_id INTEGER
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS model_registry_family_idx ON model_registry (family)`,
+  sql`CREATE INDEX IF NOT EXISTS model_registry_trained_at_idx ON model_registry (trained_at)`,
 ];
 
 export async function applyMigrations(): Promise<{ statementsApplied: number }> {

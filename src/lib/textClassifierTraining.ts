@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
+import { recordModelRun } from "@/lib/modelRegistry";
 import { classificationArchive, classifierAudit, textClassifierRuns } from "@/db/schema";
 import { chooseBestK, classifyViaKnn, prepareLabeledExamples, type LabeledExample } from "@/lib/textClassifier";
 import { normalize } from "@/lib/narrativeClustering";
@@ -204,15 +205,32 @@ async function evaluateAgainstHumanLabels(
 
 async function recordRun(r: TextClassifierRunResult): Promise<void> {
   const db = getDb();
-  await db.insert(textClassifierRuns).values({
-    trainedAt: new Date(),
-    k: r.k,
+  const [run] = await db
+    .insert(textClassifierRuns)
+    .values({
+      trainedAt: new Date(),
+      k: r.k,
+      sampleSize: r.sampleSize,
+      cvAccuracy: r.cvAccuracy,
+      backtestSampleSize: r.backtestSampleSize,
+      backtestAgreementRate: r.backtestAgreementRate,
+      promoted: r.promoted,
+      notes: r.notes,
+    })
+    .returning({ id: textClassifierRuns.id });
+  await recordModelRun({
+    family: "text-classifier",
+    variant: `knn/k=${r.k}`,
     sampleSize: r.sampleSize,
-    cvAccuracy: r.cvAccuracy,
     backtestSampleSize: r.backtestSampleSize,
-    backtestAgreementRate: r.backtestAgreementRate,
+    featureNames: ["embedding(768)"],
+    metrics: { cvAccuracy: r.cvAccuracy, auditAgreementRate: r.backtestAgreementRate },
+    baseline: { name: "live Gemini gate (human-graded rows)", note: "promotion requires beating it on ≥ 50 graded rows" },
+    trained: r.trained,
     promoted: r.promoted,
     notes: r.notes,
+    sourceTable: "text_classifier_runs",
+    sourceId: run.id,
   });
 }
 
