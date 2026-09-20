@@ -209,3 +209,16 @@ test("structural sources are identified by exact name", async () => {
   for (const s of STRUCTURAL_SOURCES) assert.equal(isStructuralSource(s), true);
   for (const s of ["gdelt", "rss:al-jazeera", "telegram:presstv", "usgs2", ""]) assert.equal(isStructuralSource(s), false);
 });
+
+test("quote timestamps are described honestly by source and age", async () => {
+  const { describeAsOf, newestAsOf } = await import("../src/lib/asOf");
+  const now = Date.parse("2026-09-20T12:00:00Z");
+  assert.equal(describeAsOf("2026-09-20T11:59:40Z", "market", now), "just now");
+  assert.equal(describeAsOf("2026-09-20T11:35:00Z", "market", now), "25 min ago");
+  assert.equal(describeAsOf("2026-09-20T03:00:00Z", "market", now), "9 h ago");
+  assert.equal(describeAsOf("2026-09-18T21:00:00Z", "market", now), "last trade 2026-09-18");
+  assert.equal(describeAsOf("2026-09-15T00:00:00.000Z", "reference", now), "daily fixing, 2026-09-15");
+  const rows = [{ asOf: "2026-09-18T00:00:00Z", source: "reference" as const }, { asOf: "2026-09-20T02:00:00Z", source: "market" as const }];
+  assert.equal(newestAsOf(rows)?.source, "market");
+  assert.equal(newestAsOf([]), null);
+});

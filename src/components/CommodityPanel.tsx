@@ -1,6 +1,7 @@
 "use client";
 
 import type { CommodityResponse } from "@/lib/dataLayerTypes";
+import { describeAsOf, newestAsOf } from "@/lib/asOf";
 
 interface CommodityPanelProps {
   data: CommodityResponse | null;
@@ -15,6 +16,7 @@ function formatPrice(price: number, unit: string): string {
 
 export default function CommodityPanel({ data }: CommodityPanelProps) {
   const commodities = data?.commodities ?? [];
+  const newest = newestAsOf(commodities);
 
   return (
     <div className="flex flex-col border-t border-red-950/50">
@@ -22,13 +24,19 @@ export default function CommodityPanel({ data }: CommodityPanelProps) {
         <h2 className="mb-1 font-mono text-xs uppercase tracking-[0.2em] text-red-500">
           Energy and Commodities
         </h2>
-        <p className="mb-3 font-mono text-[10px] text-red-800">
-          Crude oil &amp; natural gas, plus gold/silver — EIA / community FX mirror
+        <p className="mb-1 font-mono text-[10px] text-red-800">
+          Crude oil &amp; natural gas futures, plus gold/silver
         </p>
+        {newest && (
+          <p className="mb-3 font-mono text-[10px] text-neutral-500">
+            {newest.source === "market" ? "Market quotes · " : "EIA / community daily · "}
+            as of {describeAsOf(newest.asOf, newest.source)}
+          </p>
+        )}
 
         {commodities.length === 0 && (
           <p className="p-1 font-mono text-xs text-neutral-600">
-            Loading live prices…
+            Loading prices…
           </p>
         )}
 

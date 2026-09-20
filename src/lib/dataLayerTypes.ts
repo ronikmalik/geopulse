@@ -47,6 +47,8 @@ export interface ForexRate {
   rate: number;
   changePct: number;
   date: string;
+  asOf: string;
+  source: "market" | "reference";
 }
 
 export interface ForexResponse {

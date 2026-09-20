@@ -1,6 +1,7 @@
 "use client";
 
 import type { CftcResponse, ForexResponse } from "@/lib/dataLayerTypes";
+import { describeAsOf, newestAsOf } from "@/lib/asOf";
 
 interface ForexPanelProps {
   data: ForexResponse | null;
@@ -15,6 +16,7 @@ function formatContracts(n: number): string {
 
 export default function ForexPanel({ data, cftc }: ForexPanelProps) {
   const rates = data?.rates ?? [];
+  const newest = newestAsOf(rates);
   const positionsByCurrency = new Map(
     (cftc?.positions ?? []).map((p) => [p.currency, p]),
   );
@@ -25,13 +27,19 @@ export default function ForexPanel({ data, cftc }: ForexPanelProps) {
         <h2 className="mb-1 font-mono text-xs uppercase tracking-[0.2em] text-red-500">
           Forex
         </h2>
-        <p className="mb-3 font-mono text-[10px] text-red-800">
-          USD vs. major and geopolitically exposed currencies — Frankfurter / ECB
+        <p className="mb-1 font-mono text-[10px] text-red-800">
+          USD vs. major and geopolitically exposed currencies
         </p>
+        {newest && (
+          <p className="mb-3 font-mono text-[10px] text-neutral-500">
+            {newest.source === "market" ? "Market quotes · " : "ECB / community daily fixings · "}
+            as of {describeAsOf(newest.asOf, newest.source)}
+          </p>
+        )}
 
         {rates.length === 0 && (
           <p className="p-1 font-mono text-xs text-neutral-600">
-            Loading live rates…
+            Loading rates…
           </p>
         )}
 

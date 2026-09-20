@@ -9,8 +9,8 @@ import { cachedJson } from "@/lib/apiParams";
 // entirely rather than just one optional layer.
 export async function GET() {
   try {
-    const rates = await withCache("layer:forex", 5 * 60_000, fetchForexRates);
-    return cachedJson({ rates }, 300);
+    const rates = await withCache("layer:forex", 60_000, fetchForexRates);
+    return cachedJson({ rates }, 60);
   } catch (err) {
     console.error(`layer:forex failed: ${err}`);
     return NextResponse.json({ rates: [] });

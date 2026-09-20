@@ -29,6 +29,8 @@
 // - fawazahmed0/currency-api (the same community CDN forex.ts already
 //   uses for RUB/UAH) carries precious metals as pseudo-currencies (XAU,
 //   XAG) against USD, updated daily, no key required.
+import { fetchMarketQuotes } from "./yahooQuote";
+
 const EIA_ENDPOINT = "https://api.eia.gov/v2";
 const CDN_CURRENCY_ENDPOINT = "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api";
 
@@ -39,6 +41,9 @@ export interface CommodityPrice {
   price: number;
   changePct: number | null;
   date: string;
+  // See ForexRate.asOf/source in forex.ts — same meaning here (2026-09-20).
+  asOf: string;
+  source: "market" | "reference";
 }
 
 interface EiaSeriesConfig {
@@ -115,6 +120,8 @@ async function fetchEiaSeries(
     price: latest.value,
     changePct,
     date: latest.period,
+    asOf: `${latest.period}T00:00:00.000Z`,
+    source: "reference",
   };
 }
 
@@ -178,11 +185,57 @@ async function fetchMetalPrices(): Promise<CommodityPrice[]> {
       price,
       changePct,
       date: latest.date,
+      asOf: `${latest.date}T00:00:00.000Z`,
+      source: "reference" as const,
     };
   });
 }
 
+// Intraday path (2026-09-20): front-month futures from Yahoo Finance. Ids
+// are kept identical to the reference path's (EIA series ids for energy,
+// the metal symbols) so nothing keyed on `id` downstream changes. Per-
+// instrument fallback: any instrument Yahoo didn't return is filled from
+// the daily provider, so a partial Yahoo outage never blanks the ticker.
+const MARKET_INSTRUMENTS: { id: string; symbol: string; label: string; unit: string }[] = [
+  { id: "RWTC", symbol: "CL=F", label: "Crude Oil (WTI)", unit: "$/bbl" },
+  { id: "RBRTE", symbol: "BZ=F", label: "Crude Oil (Brent)", unit: "$/bbl" },
+  { id: "RNGWHHD", symbol: "NG=F", label: "Natural Gas (Henry Hub)", unit: "$/MMBtu" },
+  { id: "xau", symbol: "GC=F", label: "Gold", unit: "$/oz" },
+  { id: "xag", symbol: "SI=F", label: "Silver", unit: "$/oz" },
+];
+
+async function fetchMarketCommodityPrices(): Promise<Map<string, CommodityPrice>> {
+  const quotes = await fetchMarketQuotes(MARKET_INSTRUMENTS.map((m) => m.symbol));
+  const out = new Map<string, CommodityPrice>();
+  for (const m of MARKET_INSTRUMENTS) {
+    const q = quotes.get(m.symbol);
+    if (!q) continue;
+    out.set(m.id, {
+      id: m.id,
+      label: m.label,
+      unit: m.unit,
+      price: q.price,
+      changePct: q.changePct,
+      date: q.asOf.toISOString().slice(0, 10),
+      asOf: q.asOf.toISOString(),
+      source: "market",
+    });
+  }
+  return out;
+}
+
 export async function fetchCommodityPrices(): Promise<CommodityPrice[]> {
-  const [energy, metals] = await Promise.all([fetchEnergyPrices(), fetchMetalPrices()]);
-  return [...energy, ...metals];
+  const market = await fetchMarketCommodityPrices().catch((err) => {
+    console.error(`Market commodity quotes failed: ${err}`);
+    return new Map<string, CommodityPrice>();
+  });
+  // Only hit the daily providers for whatever the market path is missing.
+  const missing = MARKET_INSTRUMENTS.filter((m) => !market.has(m.id));
+  let reference: CommodityPrice[] = [];
+  if (missing.length > 0) {
+    const [energy, metals] = await Promise.all([fetchEnergyPrices(), fetchMetalPrices()]);
+    reference = [...energy, ...metals];
+  }
+  const byId = new Map(reference.map((r) => [r.id, r]));
+  return MARKET_INSTRUMENTS.map((m) => market.get(m.id) ?? byId.get(m.id)).filter((c): c is CommodityPrice => c != null);
 }

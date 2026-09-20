@@ -8,8 +8,8 @@ import { cachedJson } from "@/lib/apiParams";
 // degrades to an empty ticker rather than breaking the tab.
 export async function GET() {
   try {
-    const commodities = await withCache("layer:commodities", 5 * 60_000, fetchCommodityPrices);
-    return cachedJson({ commodities }, 300);
+    const commodities = await withCache("layer:commodities", 60_000, fetchCommodityPrices);
+    return cachedJson({ commodities }, 60);
   } catch (err) {
     console.error(`layer:commodities failed: ${err}`);
     return NextResponse.json({ commodities: [] });

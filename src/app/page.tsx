@@ -49,12 +49,12 @@ import type {
 } from "@/lib/dataLayerTypes";
 import type { GeoEvent } from "@/lib/types";
 
-const FOREX_POLL_MS = 5 * 60_000;
+const FOREX_POLL_MS = 60_000;
 const CFTC_POLL_MS = 60 * 60_000;
 // Same cadence as forex — FRED/the metals CDN both publish once/day, so
 // polling faster wouldn't surface new data any sooner, just re-hit
 // withCache's 5-minute TTL on the route for nothing.
-const COMMODITIES_POLL_MS = 5 * 60_000;
+const COMMODITIES_POLL_MS = 60_000;
 
 const MOBILE_TABS: { id: DashboardTab; label: string }[] = [
   { id: "feed", label: "Feed" },
