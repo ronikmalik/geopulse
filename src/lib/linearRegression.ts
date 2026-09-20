@@ -89,12 +89,7 @@ interface FitResult {
 // fallback candidate produced a model that could only predict the mean
 // (MAE 31.7 vs. persistence 2.98 on 2026-09-20's run). The fallback is
 // still the largest candidate; it is just now a real ridge fit.
-function fitOnce(
-  x: number[][],
-  y: number[],
-  l2: number,
-  _config: TrainConfig,
-): FitResult {
+function fitOnce(x: number[][], y: number[], l2: number): FitResult {
   const n = x.length;
   const dims = x[0]?.length ?? 0;
   if (n === 0 || dims === 0) return { weights: new Array(dims).fill(0), bias: 0 };
@@ -198,7 +193,7 @@ export function trainLinearRegression(
     const validationY = valY.map((value) => (value - innerMean) / innerStd);
     let bestValLoss = Infinity;
     for (const l2 of config.l2Candidates) {
-      const fit = fitOnce(inner.standardized, innerY, l2, config);
+      const fit = fitOnce(inner.standardized, innerY, l2);
       const valLoss = meanAbsErrorOf(fit, validationX, validationY);
       if (valLoss < bestValLoss) {
         bestValLoss = valLoss;
@@ -207,7 +202,7 @@ export function trainLinearRegression(
     }
   }
 
-  const finalFit = fitOnce(xStd, yStd, selectedL2, config);
+  const finalFit = fitOnce(xStd, yStd, selectedL2);
   return {
     model: {
       weights: finalFit.weights,
