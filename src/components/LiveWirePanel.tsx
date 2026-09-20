@@ -89,7 +89,7 @@ export default function LiveWirePanel({
         <p className="mb-2 font-mono text-[10px] text-red-800">
           {selectedCountry
             ? `Suggested for ${countryName(selectedCountry)}: ${channel.region}`
-            : "No country selected — showing global coverage."}
+            : "No country selected - showing global coverage."}
         </p>
 
         <div className="aspect-video w-full overflow-hidden rounded border border-neutral-800 bg-black">

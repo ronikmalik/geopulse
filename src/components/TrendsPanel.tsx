@@ -64,7 +64,7 @@ function HistoryChart({ history }: { history: HistorySnapshot[] }) {
             key={h.snapshotAt}
             className="group relative w-3 shrink-0 rounded-t-sm"
             style={{ height: `${barHeight}px`, backgroundColor: THREAT_COLORS[h.threatLevel] }}
-            title={`${formatDate(h.snapshotAt)} — score ${h.score.toFixed(1)}`}
+            title={`${formatDate(h.snapshotAt)} - score ${h.score.toFixed(1)}`}
           />
         );
       })}
@@ -131,7 +131,7 @@ export default function TrendsPanel({ countryScores, anomalies }: TrendsPanelPro
           Trends
         </h2>
         <p className="mb-3 font-mono text-[10px] text-red-800">
-          Search a country to see its Pulse history — daily snapshots,
+          Search a country to see its Pulse history - daily snapshots,
           recorded once a day, building up over time.
         </p>
 

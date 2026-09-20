@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Geopulse — Live Geopolitical Signal Map",
+  title: "Geopulse - Live Geopolitical Signal Map",
   description:
     "A live 3D globe tracking geopolitical events from GDELT and global news sources.",
 };

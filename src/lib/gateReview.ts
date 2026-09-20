@@ -166,7 +166,7 @@ export async function gradeGateSample(id: number, verdict: HumanVerdict, note: s
   const newStatus = sample.gateDecision === "approved" ? "rejected" : "approved";
   const flipped = await db
     .update(events)
-    .set({ reviewStatus: newStatus, reviewReasoning: `human grade: gate was wrong${note ? ` — ${note.slice(0, 300)}` : ""}` })
+    .set({ reviewStatus: newStatus, reviewReasoning: `human grade: gate was wrong${note ? ` - ${note.slice(0, 300)}` : ""}` })
     .where(and(eq(events.id, sample.eventId), eq(events.reviewStatus, sample.gateDecision)))
     .returning({ id: events.id });
   await db
@@ -277,7 +277,7 @@ export async function checkGradingProgress(): Promise<GradingCheckResult> {
   if (result.gradedLast7d === 0 && result.ungraded > 0) {
     throw new Error(
       `No gate-review grades in the last 7 days while ${result.ungraded} samples wait (oldest ${result.oldestUngradedDays} days). ` +
-        `Grade them at /admin/gate-review — the shadow classifier cannot be evaluated, let alone promoted, until at least 50 exist (currently ${result.gradedTotal}).`,
+        `Grade them at /admin/gate-review - the shadow classifier cannot be evaluated, let alone promoted, until at least 50 exist (currently ${result.gradedTotal}).`,
     );
   }
   return result;

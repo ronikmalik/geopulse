@@ -91,7 +91,7 @@ export function summarizeHistory(country: string, history: HistorySnapshot[]): H
       levelDayCounts: {},
       peak: null,
       trend: "insufficient-data",
-      text: `No history recorded yet for this country — snapshots started ${new Date().toISOString().slice(0, 10)} and accumulate once a day.`,
+      text: `No history recorded yet for this country - snapshots started ${new Date().toISOString().slice(0, 10)} and accumulate once a day.`,
     };
   }
 

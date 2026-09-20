@@ -138,7 +138,7 @@ function RelatedEvents({ eventId }: { eventId: number }) {
             className="block truncate font-mono text-[10px] text-neutral-400 hover:text-red-400"
             title={item.title}
           >
-            {sourceLabel(item.source)} — {item.title}
+            {sourceLabel(item.source)} - {item.title}
           </a>
         ))}
       </div>

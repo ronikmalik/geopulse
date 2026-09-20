@@ -31,7 +31,7 @@ async function fetchPayload(secret: string): Promise<{ data: Payload | null; err
 }
 
 function pct(v: number | null): string {
-  return v === null ? "—" : `${Math.round(v * 100)}%`;
+  return v === null ? "-" : `${Math.round(v * 100)}%`;
 }
 
 export default function GateReviewPage() {
@@ -80,7 +80,7 @@ export default function GateReviewPage() {
         setError(body.error ?? `Request failed (${res.status}).`);
         return;
       }
-      setLastResult(`${verdict === "correct" ? "Confirmed" : "Overruled"} — ${body.note ?? ""}`);
+      setLastResult(`${verdict === "correct" ? "Confirmed" : "Overruled"} - ${body.note ?? ""}`);
       setData((prev) => (prev ? { ...prev, pending: prev.pending.filter((p) => p.id !== sample.id) } : prev));
       load();
     } catch {
@@ -138,7 +138,7 @@ export default function GateReviewPage() {
       )}
 
       {data && data.pending.length === 0 && (
-        <p className="text-sm text-neutral-500">Nothing to grade — today&apos;s sample is done. Come back tomorrow.</p>
+        <p className="text-sm text-neutral-500">Nothing to grade - today&apos;s sample is done. Come back tomorrow.</p>
       )}
 
       <ul className="flex flex-col gap-3">
@@ -155,7 +155,7 @@ export default function GateReviewPage() {
                   gate {approved ? "published" : "rejected"}
                 </span>
                 <span className="font-mono text-[10px] text-neutral-500">
-                  {CATEGORY_LABELS[s.category as Category] ?? s.category} · {s.country ?? "—"} · sev {s.severity} ·{" "}
+                  {CATEGORY_LABELS[s.category as Category] ?? s.category} · {s.country ?? "-"} · sev {s.severity} ·{" "}
                   {sourceLabel(s.source)}
                 </span>
               </div>
@@ -184,7 +184,7 @@ export default function GateReviewPage() {
                   onClick={() => grade(s, "wrong")}
                   className="rounded bg-red-800 px-3 py-1.5 text-sm text-white transition hover:bg-red-700 disabled:opacity-50"
                 >
-                  Gate was wrong — {approved ? "should be hidden" : "should be published"}
+                  Gate was wrong - {approved ? "should be hidden" : "should be published"}
                 </button>
                 <input
                   value={notes[s.id] ?? ""}

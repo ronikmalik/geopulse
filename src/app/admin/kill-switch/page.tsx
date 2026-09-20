@@ -81,7 +81,7 @@ export default function KillSwitchPage() {
         <h1 className="text-xl font-semibold text-white">Feed Kill Switch</h1>
         <p className="mt-1 text-sm text-neutral-400">
           Hides every currently-live event from the feed, risk scores, and anomaly
-          signals. Nothing is deleted — hidden rows stay in the database, and can be
+          signals. Nothing is deleted - hidden rows stay in the database, and can be
           restored at any time.
         </p>
       </div>

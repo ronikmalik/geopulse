@@ -57,15 +57,15 @@ interface LayersDashboardProps {
 
 const LAYER_DESCRIPTIONS: Partial<Record<Category, string>> = {
   "political-instability":
-    "GDELT, RSS & Telegram — coups, contested elections, martial law, government collapse.",
+    "GDELT, RSS & Telegram - coups, contested elections, martial law, government collapse.",
   humanitarian:
-    "GDELT, RSS & Telegram — famine, displacement, refugee flows, disease outbreaks.",
-  earthquake: "USGS — magnitude 4.5+ seismic events, last 30 days.",
+    "GDELT, RSS & Telegram - famine, displacement, refugee flows, disease outbreaks.",
+  earthquake: "USGS - magnitude 4.5+ seismic events, last 30 days.",
   "natural-disaster":
-    "NASA EONET + GDACS — cyclones, volcanoes, tsunamis, severe storms.",
-  "climate-hazard": "NASA EONET + GDACS — floods, wildfires, drought.",
+    "NASA EONET + GDACS - cyclones, volcanoes, tsunamis, severe storms.",
+  "climate-hazard": "NASA EONET + GDACS - floods, wildfires, drought.",
   "infrastructure-outage":
-    "IODA (Georgia Tech) — country-level internet connectivity disruptions.",
+    "IODA (Georgia Tech) - country-level internet connectivity disruptions.",
 };
 
 function formatUsd(value: number): string {
@@ -117,7 +117,7 @@ export default function LayersDashboard({
       if (commercialFlightsError) {
         return (
           <span className="mt-1 block text-[11px] text-red-500">
-            Unavailable right now ({commercialFlightsError}) — not a genuine zero
+            Unavailable right now ({commercialFlightsError}) - not a genuine zero
           </span>
         );
       }
@@ -140,7 +140,7 @@ export default function LayersDashboard({
           {gdp.countries.slice(0, 5).map((c) => (
             <div key={c.countryIso3} className="flex justify-between gap-2">
               <span className="truncate">{c.countryName}</span>
-              <span className="shrink-0">{c.value != null ? formatUsd(c.value) : "—"}</span>
+              <span className="shrink-0">{c.value != null ? formatUsd(c.value) : "-"}</span>
             </div>
           ))}
         </div>
@@ -152,7 +152,7 @@ export default function LayersDashboard({
           {population.countries.slice(0, 5).map((c) => (
             <div key={c.countryIso3} className="flex justify-between gap-2">
               <span className="truncate">{c.countryName}</span>
-              <span className="shrink-0">{c.value != null ? formatCount(c.value) : "—"}</span>
+              <span className="shrink-0">{c.value != null ? formatCount(c.value) : "-"}</span>
             </div>
           ))}
         </div>
@@ -164,7 +164,7 @@ export default function LayersDashboard({
           {cyber.vulnerabilities.slice(0, 5).map((v) => (
             <div key={v.cveId} className="flex items-start justify-between gap-2">
               <span className="truncate">
-                {v.cveId} — {v.product}
+                {v.cveId} - {v.product}
                 {v.knownRansomwareUse && (
                   <span className="ml-1 text-red-500">⚠ ransomware</span>
                 )}
@@ -199,7 +199,7 @@ export default function LayersDashboard({
       return (
         <div className="mt-1.5 space-y-0.5 text-[11px] text-neutral-500">
           <div>
-            {s.date} — {s.totalBadHexes} suspect cells
+            {s.date} - {s.totalBadHexes} suspect cells
             {s.globalSuspect ? " (flagged)" : ""}
           </div>
           {s.regions.slice(0, 5).map((r) => (
@@ -245,7 +245,7 @@ export default function LayersDashboard({
           {gridLoss.countries.slice(0, 5).map((c) => (
             <div key={c.countryIso3} className="flex justify-between gap-2">
               <span className="truncate">{c.countryName}</span>
-              <span className="shrink-0">{c.value != null ? `${c.value.toFixed(1)}%` : "—"}</span>
+              <span className="shrink-0">{c.value != null ? `${c.value.toFixed(1)}%` : "-"}</span>
             </div>
           ))}
         </div>
@@ -391,7 +391,7 @@ export default function LayersDashboard({
           Context Layers
         </h2>
         <p className="mb-2 font-mono text-[10px] text-red-800">
-          Structural and situational context, not scored events. Flights, Commercial Air Traffic, Weather, GPS Jamming, Submarine Cables, Travel Advisories, Grid Losses, Energy Mix, Trade Balance, Chokepoint Traffic, Air Quality, and Cyber (Actively Exploited Vulnerabilities, plotted by vendor headquarters — a proxy, not the real exploitation location) all render as points on the globe (toggle one, then look at the map) and preview here; GDP/Population/Telegram/Food Price Index are ticker-only for now.
+          Structural and situational context, not scored events. Flights, Commercial Air Traffic, Weather, GPS Jamming, Submarine Cables, Travel Advisories, Grid Losses, Energy Mix, Trade Balance, Chokepoint Traffic, Air Quality, and Cyber (Actively Exploited Vulnerabilities, plotted by vendor headquarters - a proxy, not the real exploitation location) all render as points on the globe (toggle one, then look at the map) and preview here; GDP/Population/Telegram/Food Price Index are ticker-only for now.
         </p>
         {DATA_LAYERS.map((id) => {
           const isActive = activeDataLayers.has(id);

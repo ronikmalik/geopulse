@@ -61,7 +61,7 @@ export default function CommodityPanel({ data }: CommodityPanelProps) {
                       : "text-red-500"
                 }`}
               >
-                {c.changePct == null ? "—" : `${up ? "+" : ""}${c.changePct.toFixed(2)}%`}
+                {c.changePct == null ? "-" : `${up ? "+" : ""}${c.changePct.toFixed(2)}%`}
               </span>
             </div>
           );

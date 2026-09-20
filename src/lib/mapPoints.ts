@@ -138,7 +138,7 @@ export function gpsJammingToPoints(regions: JammedRegion[]): ExtraMapPoint[] {
         lon: c.lon,
         color: GPS_JAMMING_COLOR,
         radius: scaleRadius(r.badAircraftCount, maxCount, 0.18, 0.5),
-        label: html`<b>${r.countryName}</b><br/>GPS/GNSS jamming — ${r.badAircraftCount} aircraft reports (${r.badCellCount} cells)`,
+        label: html`<b>${r.countryName}</b><br/>GPS/GNSS jamming - ${r.badAircraftCount} aircraft reports (${r.badCellCount} cells)`,
       };
     })
     .filter((p): p is ExtraMapPoint => p !== null);
@@ -256,7 +256,7 @@ export function portCongestionToPoints(chokepoints: ChokepointTransit[]): ExtraM
     lon: c.lon,
     color: PORT_CONGESTION_COLOR,
     radius: scaleRadius(c.totalVessels, maxVessels, 0.18, 0.5),
-    label: html`<b>${c.name}</b><br/>${c.totalVessels} vessel transits (${c.date}) — ${c.cargoVessels} cargo, ${c.tankerVessels} tanker`,
+    label: html`<b>${c.name}</b><br/>${c.totalVessels} vessel transits (${c.date}) - ${c.cargoVessels} cargo, ${c.tankerVessels} tanker`,
   }));
 }
 

@@ -25,18 +25,18 @@ const FAMILY_BLURB: Record<string, string> = {
 };
 
 function num(v: unknown, digits = 2): string {
-  if (typeof v !== "number" || !Number.isFinite(v)) return "—";
+  if (typeof v !== "number" || !Number.isFinite(v)) return "-";
   return Number.isInteger(v) ? v.toLocaleString() : v.toFixed(digits);
 }
 
 function pct(v: number | null): string {
-  return v === null ? "—" : `${Math.round(v * 100)}%`;
+  return v === null ? "-" : `${Math.round(v * 100)}%`;
 }
 
 function MetricPairs({ m }: { m: Record<string, unknown> | null }) {
-  if (!m) return <span className="text-neutral-500">{"—"}</span>;
+  if (!m) return <span className="text-neutral-500">{"-"}</span>;
   const entries = Object.entries(m).filter(([k]) => k !== "name" && k !== "note");
-  if (entries.length === 0) return <span className="text-neutral-500">{"—"}</span>;
+  if (entries.length === 0) return <span className="text-neutral-500">{"-"}</span>;
   return (
     <span className="flex flex-wrap gap-x-3 gap-y-1">
       {entries.map(([k, v]) => (
@@ -72,7 +72,7 @@ function ModelRow({ m }: { m: ModelSummaryEntry }) {
             <MetricPairs m={m.baseline} />
           </>
         ) : (
-          <span className="text-neutral-500">{"—"}</span>
+          <span className="text-neutral-500">{"-"}</span>
         )}
       </td>
       <td className="py-2 pr-3 text-xs text-neutral-400">
@@ -106,8 +106,8 @@ function LiveTrack({ rows }: { rows: LiveHorizonTrack[] }) {
             <td className="py-1.5 pr-3 font-mono text-xs text-neutral-300">{r.modelType}</td>
             <td className="py-1.5 pr-3 text-neutral-400">{r.predictions}</td>
             <td className="py-1.5 pr-3 text-neutral-400">{r.graded}</td>
-            <td className="py-1.5 pr-3 text-neutral-200">{r.liveMae === null ? "—" : num(r.liveMae)}</td>
-            <td className="py-1.5 text-neutral-200">{r.livePersistenceMae === null ? "—" : num(r.livePersistenceMae)}</td>
+            <td className="py-1.5 pr-3 text-neutral-200">{r.liveMae === null ? "-" : num(r.liveMae)}</td>
+            <td className="py-1.5 text-neutral-200">{r.livePersistenceMae === null ? "-" : num(r.livePersistenceMae)}</td>
           </tr>
         ))}
       </tbody>

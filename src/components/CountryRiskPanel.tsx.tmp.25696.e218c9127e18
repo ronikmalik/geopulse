@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { stripOutletSuffix } from "@/lib/displayText";
 import { useWatchlist } from "@/lib/useWatchlist";
 import type { CountryRiskScore } from "@/lib/useCountryRisk";
 import type { AnomalyFindingResponse } from "@/lib/useAnomalies";
-import { signalDescription } from "@/lib/anomalyLabels";
+import { CATEGORY_LABELS as CATEGORY_LABELS_FOR_ANOMALY, type Category as AnomalyCategory } from "@/lib/categories";
 import {
   THREAT_COLORS,
   momentumArrow,
@@ -107,24 +106,18 @@ const compactNumber = new Intl.NumberFormat("en-US", {
 
 interface CountryRiskPanelProps {
   scores: CountryRiskScore[];
-  anomalies: Map<string, AnomalyFindingResponse[]>;
+  aircraftAnomalies: Map<string, AircraftAnomaly>;
   selectedCountry: string | null;
   onSelectCountry: (country: string | null) => void;
 }
 
-// Collapsed-row badge — a count, not a blended score (see docs/ROADMAP.md's
-// "no falsely precise single score" principle): "3 unusual signals" is
-// honest about what was checked and found unusual; a single composite
-// number would imply weighting/rigor no hand-picked formula actually has.
-function AnomalyBadge({ findings }: { findings: AnomalyFindingResponse[] }) {
-  if (findings.length === 0) return null;
-  const title = findings.map(signalDescription).join(" · ");
+function AnomalyBadge({ anomaly }: { anomaly: AircraftAnomaly }) {
   return (
     <span
       className="rounded-sm border border-amber-600/60 px-1 py-0 font-mono text-[9px] text-amber-500"
-      title={title}
+      title={`${anomaly.todayCount} tracked today vs. a ${anomaly.baselineMean} average over the last ${anomaly.sampleSize} days (z=${anomaly.zScore})`}
     >
-      ⚠ {findings.length} unusual
+      ✈ +{Math.round(anomaly.todayCount - anomaly.baselineMean)}
     </span>
   );
 }
@@ -181,7 +174,7 @@ function MomentumTag({
 
 export default function CountryRiskPanel({
   scores,
-  anomalies,
+  aircraftAnomalies,
   selectedCountry,
   onSelectCountry,
 }: CountryRiskPanelProps) {
@@ -279,7 +272,7 @@ export default function CountryRiskPanel({
             "momentumDirection" in r ? r.momentumDirection : 0;
           const eventCount = "eventCount" in r ? r.eventCount : 0;
           const lastEventAt = "lastEventAt" in r ? r.lastEventAt : "";
-          const findings = anomalies.get(r.country) ?? [];
+          const anomaly = aircraftAnomalies.get(r.country);
           return (
             <div key={r.country} className="border-b border-red-950">
               <div className="flex items-center gap-2 px-4 py-2.5">
@@ -304,7 +297,7 @@ export default function CountryRiskPanel({
                     </span>
                     {!isPlaceholder && (
                       <div className="flex items-center gap-2">
-                        {findings.length > 0 && <AnomalyBadge findings={findings} />}
+                        {anomaly && <AnomalyBadge anomaly={anomaly} />}
                         <MomentumTag magnitude={momentum} direction={momentumDirection} />
                         <ThreatBadge level={threatLevel} label={threatLabel} />
                       </div>
@@ -343,19 +336,15 @@ export default function CountryRiskPanel({
                           </p>
                         </div>
                       )}
-                      {findings.length > 0 && (
+                      {anomaly && (
                         <div className="mb-2 border-b border-red-950/70 pb-2">
                           <span className="font-mono text-[9px] uppercase tracking-wider text-amber-500">
-                            ⚠ {findings.length} unusual signal{findings.length > 1 ? "s" : ""}
+                            ⚠ Unusual military aircraft activity
                           </span>
-                          {findings.map((f) => (
-                            <p
-                              key={`${f.signalType}:${f.category ?? ""}`}
-                              className="mt-1 font-mono text-[10px] leading-relaxed text-neutral-400"
-                            >
-                              {signalDescription(f)}.
-                            </p>
-                          ))}
+                          <p className="mt-1 font-mono text-[10px] leading-relaxed text-neutral-400">
+                            {anomaly.todayCount} tracked today vs. a {anomaly.baselineMean}{" "}
+                            average over the last {anomaly.sampleSize} days (z={anomaly.zScore}).
+                          </p>
                         </div>
                       )}
                       {snapshot?.country === r.country && snapshot.dossier && (
@@ -374,7 +363,7 @@ export default function CountryRiskPanel({
                                   ? "border-amber-800 text-amber-500"
                                   : "border-neutral-700 text-neutral-500"
                               }`}
-                              title="US State Dept Travel Advisory - opens the official advisory page"
+                              title="US State Dept Travel Advisory — opens the official advisory page"
                             >
                               Travel Advisory Level {snapshot.dossier.travelAdvisory.level}:{" "}
                               {snapshot.dossier.travelAdvisory.levelLabel}
@@ -521,7 +510,7 @@ export default function CountryRiskPanel({
                             </span>
                           </div>
                           <p className="mt-0.5 line-clamp-2 text-[11px] text-neutral-300">
-                            {stripOutletSuffix(e.summary)}
+                            {e.summary}
                           </p>
                           <span className="mt-0.5 block font-mono text-[9px] text-neutral-600">
                             Source: {sourceLabel(e.source)}

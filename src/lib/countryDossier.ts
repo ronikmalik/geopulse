@@ -76,8 +76,8 @@ export async function fetchCountryDossier(iso2: string): Promise<CountryDossier 
   const body = parts.join(" · ");
   const summary =
     parts.length > 0
-      ? `${countryName} — ${body}${body.endsWith(".") ? "" : "."}`
-      : `${countryName} — no World Bank data available.`;
+      ? `${countryName} - ${body}${body.endsWith(".") ? "" : "."}`
+      : `${countryName} - no World Bank data available.`;
 
   return {
     country: iso2.toUpperCase(),

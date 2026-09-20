@@ -69,7 +69,7 @@ export default function ForexPanel({ data, cftc }: ForexPanelProps) {
               {position && (
                 <div
                   className="mt-1 flex items-center justify-between text-[10px] text-neutral-500"
-                  title="CFTC Commitments of Traders: speculators' net futures position in this currency. Published weekly (Fridays, data as of the prior Tuesday) — the date is the report week, not a price date."
+                  title="CFTC Commitments of Traders: speculators' net futures position in this currency. Published weekly (Fridays, data as of the prior Tuesday) - the date is the report week, not a price date."
                 >
                   <span>
                     Speculators net{" "}
