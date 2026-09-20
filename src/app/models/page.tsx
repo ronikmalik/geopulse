@@ -25,7 +25,8 @@ const FAMILY_BLURB: Record<string, string> = {
 };
 
 function num(v: unknown, digits = 2): string {
-  return typeof v === "number" && Number.isFinite(v) ? v.toFixed(digits) : "—";
+  if (typeof v !== "number" || !Number.isFinite(v)) return "—";
+  return Number.isInteger(v) ? v.toLocaleString() : v.toFixed(digits);
 }
 
 function pct(v: number | null): string {

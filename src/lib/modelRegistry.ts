@@ -127,7 +127,9 @@ async function latestPerVariant(): Promise<ModelSummaryEntry[]> {
       runsRecorded: 1,
     });
   }
-  return [...seen.values()].sort((a, b) => a.family.localeCompare(b.family) || a.variant.localeCompare(b.variant));
+  // Natural order so "1d" sorts before "10d".
+  const natural = new Intl.Collator("en", { numeric: true }).compare;
+  return [...seen.values()].sort((a, b) => a.family.localeCompare(b.family) || natural(a.variant, b.variant));
 }
 
 // The live, out-of-sample track record: predictions made before their
