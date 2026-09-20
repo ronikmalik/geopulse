@@ -810,21 +810,25 @@ export async function runIngest(
   // backfill goes second, not first: feed_archive backs the live "similar
   // events" feature, which is more immediately user-visible than
   // classification_archive's own not-yet-shadow-scored classifier work.
+  // Deadlines widened 2026-09-20: the old 8s each was sized for cron-
+  // job.org's 30s request window, which no longer drives ingest (see
+  // .github/workflows/ingest.yml — this runs on a GitHub Actions runner
+  // with no wall-clock ceiling; the Vercel fallback route has
+  // maxDuration=300). withDeadline does NOT cancel the underlying work,
+  // and scripts/run-job.ts exits the process the moment runIngest returns
+  // — so a deadline that fires mid-backfill on the runner would SPEND
+  // embedding calls whose results never get written. The deadlines must
+  // therefore comfortably exceed each step's real worst case: feed_archive
+  // stays at 4 rows (~1 chunk, seconds); classification_archive is now
+  // adaptive up to 40 rows (~30s at embedBatch's 4-per-3s pacing).
   async function runEmbeddingBackfillChain(): Promise<void> {
     try {
-      await withDeadline(backfillFeedArchiveEmbeddings(), 8_000, "embeddingBackfill");
+      await withDeadline(backfillFeedArchiveEmbeddings(), 20_000, "embeddingBackfill");
     } catch (err) {
       errors.push(`embeddingBackfill: ${err}`);
     }
     try {
-      // 8s, not 5s (an earlier draft's mistake, caught live in production
-      // 2026-09-10: the deadline fired every single cycle) — this backfill
-      // uses the SAME BACKFILL_BATCH_SIZE=12 as feed_archive's own, which
-      // needs ~8s by embeddingBackfill.ts's own documented math (3 chunks
-      // of embedBatch's CONCURRENCY=4, 2 gaps of CHUNK_SPACING_MS=3s, plus
-      // request time) — there's no reason this backfill would need less
-      // time than that identical-shaped one does.
-      await withDeadline(backfillClassificationArchiveEmbeddings(), 8_000, "classificationArchiveEmbeddingBackfill");
+      await withDeadline(backfillClassificationArchiveEmbeddings(), 75_000, "classificationArchiveEmbeddingBackfill");
     } catch (err) {
       errors.push(`classificationArchiveEmbeddingBackfill: ${err}`);
     }
