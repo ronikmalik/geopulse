@@ -28,7 +28,7 @@ export default function ForexPanel({ data, cftc }: ForexPanelProps) {
           Forex
         </h2>
         <p className="mb-1 font-mono text-[10px] text-red-800">
-          USD vs. major and geopolitically exposed currencies
+          USD vs. major and geopolitically exposed currencies · units per 1 USD · green = USD stronger
         </p>
         {newest && (
           <p className="mb-3 font-mono text-[10px] text-neutral-500">
@@ -67,9 +67,12 @@ export default function ForexPanel({ data, cftc }: ForexPanelProps) {
                 </span>
               </div>
               {position && (
-                <div className="mt-1 flex items-center justify-between text-[10px] text-neutral-500">
+                <div
+                  className="mt-1 flex items-center justify-between text-[10px] text-neutral-500"
+                  title="CFTC Commitments of Traders: speculators' net futures position in this currency. Published weekly (Fridays, data as of the prior Tuesday) — the date is the report week, not a price date."
+                >
                   <span>
-                    CFTC spec. net{" "}
+                    Speculators net{" "}
                     <span
                       className={
                         position.netSpeculativePosition >= 0
@@ -79,9 +82,10 @@ export default function ForexPanel({ data, cftc }: ForexPanelProps) {
                     >
                       {position.netSpeculativePosition >= 0 ? "LONG" : "SHORT"}{" "}
                       {formatContracts(position.netSpeculativePosition)}
-                    </span>
+                    </span>{" "}
+                    contracts
                   </span>
-                  <span>{position.reportDate}</span>
+                  <span>CFTC wk of {position.reportDate}</span>
                 </div>
               )}
             </div>

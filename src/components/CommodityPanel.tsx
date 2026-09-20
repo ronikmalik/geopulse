@@ -25,7 +25,7 @@ export default function CommodityPanel({ data }: CommodityPanelProps) {
           Energy and Commodities
         </h2>
         <p className="mb-1 font-mono text-[10px] text-red-800">
-          Crude oil &amp; natural gas futures, plus gold/silver
+          Front-month futures in USD · change vs. previous session close
         </p>
         {newest && (
           <p className="mb-3 font-mono text-[10px] text-neutral-500">
