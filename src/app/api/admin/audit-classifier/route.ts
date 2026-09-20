@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runClassifierAudit } from "@/lib/classifierAudit";
+import { sampleGateDecisions } from "@/lib/gateReview";
 import { isCronAuthorized } from "@/lib/cronAuth";
 
 export const maxDuration = 55;
@@ -14,5 +15,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const result = await runClassifierAudit();
-  return NextResponse.json(result);
+  // Mirrors scripts/run-job.ts's audit-classifier job — see gateReview.ts.
+  const gateSample = await sampleGateDecisions().catch((err) => {
+    console.error(`sampleGateDecisions failed: ${err}`);
+    return { sampled: 0, approved: 0, rejected: 0 };
+  });
+  return NextResponse.json({ ...result, gateSample });
 }

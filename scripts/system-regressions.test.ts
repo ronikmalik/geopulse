@@ -181,3 +181,25 @@ test("outlet suffixes are stripped for display without mangling real headlines",
   assert.equal(stripOutletSuffix("Explosion at oil depot in Volgograd region - officials say no casualties"), "Explosion at oil depot in Volgograd region - officials say no casualties");
   assert.equal(stripOutletSuffix("Iran | Israel"), "Iran | Israel");
 });
+
+test("calibration loop: merge threshold, drift-guard parsing and promotion rule", async () => {
+  const { shouldMergePattern, guardVerdictAllowsPromotion, parseGuardVerdict } = await import("../src/lib/classifierAudit");
+  // Threshold chosen from the live similarity matrix (see the constant's
+  // comment): duplicates >= 0.918, genuinely different rules <= 0.902.
+  assert.equal(shouldMergePattern(0.965), true);
+  assert.equal(shouldMergePattern(0.92), true);
+  assert.equal(shouldMergePattern(0.902), false);
+  assert.equal(shouldMergePattern(null), false);
+  // Only refinements and genuinely new rules may auto-promote.
+  assert.equal(guardVerdictAllowsPromotion("narrows"), true);
+  assert.equal(guardVerdictAllowsPromotion("new"), true);
+  for (const v of ["restates", "widens", "contradicts"] as const) assert.equal(guardVerdictAllowsPromotion(v), false);
+  // Guard answers are parsed defensively: array-wrapped, case-insensitive,
+  // reasoning capped; anything off-vocabulary is a non-answer (re-asked
+  // later), never a default that promotes.
+  assert.deepEqual(parseGuardVerdict([{ verdict: " Widens ", reasoning: "drops the presstv-only scope" }]), { verdict: "widens", reasoning: "drops the presstv-only scope" });
+  assert.equal(parseGuardVerdict([{ verdict: "approve" }]), null);
+  assert.equal(parseGuardVerdict([]), null);
+  assert.equal(parseGuardVerdict("narrows"), null);
+  assert.equal(parseGuardVerdict({ verdict: "new" })?.verdict, "new");
+});

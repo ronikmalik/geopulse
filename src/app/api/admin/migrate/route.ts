@@ -384,6 +384,40 @@ const STATEMENTS = [
   // doc comment in schema.ts.
   sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS pre_kill_switch_at TIMESTAMPTZ`,
   sql`CREATE INDEX IF NOT EXISTS events_pre_kill_switch_at_idx ON events (pre_kill_switch_at)`,
+  // Calibration-loop hardening (2026-09-20) — see classifierCalibrationPatterns
+  // and gateReviewSamples's own doc comments in schema.ts, and
+  // classifierAudit.ts's header for the production data that motivated it.
+  sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS review_reasoning TEXT`,
+  sql`CREATE TABLE IF NOT EXISTS classifier_calibration_patterns (
+    id SERIAL PRIMARY KEY,
+    pattern TEXT NOT NULL UNIQUE,
+    lesson TEXT NOT NULL,
+    applies_to TEXT NOT NULL,
+    embedding vector(768),
+    guard_verdict TEXT,
+    guard_reasoning TEXT,
+    guard_checked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS classifier_calibration_patterns_pattern_idx ON classifier_calibration_patterns (pattern)`,
+  sql`CREATE TABLE IF NOT EXISTS gate_review_samples (
+    id SERIAL PRIMARY KEY,
+    event_id INTEGER NOT NULL UNIQUE,
+    sampled_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    gate_decision TEXT NOT NULL,
+    gate_reasoning TEXT,
+    source TEXT NOT NULL,
+    url TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    country TEXT,
+    category TEXT NOT NULL,
+    severity INTEGER NOT NULL,
+    human_verdict TEXT,
+    human_note TEXT,
+    graded_at TIMESTAMPTZ
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS gate_review_samples_graded_at_idx ON gate_review_samples (graded_at)`,
 ];
 
 export async function GET(req: NextRequest) {

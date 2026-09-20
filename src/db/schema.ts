@@ -94,6 +94,14 @@ export const events = pgTable(
     // column was added (see the migrate route) — this was never meant
     // to retroactively hide anything already live.
     reviewStatus: text("review_status").notNull().default("pending"),
+    // Gemini's one-sentence reasoning at the moment reviewPendingEvents
+    // approved/rejected this row (2026-09-20; empty when it agreed with
+    // everything stored). Kept so a human grading a gate_review_samples
+    // row can see WHY the gate decided what it did — without it the
+    // gate's ~600 decisions/day were completely unexplainable after the
+    // fact, which is how the self-taught "exclude Gaza" lesson ran for
+    // four days before anyone could tell it was the cause.
+    reviewReasoning: text("review_reasoning"),
     // NULL = not yet run through src/lib/geocodeBackfill.ts's Gemini
     // location-resolution pass — still sitting at classify.ts's
     // country-centroid fallback lat/lon. Set the moment that pass has
@@ -881,6 +889,83 @@ export const classifierCalibrationEvidence = pgTable(
     unique("classifier_calibration_evidence_pattern_archive_unique").on(table.pattern, table.archiveId),
     index("classifier_calibration_evidence_pattern_idx").on(table.pattern),
   ],
+);
+
+// Canonical registry of lesson patterns (2026-09-20). Before this, every
+// piece of evidence carried whatever slug Gemini happened to invent that
+// call — production had 908 evidence rows across 725 distinct patterns,
+// three separately-promoted lessons that were the SAME "exclude Gaza"
+// rule under three slugs, and five gdelt-noise slugs sharing 41 votes with
+// none of them ever clearing the corroboration bar. This table makes the
+// slug canonical: a new proposal is matched by exact slug first, then by
+// cosine similarity of its lesson text against every stored embedding
+// (see PATTERN_MERGE_MIN_SIMILARITY in classifierAudit.ts, chosen from a
+// live similarity matrix of real lessons), and only becomes a new row if
+// neither matches. Evidence is then recorded under the canonical slug.
+//
+// guardVerdict is the drift-guard's answer (see buildLessonGuardPrompt)
+// — recorded once per pattern the first time it clears the corroboration
+// bar, so a pattern judged to "widen" or "contradict" the foundational
+// rules is never re-asked and never promoted, and a pattern that merely
+// "restates" them never bloats the prompt. Null = not yet evaluated.
+export const classifierCalibrationPatterns = pgTable(
+  "classifier_calibration_patterns",
+  {
+    id: serial("id").primaryKey(),
+    pattern: text("pattern").notNull().unique(),
+    // Canonical wording: the first lesson text proposed under this
+    // pattern. Later proposals that merge into it keep this wording (the
+    // merge decision was made against it).
+    lesson: text("lesson").notNull(),
+    appliesTo: text("applies_to").notNull(),
+    // Null when the embedding budget was exhausted at creation time —
+    // such a row can still be matched by exact slug, just not by
+    // similarity, until a later call backfills it.
+    embedding: vector("embedding", { dimensions: 768 }),
+    guardVerdict: text("guard_verdict"), // restates | narrows | widens | contradicts | new
+    guardReasoning: text("guard_reasoning"),
+    guardCheckedAt: timestamp("guard_checked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("classifier_calibration_patterns_pattern_idx").on(table.pattern)],
+);
+
+// The ground-truth channel for the pre-publish gate (2026-09-20). Until
+// this existed, reviewPendingEvents made ~600 approve/reject decisions a
+// day and nothing ever checked any of them against a human — the daily
+// backlog audit re-judges Gemini's approvals with the same model and the
+// same prompt, which measures self-agreement, not accuracy. A small daily
+// sample (see sampleGateDecisions in gateReview.ts) lands here for a
+// person to grade in a minute or two; the grades give a running
+// precision/recall for the gate, flip the sampled event when the gate was
+// wrong, and form the held-out evaluation set for the shadow k-NN
+// classifier (textClassifierTraining.ts) — the "independent,
+// representative evaluation with reviewer provenance" its own notes said
+// it needed before it could ever be promoted.
+export const gateReviewSamples = pgTable(
+  "gate_review_samples",
+  {
+    id: serial("id").primaryKey(),
+    eventId: integer("event_id").notNull().unique(),
+    sampledAt: timestamp("sampled_at", { withTimezone: true }).notNull().defaultNow(),
+    gateDecision: text("gate_decision").notNull(), // approved | rejected
+    gateReasoning: text("gate_reasoning"),
+    // Denormalised so the grading page needs no joins and the row stays
+    // readable after the event ages out of the 30-day window.
+    source: text("source").notNull(),
+    url: text("url").notNull(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull(),
+    country: text("country"),
+    category: text("category").notNull(),
+    severity: integer("severity").notNull(),
+    humanVerdict: text("human_verdict"), // correct | wrong (null = ungraded)
+    humanNote: text("human_note"),
+    gradedAt: timestamp("graded_at", { withTimezone: true }),
+  },
+  (table) => [index("gate_review_samples_graded_at_idx").on(table.gradedAt)],
 );
 
 // Shadow-mode predictive risk model — see src/lib/riskModel.ts. Redesigned

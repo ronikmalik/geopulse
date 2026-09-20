@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { classificationArchive, classifierAudit, textClassifierRuns } from "@/db/schema";
 import { chooseBestK, classifyViaKnn, prepareLabeledExamples, type LabeledExample } from "@/lib/textClassifier";
 import { normalize } from "@/lib/narrativeClustering";
+import { getHumanLabelledExamples } from "@/lib/gateReview";
 
 // Shadow evaluation of the embedded classification archive. Select k within
 // the reference pool, then measure agreement with held-out audit corrections.
@@ -11,6 +12,16 @@ import { normalize } from "@/lib/narrativeClustering";
 // authorize automatic promotion.
 const K_CANDIDATES = [5, 10, 15, 20, 25];
 const MIN_TRAINING_SAMPLE = 100;
+// Promotion criterion (2026-09-20), replacing the permanent
+// `promoted = false`: once at least this many gate decisions have been
+// graded by a human (gate_review_samples, see gateReview.ts), the shadow
+// classifier is scored on exactly those rows and promoted only if it
+// beats the LIVE GATE's own accuracy on the same rows. That's the one
+// comparison that means anything — the corrections-only challenge set
+// below measures agreement with Gemini's audit, not with a person.
+// "Promoted" is still shadow-only (a logged flag nothing consumes yet);
+// it just stops being unreachable by construction.
+const HUMAN_EVAL_MIN_SAMPLE = 50;
 
 interface RawLabeledRow {
   id: number;
@@ -122,17 +133,23 @@ export async function trainAndEvaluateTextClassifier(): Promise<TextClassifierRu
   }
 
   const backtestAgreementRate = evaluated > 0 ? correct / evaluated : 0;
-  // Approved/applied status includes automatic reviews. This selected set
-  // measures correction agreement, not independent population accuracy.
-  // A representative evaluation with reviewer provenance is needed before
-  // this shadow classifier can earn promotion.
-  const promoted = false;
+
+  // Human-graded evaluation (see HUMAN_EVAL_MIN_SAMPLE). Graded rows are
+  // excluded from the reference pool too — same leakage discipline as the
+  // correction challenge set.
+  const human = await evaluateAgainstHumanLabels(training, kSelection.k, kSelection.weighting);
+  const promoted = human.evaluated >= HUMAN_EVAL_MIN_SAMPLE && human.knnAccuracy > human.gateAccuracy;
 
   const notes =
     `trained k=${kSelection.k} (${kSelection.weighting} vote weighting, selected jointly with k by 3-fold CV) on ${training.length} labeled examples (CV agreement with archived labels ${(kSelection.accuracy * 100).toFixed(1)}%). ` +
     `Evaluated on ${evaluated} audit corrections (may include automatic reviews) — ` +
     `agreement with audit decisions: ${(backtestAgreementRate * 100).toFixed(1)}%. ` +
-    "This corrections-only challenge set does not measure overall accuracy. Shadow only: independent representative evaluation and reviewer provenance are required for promotion.";
+    `Human-graded evaluation: ${human.evaluated} gate decision(s) graded by a person${human.evaluated > 0 ? ` — k-NN accuracy ${(human.knnAccuracy * 100).toFixed(1)}% vs the live gate's ${(human.gateAccuracy * 100).toFixed(1)}% on the same rows` : ""}. ` +
+    (promoted
+      ? `Promoted (shadow-only flag): beats the live gate on >= ${HUMAN_EVAL_MIN_SAMPLE} human-graded rows.`
+      : human.evaluated < HUMAN_EVAL_MIN_SAMPLE
+        ? `Not promoted: fewer than ${HUMAN_EVAL_MIN_SAMPLE} human-graded rows yet (grade more at /admin/gate-review).`
+        : "Not promoted: does not beat the live gate on human-graded rows.");
 
   const result: TextClassifierRunResult = {
     trained: true,
@@ -146,6 +163,43 @@ export async function trainAndEvaluateTextClassifier(): Promise<TextClassifierRu
   };
   await recordRun(result);
   return result;
+}
+
+// Scores the classifier on the human-graded gate sample. Rows without an
+// embedded classification_archive twin are skipped (the sample stores the
+// url, and the archive is what carries the embedding).
+async function evaluateAgainstHumanLabels(
+  referencePool: LabeledExample[],
+  k: number,
+  weighting: "uniform" | "distance",
+): Promise<{ evaluated: number; knnAccuracy: number; gateAccuracy: number }> {
+  const graded = await getHumanLabelledExamples();
+  if (graded.length === 0) return { evaluated: 0, knnAccuracy: 0, gateAccuracy: 0 };
+  const db = getDb();
+  const rows = await db
+    .select({ id: classificationArchive.id, url: classificationArchive.url, embedding: classificationArchive.embedding })
+    .from(classificationArchive)
+    .where(and(inArray(classificationArchive.url, graded.map((g) => g.url)), isNotNull(classificationArchive.embedding)));
+  const embeddingByUrl = new Map(rows.map((r) => [r.url, r.embedding as number[]]));
+  const gradedArchiveIds = new Set(rows.map((r) => r.id));
+  // Never let a graded row vote on itself or on another graded row.
+  const pool = referencePool.filter((ex) => !gradedArchiveIds.has(ex.id));
+  let evaluated = 0;
+  let knnCorrect = 0;
+  let gateCorrect = 0;
+  for (const g of graded) {
+    const embedding = embeddingByUrl.get(g.url);
+    if (!embedding) continue;
+    const prediction = classifyViaKnn(normalize(embedding), pool, k, weighting);
+    evaluated++;
+    if (prediction.relevant === g.relevant) knnCorrect++;
+    if (g.gateCorrect) gateCorrect++;
+  }
+  return {
+    evaluated,
+    knnAccuracy: evaluated > 0 ? knnCorrect / evaluated : 0,
+    gateAccuracy: evaluated > 0 ? gateCorrect / evaluated : 0,
+  };
 }
 
 async function recordRun(r: TextClassifierRunResult): Promise<void> {

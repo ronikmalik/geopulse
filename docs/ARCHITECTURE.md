@@ -194,6 +194,41 @@ one non-generative translation API — all direct REST calls, no SDK:
   constants (`DELIBERATE_EXCLUSIONS`/`SEVERITY_RUBRIC`/`COUNTRY_GUIDANCE`), which never
   expire — that graduation step is the one piece of this that's still manual, since it
   means editing and redeploying code, not just writing a database row.
+
+- **Loop hardening (2026-09-20)** — the corroboration bar proves a lesson is
+  *recurring*; it says nothing about whether it's *right*. Ten days of production data
+  showed both failure modes: (a) the loop auto-promoted "exclude Gaza/West Bank
+  regardless of topic" — Gemini's over-generalisation of a rule the prompt scopes to
+  `telegram:presstv` only — three times under three slugs, and the pre-publish gate
+  then rejected 96% of non-presstv Gaza/West Bank items for four days; (b) slug entropy
+  (908 evidence rows across 725 distinct slugs) meant real recurring rules could never
+  clear the bar while accidental near-duplicates did. Five changes, all in
+  `classifierAudit.ts`:
+  1. **Canonical patterns** (`classifier_calibration_patterns`): the prompt lists the
+     known slugs for reuse; a new slug's lesson text is embedded and merged into the
+     nearest existing pattern at cosine ≥ 0.92 (threshold chosen from a live
+     similarity matrix of real lessons — duplicates ≥ 0.918, distinct rules ≤ 0.902).
+  2. **Drift guard**: before anything auto-promotes, one Gemini call with *only* the
+     foundational rules classifies the candidate as `restates | narrows | widens |
+     contradicts | new`. Only `narrows`/`new` promote; `restates` is discarded (prompt
+     bloat); `widens`/`contradicts` are held with the verdict visible at
+     `…/calibration?pending=1` and never re-asked. Lessons are now worded as
+     *subordinate* to the foundational rules in the prompt, not "authoritative".
+  3. **Reinforcement works** (`occurrences` increments on active lessons; inactive ones
+     stay dead), **severity auto-applies only at a gap ≥ 2** (finding still created at
+     1), **false-positive apply is a soft `rejected`** (never `DELETE`), and a
+     **decision memory** refuses to auto-apply a finding that contradicts an
+     already-applied one on the same row — a human is the only thing that reverses.
+  4. **Hygiene**: the kept-audit only re-audits `approved` rows (gate-rejected rows
+     were being re-audited and "deleted" again — a large share of the 985 stale
+     findings); pending findings expire at 30 days.
+  5. **A ground-truth channel** (`gateReview.ts`, `/admin/gate-review`): every day 10
+     of the gate's decisions (5 approve / 5 reject) are sampled with the gate's stored
+     reasoning; a person grades them in a minute. Grades flip the live decision when
+     the gate was wrong, give a running gate precision/recall, and form the held-out
+     evaluation set the shadow k-NN classifier must **beat the live gate on** (≥ 50
+     graded rows) before it can ever be promoted. This is the only feedback in the
+     system that isn't Gemini judging Gemini.
 - **Daily AI country situation briefs** (`src/lib/countryBriefs.ts`) — one Gemini call
   per currently-active country (ranked by score, capped per run), strictly grounded on
   that country's own real recent events.

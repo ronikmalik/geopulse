@@ -64,3 +64,9 @@ weekly model training) runs in-process on GitHub Actions runners via
 `scripts/run-job.ts` — not on Vercel — see `.github/workflows/` and
 `docs/ARCHITECTURE.md` §10. Run any job locally with
 `npm run job -- <name>` (e.g. `npm run job -- review-pending`).
+
+## Daily minute of human review
+
+`/admin/gate-review` (needs `CRON_SECRET`) shows 10 of yesterday's pre-publish
+gate decisions. Two buttons each. It is the only ground truth the calibration
+loop has — see `docs/ARCHITECTURE.md` §6, "Loop hardening".

@@ -45,6 +45,7 @@ import { trainAndShadowPredict } from "../src/lib/riskModel";
 import { trainNarrativeClusters } from "../src/lib/narrativeTraining";
 import { trainAndEvaluateTextClassifier } from "../src/lib/textClassifierTraining";
 import { syncSourceCredibility } from "../src/lib/sourceCredibility";
+import { sampleGateDecisions } from "../src/lib/gateReview";
 
 // Hard ceiling on any single job so a hung upstream can never pin a runner
 // for the workflow's full timeout-minutes. Generous relative to the Vercel
@@ -88,7 +89,17 @@ const JOBS: Record<string, () => Promise<unknown>> = {
     });
     return { military, commercial, gpsJamming, scan, errors };
   },
-  "audit-classifier": () => runClassifierAudit(),
+  // The daily backlog sweep also draws the day's gate-review sample (see
+  // src/lib/gateReview.ts) — same once-a-day cadence, and it's the one
+  // job that already exists to feed the calibration loop.
+  "audit-classifier": async () => {
+    const audit = await runClassifierAudit();
+    const gateSample = await sampleGateDecisions().catch((err) => {
+      console.error(`sampleGateDecisions failed: ${err}`);
+      return { sampled: 0, approved: 0, rejected: 0 };
+    });
+    return { ...audit, gateSample };
+  },
   "train-risk-model": () => trainAndShadowPredict(),
   "train-narrative-clusters": () => trainNarrativeClusters(),
   "train-text-classifier": () => trainAndEvaluateTextClassifier(),
