@@ -70,8 +70,10 @@ async function fetchAdsbLol(url: string): Promise<AdsbLolAircraft[]> {
     throw new Error(`adsb.lol request failed: ${err}`);
   }
   if (!res.ok) {
-    console.error(`adsb.lol fetch failed: ${res.status}`);
-    return [];
+    // Thrown, not swallowed as [] (2026-09-20): a 429/5xx must look like a
+    // failure to callers, so the commercial hub loop can retry it and the
+    // snapshot can refuse to record an undercount.
+    throw new Error(`adsb.lol fetch failed: ${res.status}`);
   }
   const data = (await res.json()) as AdsbLolResponse;
   return data.ac ?? [];
@@ -106,17 +108,48 @@ const COMMERCIAL_HUBS: { lat: number; lon: number }[] = [
 ];
 const COMMERCIAL_RADIUS_NM = 250;
 
-export async function fetchAdsbLolCommercial(): Promise<TrackedAircraft[]> {
-  const batches = await Promise.all(
-    COMMERCIAL_HUBS.map((h) =>
-      fetchAdsbLol(
-        `${ADSBLOL_POINT_ENDPOINT}/${h.lat}/${h.lon}/${COMMERCIAL_RADIUS_NM}`,
-      ).catch((err) => {
-        console.error(`adsb.lol commercial hub (${h.lat},${h.lon}) failed: ${err}`);
-        return [] as AdsbLolAircraft[];
-      }),
-    ),
-  );
+// Hubs are queried ONE AT A TIME, not in parallel (2026-09-20): nine
+// simultaneous requests tripped adsb.lol's rate limit and the 429'd hub
+// silently contributed zero aircraft. For the live layer that is a
+// cosmetic gap; for the daily snapshot (flightBaseline.ts) it is a
+// phantom "airspace closure" — the commercial signal is the one that
+// flags large DROPS, so a random 429 looks exactly like the event it
+// exists to detect.
+//
+// Probed live 2026-09-20 from a residential IP: the limit behaves like a
+// small token bucket — a burst of 3-4 succeeds, then 429s until it
+// refills over a few seconds, and even 1 request/second is not reliably
+// clean once the bucket is drained. So: one second between hubs, and a
+// 429 is retried with a growing pause (3s, 6s, 12s). The live layer route
+// gets one retry (it sits behind a 20s cache and a serverless clock); the
+// snapshot passes `strict` for the full three, and a hub that STILL fails
+// throws so the day is recorded as an error rather than an undercount.
+const HUB_SPACING_MS = 1_000;
+const RETRY_BACKOFF_MS = [3_000, 6_000, 12_000];
+
+export async function fetchAdsbLolCommercial(options: { strict?: boolean } = {}): Promise<TrackedAircraft[]> {
+  const maxRetries = options.strict ? RETRY_BACKOFF_MS.length : 1;
+  const batches: AdsbLolAircraft[][] = [];
+  for (const [i, h] of COMMERCIAL_HUBS.entries()) {
+    if (i > 0) await new Promise((r) => setTimeout(r, HUB_SPACING_MS));
+    const url = `${ADSBLOL_POINT_ENDPOINT}/${h.lat}/${h.lon}/${COMMERCIAL_RADIUS_NM}`;
+    let batch: AdsbLolAircraft[] | null = null;
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt <= maxRetries && batch === null; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS[attempt - 1]));
+      batch = await fetchAdsbLol(url).catch((err) => {
+        lastError = err;
+        return null;
+      });
+    }
+    if (batch === null) {
+      const msg = `adsb.lol commercial hub (${h.lat},${h.lon}) unavailable after ${maxRetries} retr${maxRetries === 1 ? "y" : "ies"}: ${lastError}`;
+      if (options.strict) throw new Error(msg);
+      console.error(msg);
+      continue;
+    }
+    batches.push(batch);
+  }
 
   // Adjacent hubs' 250nm radii can overlap (e.g. London/Frankfurt) — dedupe
   // by hex so an aircraft in the overlap isn't double-plotted.

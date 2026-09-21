@@ -61,7 +61,10 @@ export async function snapshotCommercialAircraftCounts(): Promise<{
   inserted: number;
   countriesSeen: number;
 }> {
-  return snapshotAircraft("commercial", await fetchAdsbLolCommercial());
+  // strict: a hub that fails after retry throws, and the day is recorded
+  // as an error (see run-job.ts / the snapshot-flights route) rather than
+  // as an undercount that the drop-detecting anomaly signal would flag.
+  return snapshotAircraft("commercial", await fetchAdsbLolCommercial({ strict: true }));
 }
 
 // Pure statistics, not ML — plain z-score against each country's own
