@@ -34,9 +34,26 @@ name: Ingest live events
 # trigger from the old SSE stream — three overlapping schedulers were why
 # /api/ingest ran ~260x/day instead of ~96x. Those are off; this is now
 # the only scheduler apart from the daily Vercel floor.
+# Two schedules, not one (2026-09-21): the Neon Free compute allowance was
+# at 80% with 20 CU-hours left for the last ten days of September, and when
+# it runs out Neon SUSPENDS the compute until the next billing period — the
+# site would go dark, not degrade. The compute is already pinned at 0.25
+# CU, so wake-ups are the only lever: every one costs the burst plus a
+# fixed 5 idle minutes before suspend, so a 30-minute cycle is ~20% duty
+# (~1.2 CU-hours/day) against ~40% (~2.4/day) at 15 minutes.
+#
+#   1st entry: every 30 min, ONLY on September 21-30 (day-of-month 21-30,
+#              month 9). It stops firing by itself after Sept 30.
+#   2nd entry: the normal 15-minute cadence, every month EXCEPT September
+#              (months 1-8 and 10-12). It starts firing on October 1.
+#
+# Nothing needs editing on Oct 1. To end the slow period early, delete the
+# first entry and change the second to "* * * *" (all months) — or just
+# delete the "1-8,10-12" so the 15-min line reads "1,16,31,46 * * * *".
 on:
   schedule:
-    - cron: "1,16,31,46 * * * *"
+    - cron: "1,31 * 21-30 9 *"
+    - cron: "1,16,31,46 * * 1-8,10-12 *"
   workflow_dispatch: {}
 
 permissions:
