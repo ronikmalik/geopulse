@@ -24,9 +24,13 @@ export async function GET(req: NextRequest) {
       getCountryRiskEvents(country),
       getLatestCountryBrief(country),
     ]);
-    return cachedJson({ ...detail, events: eventsForCountry, brief }, 60);
+    return cachedJson({ ...detail, events: eventsForCountry, brief }, 300, 300);
   }
 
+  // 15 min at the CDN (was 60s, 2026-09-21): the map polls this every
+  // minute from every open tab, and each CDN miss is a Neon wake-up. The
+  // scores only move with decay and with the pipeline's ~15-min cycles,
+  // so a minute of freshness was buying nothing but compute hours.
   const scores = await getCountryThreatSummaries();
-  return cachedJson({ scores }, 60);
+  return cachedJson({ scores }, 900, 300);
 }

@@ -415,9 +415,8 @@ CDN-cached read routes, which is all a Hobby plan is really for.
 
 | Job | Workflow | Cadence (UTC) |
 | --- | --- | --- |
-| `ingest` then `review-pending` (chained, same run) | `ingest.yml` | :01, :11, :21, :31, :41, :51 (since 2026-09-20 — GitHub starts scheduled runs a median ~10 min late and drops ~4% of slots, so a 15-min schedule delivered rows at 13-31 min gaps; review is chained so it lands ~1 min after the rows it reviews) |
-| `review-pending` (manual only) | `review-pending.yml` | dispatch |
-| `generate-briefs` | `generate-briefs.yml` | :10/:25/:40/:55 |
+| `ingest` → `review-pending` → `generate-briefs` (chained, one run) | `ingest.yml` | :01, :16, :31, :46 — one database burst per cycle so Neon's compute can suspend between them (see §12); review is chained so rows are visible ~1 min after insert, and the review job purges the ISR feed cache when it finishes |
+| `review-pending`, `generate-briefs` (manual only) | `review-pending.yml`, `generate-briefs.yml` | dispatch |
 | `snapshot` (+ `country_feature_daily`, + prediction grading), `snapshot-flights` (+ anomaly scan), `audit-classifier` (+ gate sample) | `daily-snapshots.yml` | 18:00, 18:30, 20:00 |
 | `grading-check` | `grading-check.yml` | Monday 15:00 — fails loudly if a week passed with no human gate grades |
 | `migrate` | (manual: `npx tsx scripts/run-job.ts migrate`, or `/api/admin/migrate`) | after a schema change |
@@ -538,3 +537,26 @@ because they are the data no later date can back-fill:
   empty, and both models predict the horizon *change* (persistence = the zero model).
   Dry run on live data: MAE 2.98 vs. persistence 2.98 — at par, weights ≈ 0, the honest
   result until `country_feature_daily` accumulates.
+
+## 12. Neon compute budget (2026-09-21)
+
+Neon Free is **100 CU-hours/month**: at the 0.25 CU minimum that is ~13 h/day
+awake, and the compute only suspends after 5 idle minutes. Storage (121 MB of
+0.5 GB) and egress are not the constraint; wake-ups are. Three things keep it
+asleep:
+
+1. **Pipeline touches are batched.** ingest → review → briefs run as one chained
+   Actions run every 15 min, so the database sees one ~40-60 s burst and ~10 idle
+   minutes per cycle instead of separate wake-ups from each job's own offset.
+2. **Viewer reads never wake it.** `/api/events/feed` is an ISR route handler
+   (`export const revalidate = 900`, reads nothing from the request) served from
+   Vercel's cache; the runner calls `POST /api/admin/revalidate` after each review
+   so it regenerates exactly once per cycle. The client reconciles the full window
+   every poll — the per-viewer `?since=` cursor, which made every poll its own
+   cache key and its own query, is gone. `/api/risk` summaries are CDN-cached 15
+   min (was 60 s). The remaining DB-backed read routes are on-click, 5-min cached.
+3. **Compute size is pinned at 0.25 CU** (min and max) in the Neon console, so a
+   burst cannot scale the hours up.
+
+If usage still climbs, the next lever is a second Free project (each gets its own
+100 CU-hours) holding the archive/ML tables, at the cost of two connection strings.

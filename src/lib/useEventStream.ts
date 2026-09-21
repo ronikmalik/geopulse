@@ -15,13 +15,17 @@ export type ConnectionState = "connecting" | "live" | "disconnected";
 // once it's backgrounded (the browser throttles timers there anyway, and
 // nobody is looking — this is where an "always open" monitoring tab used
 // to quietly burn the most). Switching back to the tab polls immediately.
-// Every RECONCILE_EVERY_N_POLLS-th poll re-fetches the whole recent window
-// instead of a delta: that is how later approvals, country/severity
-// corrections and kill-switch removals reach an open tab, since an
-// insertion-id cursor can't represent any of those.
+//
+// Every poll is a full-window reconcile (2026-09-21) — the per-viewer
+// `?since=` delta is gone. The route is now served from Vercel's cache and
+// regenerated only when the pipeline purges it, so every viewer's poll is
+// the same cached document: a cache hit costs nothing and never wakes the
+// database. Reconciling the whole window each time is also how later
+// approvals, corrections and kill-switch removals reach an open tab,
+// which the old cursor could never represent; it used to happen every
+// tenth poll, now it is simply every poll.
 const POLL_INTERVAL_MS = 12_000;
 const HIDDEN_POLL_INTERVAL_MS = 60_000;
-const RECONCILE_EVERY_N_POLLS = 10;
 const INITIAL_RETRY_MS = 3_000;
 const MAX_RETRY_MS = 60_000;
 
@@ -37,7 +41,6 @@ const MAX_INCOMING_EVENTS = 20;
 interface FeedResponse {
   events: GeoEvent[];
   cursor: number;
-  reconcile: boolean;
 }
 
 function trimBuffer(next: GeoEvent[]): GeoEvent[] {
@@ -48,8 +51,6 @@ export function useEventStream() {
   const [events, setEvents] = useState<GeoEvent[]>([]);
   const [status, setStatus] = useState<ConnectionState>("connecting");
   const [incoming, setIncoming] = useState<GeoEvent[]>([]);
-  const cursorRef = useRef(0);
-  const pollCountRef = useRef(0);
   const knownIds = useRef<Set<number>>(new Set());
 
   useEffect(() => {
@@ -94,36 +95,18 @@ export function useEventStream() {
       }
     }
 
-    function applyDelta(rows: GeoEvent[]) {
-      const fresh = rows.filter((e) => !knownIds.current.has(e.id));
-      if (fresh.length === 0) return;
-      for (const e of fresh) knownIds.current.add(e.id);
-      setEvents((prev) => {
-        const next = trimBuffer([...prev, ...fresh]);
-        if (next.length < prev.length + fresh.length) {
-          knownIds.current = new Set(next.map((e) => e.id));
-        }
-        return next;
-      });
-      setIncoming((cur) => [...cur, ...fresh].slice(-MAX_INCOMING_EVENTS));
-    }
-
     async function poll() {
       if (cancelled || inFlight) return;
       inFlight = true;
-      const wantReconcile = !hasLoaded || pollCountRef.current % RECONCILE_EVERY_N_POLLS === 0;
-      pollCountRef.current += 1;
-      const url = wantReconcile ? "/api/events/feed" : `/api/events/feed?since=${cursorRef.current}`;
       try {
-        const res = await fetch(url, { cache: "no-store" });
+        // cache: "default", not "no-store" — the browser may reuse its own
+        // copy inside the CDN's freshness window, and the point of the
+        // route now is that the same document serves everyone.
+        const res = await fetch("/api/events/feed");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = (await res.json()) as FeedResponse;
         if (cancelled) return;
-        if (data.reconcile) applyReconcile(data.events);
-        else applyDelta(data.events);
-        // The cursor only ever moves forward: a reconcile's cursor is the
-        // window's newest id, which a delta may already have passed.
-        cursorRef.current = Math.max(cursorRef.current, data.cursor);
+        applyReconcile(data.events);
         hasLoaded = true;
         retryDelay = INITIAL_RETRY_MS;
         setStatus("live");

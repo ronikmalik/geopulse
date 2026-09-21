@@ -76,4 +76,8 @@ jobs:
           GEMINI_GEOCODE_MODEL: ${{ secrets.GEMINI_GEOCODE_MODEL }}
           NODE_ENV: production
           JOB_TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+          # For the post-review cache purge (scripts/run-job.ts purgeReadCaches):
+          # the runner tells the Vercel deployment its data changed.
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_ORIGIN: https://geopulse-green.vercel.app
         run: npx tsx scripts/run-job.ts "${{ inputs.job }}"

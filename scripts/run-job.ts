@@ -64,9 +64,36 @@ const JOB_TIMEOUT_MS = (() => {
   return Number.isFinite(minutes) && minutes > 1 ? (minutes - 1) * 60_000 : 8 * 60_000;
 })();
 
+// Purge the ISR-served read routes on Vercel (POST /api/admin/revalidate)
+// so the next viewer poll regenerates the feed once and everyone else gets
+// that copy. Called after review-pending — the moment rows become
+// visible. Best-effort: without APP_ORIGIN/CRON_SECRET, or on any failure,
+// the routes fall back to their own time-based revalidate, which is one
+// pipeline cycle of staleness, never data loss.
+async function purgeReadCaches(): Promise<{ purged: boolean; detail: string }> {
+  const origin = process.env.APP_ORIGIN;
+  const secret = process.env.CRON_SECRET;
+  if (!origin || !secret) return { purged: false, detail: "APP_ORIGIN or CRON_SECRET not set" };
+  try {
+    const res = await fetch(new URL("/api/admin/revalidate", origin), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${secret}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    return { purged: res.ok, detail: res.ok ? await res.text() : `HTTP ${res.status}` };
+  } catch (err) {
+    return { purged: false, detail: String(err) };
+  }
+}
+
 const JOBS: Record<string, () => Promise<unknown>> = {
   ingest: () => runIngest(),
-  "review-pending": () => reviewPendingEvents(),
+  "review-pending": async () => {
+    const review = await reviewPendingEvents();
+    const purge = await purgeReadCaches();
+    if (!purge.purged) console.error(`read-cache purge skipped/failed: ${purge.detail}`);
+    return { ...review, purge };
+  },
   "generate-briefs": () => generateBriefsForActiveCountries(),
   // Mirrors src/app/api/admin/snapshot/route.ts exactly: grading failure
   // must never mask a successful snapshot write.

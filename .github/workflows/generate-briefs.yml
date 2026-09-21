@@ -1,17 +1,15 @@
 name: Generate country briefs
 
-# Frequent cadence for AI country situation briefs (2026-09-11, user
-# request — "50 refreshes every day," one call per country, descending
-# pulse/risk-score order). Generates exactly ONE country's brief per call
-# (see src/lib/countryBriefs.ts) and needs a cadence like this to reach
-# 50/day; GEMINI_LITE_DAILY_CAPS.brief in src/lib/aiUsage.ts is what stops
-# it at 50. Offset from ingest (:01, :11, ... — review-pending is chained
-# inside that run since 2026-09-20) so the two never fire in the same
-# minute. In-process on the runner since
-# 2026-09-19 (see _run-job.yml).
+# Manual-dispatch entry point for AI country situation briefs. Since
+# 2026-09-21 the scheduled brief runs as the third job of ingest.yml,
+# chained after review-pending, so it shares the pipeline's one database
+# wake-up per cycle instead of waking Neon on its own :10/:25/:40/:55
+# offset (Neon Free is 100 CU-hours/month; the compute only saves hours
+# by sleeping, and it needs 5 idle minutes to do so). Four cycles an hour
+# still reaches the 50/day cap (GEMINI_LITE_DAILY_CAPS.brief in
+# src/lib/aiUsage.ts) — the cap, not the cadence, is what bounds it.
+# Kept for one-off runs and so old run history stays browsable.
 on:
-  schedule:
-    - cron: "10,25,40,55 * * * *"
   workflow_dispatch: {}
 
 permissions:
