@@ -423,6 +423,64 @@ export const chokepointTransitHistory = pgTable(
 export type ChokepointTransitHistoryRow = typeof chokepointTransitHistory.$inferSelect;
 export type NewChokepointTransitHistoryRow = typeof chokepointTransitHistory.$inferInsert;
 
+// Current membership of each sanctions list (2026-09-22). Deliberately
+// just (list, entry_id) for ~25,600 rows: membership is all the weekly
+// diff needs, and mirroring someone else's database — names, aliases,
+// addresses, dates of birth — would cost tens of megabytes of a 500 MB
+// budget to store a copy of a file that is public and re-downloadable.
+// Everything descriptive lives on the delta rows below, where it
+// documents one change at one time and stays true afterwards.
+export const sanctionsEntry = pgTable(
+  "sanctions_entry",
+  {
+    id: serial("id").primaryKey(),
+    list: text("list").notNull(), // "ofac" | "eu"
+    entryId: text("entry_id").notNull(), // the publisher's own permanent id
+  },
+  (table) => [unique("sanctions_entry_list_entry_key").on(table.list, table.entryId)],
+);
+
+export type SanctionsEntryRow = typeof sanctionsEntry.$inferSelect;
+export type NewSanctionsEntryRow = typeof sanctionsEntry.$inferInsert;
+
+// What changed between two fetches of a sanctions list. Neither OFAC nor
+// the EU publishes a change feed, so this table IS the feed — and it is
+// the durable record: the row keeps the name and programme as they read
+// at the moment of the change, so a later revision upstream cannot
+// silently rewrite history here.
+//
+// `country` is the programme's country where the programme names one
+// (OFAC "IRAN-EO13902", EU "IRN") and null where it is thematic (OFAC
+// "SDGT", EU "TERR"). Null is the honest answer there: a global terrorism
+// designation is not a signal about any one country, and forcing it onto
+// the designating state would be worse than leaving it blank.
+//
+// `name` is null on removals — the entry is gone from the published file,
+// so there is nothing to read a name from, and the membership table does
+// not keep one. See src/lib/sanctions.ts.
+export const sanctionsDelta = pgTable(
+  "sanctions_delta",
+  {
+    id: serial("id").primaryKey(),
+    list: text("list").notNull(),
+    entryId: text("entry_id").notNull(),
+    change: text("change").notNull(), // "added" | "removed"
+    name: text("name"),
+    entityType: text("entity_type"), // person | entity | vessel | aircraft
+    program: text("program"),
+    country: text("country"), // ISO2, nullable
+    publishedAt: text("published_at"), // YYYY-MM-DD when the list states one
+    detectedAt: timestamp("detected_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("sanctions_delta_detected_at_idx").on(table.detectedAt),
+    index("sanctions_delta_country_idx").on(table.country),
+  ],
+);
+
+export type SanctionsDeltaRow = typeof sanctionsDelta.$inferSelect;
+export type NewSanctionsDeltaRow = typeof sanctionsDelta.$inferInsert;
+
 // Project 1 (2026-09-09, user request for "real ML" beyond linear
 // regression): unsupervised clustering over feed_archive's existing
 // embeddings (src/lib/narrativeClustering.ts's spherical k-means), read as

@@ -1,0 +1,35 @@
+name: Sync sanctions lists
+
+# Weekly (2026-09-22). Neither OFAC nor the EU publishes a "what changed"
+# feed, so each run downloads both lists whole (~5.7 MB and ~25 MB) and
+# diffs them against stored membership — see src/lib/sanctions.ts.
+#
+# Wednesday rather than Monday: OFAC publishes designations on no fixed
+# day but most often mid-week, and the EU regenerates its consolidated
+# file irregularly, so a mid-week run catches a typical week's changes
+# with one fetch instead of splitting them across two runs.
+#
+# This is the only new schedule any of the 2026-09-22 work adds. Everything
+# else rides a job that already runs, because a new wake-up costs real
+# Neon compute hours and this project is on the 100 CU-hour free plan (see
+# docs/ARCHITECTURE.md §12). One weekly run costs roughly a minute of
+# database time; the download itself is Actions bandwidth, which is free
+# on a public repo.
+on:
+  schedule:
+    - cron: "0 17 * * 3"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  sync-sanctions:
+    uses: ./.github/workflows/_run-job.yml
+    with:
+      job: sync-sanctions
+      # The EU file is ~25 MB and parses to ~44k rows before collapsing to
+      # ~6.2k entities; both lists together ran in ~8s end to end, so this
+      # is slack for a slow upstream, not an expected duration.
+      timeout-minutes: 10
+    secrets: inherit

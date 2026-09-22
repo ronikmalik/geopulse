@@ -560,3 +560,84 @@ asleep:
 
 If usage still climbs, the next lever is a second Free project (each gets its own
 100 CU-hours) holding the archive/ML tables, at the cost of two connection strings.
+
+## 13. Chokepoints, sanctions and the storage budget (2026-09-22)
+
+Three changes, in the order they were made, all against the constraint
+that Neon Free stops at **0.5 GB** and the embedding corpus is what every
+model downstream trains on.
+
+**Embeddings halved.** `feed_archive.embedding` and
+`classification_archive.embedding` moved from `vector(768)` (float32) to
+`halfvec(768)` (float16), and the HNSW index was rebuilt with
+`halfvec_cosine_ops`. Those two tables were 98 MB of a 130 MB database;
+the database is now 86 MB. Verified lossless for the only thing any
+consumer does with these vectors — rank by cosine distance: across 8
+probe rows the top-10 neighbour set was identical before and after,
+distances agreed to within 2.3e-5, and the only ordering changes were two
+exact-tie pairs swapping. `narrative_clusters.centroid` and
+`classifier_calibration_patterns.embedding` stay `vector` (101 rows
+between them, nothing to save). The two `ADD COLUMN` statements in
+`migrations.ts` were edited rather than appended — the documented
+exception to that file's own rule, because a fresh database and the live
+one must converge on the same column type or the index can only be valid
+on one of them.
+
+**Chokepoint transits are the seventh anomaly signal.**
+`src/lib/sources/portwatch.ts` had said since 2026-09-08 that a raw
+transit count is meaningless without each chokepoint's own baseline, and
+that no history was kept to build one. `chokepoint_transit_history` is
+that history, and `src/lib/chokepointHistory.ts` reads it through the
+same `anomalyBaseline.ts` z-score engine every other signal uses. Three
+things worth knowing:
+
+- It did not have to wait. PortWatch's FeatureServer carries daily rows
+  back to 2019-01-01, so the baseline was backfilled and the signal was
+  live on its first run — the only signal in the scan with zero countries
+  in `insufficient-baseline`. First real finding: Gibraltar Strait at 96
+  transits against a 132.5 average over 28 days (z=3.10).
+- `allowNegativeJump` is on. A **drop** is the disruption signal
+  (blockage, closure, shipping routing around a threat); only the
+  commercial-aircraft signal shares that.
+- Findings are attributed to littoral states from an explicit
+  hand-checked table (`CHOKEPOINT_COUNTRIES`), not by reverse-geocoding.
+  A strait is by definition the water *between* countries, so a
+  nearest-land lookup would pick one shore and silently drop the other:
+  Kerch is a Russia **and** a Ukraine signal, and both see the finding.
+  `anomaly_findings.category` carries the chokepoint's name.
+
+Retention is 120 days (~3,300 rows, 1 MB). Upstream holds seven years and
+a year of it would enable seasonality, but nothing reads seasonality yet.
+
+**Sanctions designations, as context.** `src/lib/sources/sanctions.ts`
+fetches the OFAC SDN list (19,393 entries, US government work, public
+domain) and the EU consolidated list (6,234 entities, published for
+reuse). Neither publisher offers a change feed, so `src/lib/sanctions.ts`
+diffs each list against stored membership and records what was added and
+removed. OpenSanctions was evaluated and rejected: its bulk data is free
+for non-commercial use only, which would become a licensing problem given
+this project's stated institutional direction.
+
+- `sanctions_entry` stores only `(list, entry_id)` — membership is all the
+  diff needs, and mirroring someone else's database would cost tens of
+  megabytes to duplicate a public file. Names and programmes live on
+  `sanctions_delta`, where they document one change at one time.
+- Country attribution comes from the programme: OFAC by prefix
+  (`UKRAINE-EO13662` → UA), EU by ISO3 (`IRN` → IR). 67% of OFAC and 88%
+  of EU entries attribute; the rest are thematic (SDGT, SDNT, TERR) and
+  stay **null** rather than being forced onto the designating state.
+- A run that would change more than 25% of a list is discarded as a
+  format change rather than published as news, and the first run for a
+  list records membership silently instead of announcing 19,393 new
+  designations.
+- **Not scored into country risk.** That needs a new event category,
+  which changes every country's score and touches the classifier, the
+  pillars and the risk model's features — a deliberate separate change,
+  not a side effect of adding a source. It ships as a context layer
+  (`GET /api/layers/sanctions`), the same way travel advisories and trade
+  balances did.
+
+**Schedules.** The chokepoint snapshot rides `snapshot-flights`, which
+already runs the anomaly scan. `sync-sanctions.yml` (Wednesdays 17:00
+UTC) is the only new schedule, because a new wake-up costs real CU-hours
+and everything else could ride a burst that already happens.

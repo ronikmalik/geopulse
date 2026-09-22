@@ -29,6 +29,7 @@ export const TICKER_DATA_LAYERS = [
   "air-quality",
   "port-congestion",
   "trade-balance",
+  "sanctions",
 ] as const;
 
 export const DATA_LAYERS = [...GLOBE_DATA_LAYERS, ...TICKER_DATA_LAYERS] as const;
@@ -56,6 +57,7 @@ export const DATA_LAYER_LABELS: Record<DataLayerId, string> = {
   "energy-mix": "Energy Mix Exposure",
   "food-price-index": "Food Price Index",
   "air-quality": "Air Quality (PM2.5)",
+  sanctions: "Sanctions Designations",
   "port-congestion": "Maritime Chokepoint Traffic",
   "trade-balance": "Trade Partner Exposure",
 };
@@ -80,6 +82,8 @@ export const DATA_LAYER_DESCRIPTIONS: Record<DataLayerId, string> = {
     "World Bank - electric power transmission & distribution losses (% of output). Chronic grid loss tracks infrastructure decay, Infrastructure & Connectivity context.",
   "energy-mix":
     "Our World in Data - fossil-fuel share of electricity generation by country. Structural context for energy-supply exposure.",
+  sanctions:
+    "US OFAC SDN + EU consolidated list - entities added to or removed from sanctions lists, attributed to the country their programme names. Political & Governance context; not scored into country risk.",
   "food-price-index":
     "FAO - global monthly Food Price Index. Food price spikes are a well-established driver of political instability (see the 2007-08 and 2010-11 spikes preceding the Arab Spring).",
   "air-quality":
@@ -115,4 +119,7 @@ export const DATA_LAYER_POLL_MS: Record<DataLayerId, number> = {
   "air-quality": 30 * 60_000,
   "port-congestion": 6 * 60 * 60_000,
   "trade-balance": 24 * 60 * 60_000,
+  // Written weekly by the sync-sanctions job; the route only reads stored
+  // rows, so polling faster than this refreshes nothing.
+  sanctions: 60 * 60_000,
 };

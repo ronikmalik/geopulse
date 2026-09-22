@@ -43,6 +43,7 @@ import { gradeResolvedPredictions } from "../src/lib/riskModelGrading";
 import { snapshotAircraftCounts, snapshotCommercialAircraftCounts } from "../src/lib/flightBaseline";
 import { snapshotGpsJamming } from "../src/lib/gpsJammingHistory";
 import { snapshotChokepointTransits } from "../src/lib/chokepointHistory";
+import { syncSanctions } from "../src/lib/sanctions";
 import { runAnomalyScan } from "../src/lib/anomalyScan";
 import { trainAndShadowPredict } from "../src/lib/riskModel";
 import { trainNarrativeClusters } from "../src/lib/narrativeTraining";
@@ -156,6 +157,10 @@ const JOBS: Record<string, () => Promise<unknown>> = {
   "train-narrative-clusters": () => trainNarrativeClusters(),
   "train-text-classifier": () => trainAndEvaluateTextClassifier(),
   "sync-source-credibility": () => syncSourceCredibility(),
+  // Weekly: fetch both sanctions lists whole and record what changed
+  // since last time — neither publisher offers a change feed, so the
+  // diff has to be computed here. See src/lib/sanctions.ts.
+  "sync-sanctions": () => syncSanctions(),
   // Applies src/lib/migrations.ts — idempotent, safe to run any time a
   // schema change ships (the /api/admin/migrate route does the same).
   migrate: () => applyMigrations(),

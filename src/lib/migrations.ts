@@ -526,6 +526,28 @@ export const MIGRATION_STATEMENTS = [
     CONSTRAINT chokepoint_transit_history_point_date_key UNIQUE (chokepoint, snapshot_date)
   )`,
   sql`CREATE INDEX IF NOT EXISTS chokepoint_transit_history_date_idx ON chokepoint_transit_history (snapshot_date)`,
+  // 2026-09-22: sanctions list membership + designation deltas — see
+  // sanctionsEntry/sanctionsDelta's doc comments in schema.ts.
+  sql`CREATE TABLE IF NOT EXISTS sanctions_entry (
+    id SERIAL PRIMARY KEY,
+    list TEXT NOT NULL,
+    entry_id TEXT NOT NULL,
+    CONSTRAINT sanctions_entry_list_entry_key UNIQUE (list, entry_id)
+  )`,
+  sql`CREATE TABLE IF NOT EXISTS sanctions_delta (
+    id SERIAL PRIMARY KEY,
+    list TEXT NOT NULL,
+    entry_id TEXT NOT NULL,
+    change TEXT NOT NULL,
+    name TEXT,
+    entity_type TEXT,
+    program TEXT,
+    country TEXT,
+    published_at TEXT,
+    detected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS sanctions_delta_detected_at_idx ON sanctions_delta (detected_at)`,
+  sql`CREATE INDEX IF NOT EXISTS sanctions_delta_country_idx ON sanctions_delta (country)`,
 ];
 
 export async function applyMigrations(): Promise<{ statementsApplied: number }> {

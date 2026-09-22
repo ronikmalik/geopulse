@@ -265,3 +265,20 @@ test("a chokepoint finding names the passage, not a category code", async () => 
   assert.ok(text.includes("132.5"), text);
   assert.equal(signalName("chokepoint-transit"), "maritime chokepoint transits");
 });
+
+test("sanctions programmes map to a country only when the programme names one", async () => {
+  const { programCountry } = await import("../src/lib/sanctions");
+  // Country programmes, including OFAC's executive-order suffixes and its
+  // bracket-joined multi-programme strings.
+  assert.equal(programCountry("ofac", "IRAN-EO13902"), "IR");
+  assert.equal(programCountry("ofac", "UKRAINE-EO13662"), "UA");
+  assert.equal(programCountry("ofac", "SDGT, IFSR"), "IR");
+  assert.equal(programCountry("eu", "IRN"), "IR");
+  assert.equal(programCountry("eu", "BLR"), "BY");
+  // Thematic programmes have no country and must not be forced onto the
+  // designating state — an SDGT listing is not a signal about the US.
+  assert.equal(programCountry("ofac", "SDGT"), null);
+  assert.equal(programCountry("ofac", "SDNT"), null);
+  assert.equal(programCountry("eu", "TERR"), null);
+  assert.equal(programCountry("ofac", null), null);
+});
