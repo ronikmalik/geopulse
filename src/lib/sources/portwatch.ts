@@ -142,3 +142,77 @@ export async function fetchChokepointTransits(): Promise<ChokepointTransit[]> {
     .filter((r): r is ChokepointTransit => r !== null)
     .sort((a, b) => a.totalVessels - b.totalVessels);
 }
+
+export interface ChokepointTransitDay {
+  name: string;
+  date: string; // YYYY-MM-DD
+  totalVessels: number;
+  cargoVessels: number;
+  tankerVessels: number;
+}
+
+// One row per chokepoint per day, for a date window (2026-09-22). The
+// function above answers "what is happening right now"; this one answers
+// "what is normal here", which is the question this data actually needs —
+// see this file's header comment, which has said since 2026-09-08 that a
+// raw transit count is meaningless without each chokepoint's own baseline
+// (Magellan Strait sees a handful of ships a day, Malacca sees hundreds).
+//
+// The dataset carries daily rows back to 2019-01-01 — 78,960 of them,
+// confirmed against the service's own min/max/count statistics — so a
+// baseline can be backfilled rather than waited for. `resultRecordCount`
+// is capped server-side (2,000 per response by this service's
+// maxRecordCount), so this pages with resultOffset until a short page
+// comes back, rather than assuming one request returns everything.
+//
+// No location join here, unlike fetchChokepointTransits: history rows are
+// stored against a chokepoint's name and the coordinates are static
+// reference data that would be identical on all ~400 rows of each one.
+//
+// The offset advances by however many rows actually came back, never by
+// the page size asked for: this service silently caps a response at its
+// own maxRecordCount (1,000, measured — a request for 2,000 returns
+// 1,000 with no error and no flag this code reads), so treating a short
+// page as "the end" stopped the first backfill at 1,000 of ~11,000 rows.
+// Paging ends when a request returns nothing at all.
+const HISTORY_PAGE_SIZE = 1000;
+const HISTORY_MAX_PAGES = 100; // runaway guard; the whole dataset is ~79k rows
+
+export async function fetchChokepointTransitHistory(sinceDate: string): Promise<ChokepointTransitDay[]> {
+  const out: ChokepointTransitDay[] = [];
+  let offset = 0;
+  for (let page = 0; page < HISTORY_MAX_PAGES; page++) {
+    const rows = await queryArcGis<{
+      portname: string;
+      date: string;
+      n_total: number;
+      n_cargo: number;
+      n_tanker: number;
+    }>(PORTWATCH_ENDPOINT, {
+      where: `date >= DATE '${sinceDate}'`,
+      outFields: "portname,date,n_total,n_cargo,n_tanker",
+      orderByFields: "date ASC,portname ASC",
+      resultOffset: String(offset),
+      resultRecordCount: String(HISTORY_PAGE_SIZE),
+    });
+    offset += rows.length;
+    for (const r of rows) {
+      const a = r.attributes;
+      // A chokepoint with no reported transits is a real zero, but a row
+      // with a null count is a gap in the upstream pipeline — storing it
+      // as 0 would teach the baseline that a publishing outage is a
+      // blockage, which is exactly the false positive this signal exists
+      // to avoid.
+      if (a.n_total === null || a.n_total === undefined || !a.date) continue;
+      out.push({
+        name: a.portname,
+        date: a.date,
+        totalVessels: a.n_total,
+        cargoVessels: a.n_cargo ?? 0,
+        tankerVessels: a.n_tanker ?? 0,
+      });
+    }
+    if (rows.length === 0) break;
+  }
+  return out;
+}

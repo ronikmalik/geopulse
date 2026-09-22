@@ -18,16 +18,22 @@ export function signalName(signalType: string): string {
       return "category news volume";
     case "narrative-novelty":
       return "share of coverage matching no known narrative (%)";
+    case "chokepoint-transit":
+      return "maritime chokepoint transits";
     default:
       return signalType;
   }
 }
 
 export function signalDescription(f: AnomalyFindingResponse): string {
+  // `category` carries a different thing per signal: an event category for
+  // event-volume-category, the chokepoint's name for chokepoint-transit.
   const name =
     f.signalType === "event-volume-category" && f.category
       ? `${CATEGORY_LABELS[f.category as Category] ?? f.category} news volume`
-      : signalName(f.signalType);
+      : f.signalType === "chokepoint-transit" && f.category
+        ? `${f.category} vessel transits`
+        : signalName(f.signalType);
   const direction = f.jump >= 0 ? "up" : "down";
   return `${name} ${direction} to ${f.observedValue} vs. a ${f.baselineMean} average over the last ${f.sampleSize} days (z=${f.zScore})`;
 }

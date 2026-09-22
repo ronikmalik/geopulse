@@ -7,6 +7,7 @@ import {
   getEventVolumeByCategoryAnomalyOutcomes,
 } from "@/lib/eventVolumeAnomaly";
 import { getNarrativeNoveltyAnomalyOutcomes } from "@/lib/narrativeNoveltyAnomaly";
+import { getChokepointAnomalyOutcomes } from "@/lib/chokepointHistory";
 import {
   getCountryStateMultivariateAnomalyOutcomes,
   MULTIVARIATE_FEATURE_NAMES,
@@ -129,6 +130,19 @@ export async function runAnomalyScan(): Promise<AnomalyScanResult> {
   // known narrative cluster — see narrativeNoveltyAnomaly.ts.
   await runSignal("narrative-novelty", async () =>
     (await getNarrativeNoveltyAnomalyOutcomes()).map((o) => ({ country: o.country, outcome: o.outcome })),
+  );
+  // Seventh signal (2026-09-22): vessel transits through a maritime
+  // chokepoint, against that chokepoint's own 30-day baseline — see
+  // chokepointHistory.ts. `category` carries the chokepoint name so a
+  // finding can say WHICH passage moved; the country is the littoral
+  // state, which is why the same finding can appear under two countries
+  // (Kerch Strait is a Russia and a Ukraine signal).
+  await runSignal("chokepoint-transit", async () =>
+    (await getChokepointAnomalyOutcomes()).map((o) => ({
+      country: o.country,
+      category: o.chokepoint,
+      outcome: o.outcome,
+    })),
   );
 
   // Project 2 (2026-09-09) — kept separate from the shared runSignal

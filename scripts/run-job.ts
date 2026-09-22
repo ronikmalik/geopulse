@@ -42,6 +42,7 @@ import { applyMigrations } from "../src/lib/migrations";
 import { gradeResolvedPredictions } from "../src/lib/riskModelGrading";
 import { snapshotAircraftCounts, snapshotCommercialAircraftCounts } from "../src/lib/flightBaseline";
 import { snapshotGpsJamming } from "../src/lib/gpsJammingHistory";
+import { snapshotChokepointTransits } from "../src/lib/chokepointHistory";
 import { runAnomalyScan } from "../src/lib/anomalyScan";
 import { trainAndShadowPredict } from "../src/lib/riskModel";
 import { trainNarrativeClusters } from "../src/lib/narrativeTraining";
@@ -126,11 +127,19 @@ const JOBS: Record<string, () => Promise<unknown>> = {
       errors.push(`gpsJamming: ${err}`);
       return { inserted: 0, countriesSeen: 0 };
     });
+    // Before the scan, like every other snapshot here: the chokepoint
+    // signal reads the table this writes, so today's row has to exist
+    // first. Caught like the rest — PortWatch being down is not a reason
+    // to skip the other six signals.
+    const chokepoints = await snapshotChokepointTransits().catch((err) => {
+      errors.push(`chokepoints: ${err}`);
+      return { fetched: 0, written: 0, pruned: 0, backfilled: false };
+    });
     const scan = await runAnomalyScan().catch((err) => {
       errors.push(`scan: ${err}`);
       return null;
     });
-    return { military, commercial, gpsJamming, scan, errors };
+    return { military, commercial, gpsJamming, chokepoints, scan, errors };
   },
   // The daily backlog sweep also draws the day's gate-review sample (see
   // src/lib/gateReview.ts) — same once-a-day cadence, and it's the one

@@ -222,3 +222,46 @@ test("quote timestamps are described honestly by source and age", async () => {
   assert.equal(newestAsOf(rows)?.source, "market");
   assert.equal(newestAsOf([]), null);
 });
+
+test("every chokepoint is attributed to real littoral states", async () => {
+  const { CHOKEPOINT_COUNTRIES } = await import("../src/lib/chokepointHistory");
+  const { ISO_NUMERIC_TO_ALPHA2 } = await import("../src/lib/isoCountries");
+  const known = new Set(Object.values(ISO_NUMERIC_TO_ALPHA2));
+  // PortWatch publishes exactly 28 chokepoints; an unmapped one would be
+  // silently dropped from the signal (see getChokepointAnomalyOutcomes),
+  // so the map has to keep pace with the source rather than drift.
+  assert.equal(Object.keys(CHOKEPOINT_COUNTRIES).length, 28);
+  for (const [point, countries] of Object.entries(CHOKEPOINT_COUNTRIES)) {
+    assert.ok(countries.length > 0, `${point} has no country`);
+    for (const c of countries) {
+      assert.match(c, /^[A-Z]{2}$/, `${point}: ${c} is not an ISO2 code`);
+      assert.ok(known.has(c), `${point}: ${c} is not a country this app can place`);
+    }
+  }
+  // The passages the brief names explicitly, each on the right shore.
+  assert.deepEqual(CHOKEPOINT_COUNTRIES["Strait of Hormuz"], ["IR", "OM", "AE"]);
+  assert.deepEqual(CHOKEPOINT_COUNTRIES["Kerch Strait"], ["RU", "UA"]);
+  assert.deepEqual(CHOKEPOINT_COUNTRIES["Suez Canal"], ["EG"]);
+});
+
+test("a chokepoint finding names the passage, not a category code", async () => {
+  const { signalDescription, signalName } = await import("../src/lib/anomalyLabels");
+  // `category` carries an event category for one signal and a chokepoint
+  // name for another; the description must not run a strait through the
+  // CATEGORY_LABELS lookup and render it as a bare slug.
+  const finding = {
+    signalType: "chokepoint-transit",
+    country: "ES",
+    category: "Gibraltar Strait",
+    observedValue: 96,
+    baselineMean: 132.5,
+    baselineStdDev: 11.8,
+    sampleSize: 28,
+    jump: -36.5,
+    zScore: 3.1,
+  };
+  const text = signalDescription(finding);
+  assert.ok(text.startsWith("Gibraltar Strait vessel transits down to 96"), text);
+  assert.ok(text.includes("132.5"), text);
+  assert.equal(signalName("chokepoint-transit"), "maritime chokepoint transits");
+});

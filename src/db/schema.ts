@@ -381,6 +381,48 @@ export const gpsJammingHistory = pgTable(
 export type GpsJammingHistoryRow = typeof gpsJammingHistory.$inferSelect;
 export type NewGpsJammingHistoryRow = typeof gpsJammingHistory.$inferInsert;
 
+// Daily vessel transits through the world's 28 maritime chokepoints
+// (2026-09-22). IMF PortWatch has been fetched by this app since
+// 2026-09-08, but only ever as "today's snapshot, displayed raw" — see
+// src/lib/sources/portwatch.ts's own header, which says outright that a
+// meaningful read needs each chokepoint compared against its own
+// baseline, and that no history was being kept to build one from.
+//
+// This is that history. Unlike every other snapshot table here, it did
+// NOT have to start from empty: the PortWatch FeatureServer carries daily
+// rows back to 2019-01-01 (78,960 of them, verified live), so the
+// baseline was backfilled on day one and the signal was live immediately
+// rather than after a 14-day wait.
+//
+// `snapshotDate` is a calendar day (YYYY-MM-DD text, the same shape
+// country_feature_daily uses, and exactly what PortWatch's dateOnly field
+// serializes to) and is unique per chokepoint: PortWatch publishes one
+// row per chokepoint per day and revises recent days as new satellite AIS
+// arrives, so a re-fetch must overwrite the day rather than append a
+// second row for it — every other history table here appends, because its
+// source has no notion of revising yesterday. Retention is bounded — see
+// CHOKEPOINT_RETENTION_DAYS in src/lib/chokepointHistory.ts — because
+// this table would otherwise grow without limit against a 500 MB
+// database for history no consumer reads.
+export const chokepointTransitHistory = pgTable(
+  "chokepoint_transit_history",
+  {
+    id: serial("id").primaryKey(),
+    chokepoint: text("chokepoint").notNull(), // PortWatch `portname`, verbatim
+    snapshotDate: text("snapshot_date").notNull(), // YYYY-MM-DD (UTC)
+    totalVessels: integer("total_vessels").notNull(),
+    cargoVessels: integer("cargo_vessels").notNull(),
+    tankerVessels: integer("tanker_vessels").notNull(),
+  },
+  (table) => [
+    index("chokepoint_transit_history_date_idx").on(table.snapshotDate),
+    unique("chokepoint_transit_history_point_date_key").on(table.chokepoint, table.snapshotDate),
+  ],
+);
+
+export type ChokepointTransitHistoryRow = typeof chokepointTransitHistory.$inferSelect;
+export type NewChokepointTransitHistoryRow = typeof chokepointTransitHistory.$inferInsert;
+
 // Project 1 (2026-09-09, user request for "real ML" beyond linear
 // regression): unsupervised clustering over feed_archive's existing
 // embeddings (src/lib/narrativeClustering.ts's spherical k-means), read as

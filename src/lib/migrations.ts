@@ -514,6 +514,18 @@ export const MIGRATION_STATEMENTS = [
     END
   $$`,
   sql`CREATE INDEX IF NOT EXISTS feed_archive_embedding_idx ON feed_archive USING hnsw (embedding halfvec_cosine_ops)`,
+  // 2026-09-22: maritime chokepoint transit history — see
+  // chokepointTransitHistory's doc comment in schema.ts.
+  sql`CREATE TABLE IF NOT EXISTS chokepoint_transit_history (
+    id SERIAL PRIMARY KEY,
+    chokepoint TEXT NOT NULL,
+    snapshot_date TEXT NOT NULL,
+    total_vessels INTEGER NOT NULL,
+    cargo_vessels INTEGER NOT NULL,
+    tanker_vessels INTEGER NOT NULL,
+    CONSTRAINT chokepoint_transit_history_point_date_key UNIQUE (chokepoint, snapshot_date)
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS chokepoint_transit_history_date_idx ON chokepoint_transit_history (snapshot_date)`,
 ];
 
 export async function applyMigrations(): Promise<{ statementsApplied: number }> {
