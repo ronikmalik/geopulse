@@ -1,6 +1,7 @@
 "use client";
 
 import FeedPanel from "./FeedPanel";
+import AlertsPanel from "./AlertsPanel";
 import CountryRiskPanel from "./CountryRiskPanel";
 import LayersDashboard from "./LayersDashboard";
 import LiveWirePanel from "./LiveWirePanel";
@@ -11,6 +12,7 @@ import type { GeoEvent } from "@/lib/types";
 import type { Category } from "@/lib/categories";
 import type { CountryRiskScore } from "@/lib/useCountryRisk";
 import type { AnomalyFindingResponse } from "@/lib/useAnomalies";
+import type { AlertView } from "@/lib/useAlerts";
 import type { DataLayerId } from "@/lib/dataLayers";
 import type {
   FlightsResponse,
@@ -34,7 +36,7 @@ import type {
   CommodityResponse,
 } from "@/lib/dataLayerTypes";
 
-export type DashboardTab = "feed" | "risk" | "layers" | "forex" | "trends";
+export type DashboardTab = "alerts" | "feed" | "risk" | "layers" | "forex" | "trends";
 
 const regionNames =
   typeof Intl !== "undefined"
@@ -61,6 +63,8 @@ interface DashboardProps {
 
   countryScores: CountryRiskScore[];
   anomalies: Map<string, AnomalyFindingResponse[]>;
+  alerts: AlertView[];
+  alertsLoading?: boolean;
   selectedCountry: string | null;
   onSelectCountry: (country: string | null) => void;
 
@@ -94,6 +98,10 @@ interface DashboardProps {
 }
 
 const TAB_META: { id: DashboardTab; label: string; dot: string }[] = [
+  // Alerts first: it answers "what changed", which is the question a
+  // reader with five minutes actually has. Every other tab answers "what
+  // is happening", which takes longer to read and rarely has a verdict.
+  { id: "alerts", label: "Alerts", dot: "bg-amber-400" },
   { id: "feed", label: "Feed", dot: "bg-red-500" },
   { id: "risk", label: "Pulse", dot: "bg-orange-500" },
   { id: "layers", label: "Layers", dot: "bg-sky-400" },
@@ -108,6 +116,7 @@ export default function Dashboard(props: DashboardProps) {
   // unlike the other tabs (feed length, country count, active layers, forex
   // pairs).
   const tabCount: Partial<Record<DashboardTab, number>> = {
+    alerts: props.alerts.length,
     feed: props.events.length,
     risk: props.countryScores.length,
     layers: props.activeDataLayers.size,
@@ -154,6 +163,20 @@ export default function Dashboard(props: DashboardProps) {
         </div>
       )}
       <div className="min-h-0 flex-1">
+        {activeTab === "alerts" && (
+          <AlertsPanel
+            alerts={props.alerts}
+            loading={props.alertsLoading}
+            // Selecting the country is what makes an alert a way into the
+            // rest of the app rather than a dead end: it focuses the globe
+            // and filters the feed, then hands the reader the Pulse tab,
+            // where that country's pillars and evidence already live.
+            onSelectCountry={(country) => {
+              props.onSelectCountry(country);
+              props.onTabChange("risk");
+            }}
+          />
+        )}
         {activeTab === "feed" && (
           <div className="flex h-full flex-col">
             {props.selectedCountry && (

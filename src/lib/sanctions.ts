@@ -1,6 +1,6 @@
 import { getDb } from "@/db";
 import { sanctionsEntry, sanctionsDelta } from "@/db/schema";
-import { eq, sql, desc, and, gte, inArray } from "drizzle-orm";
+import { eq, desc, and, gte, inArray } from "drizzle-orm";
 import { ALPHA2_TO_ALPHA3 } from "@/lib/iso3";
 import {
   fetchOfacSdn,
