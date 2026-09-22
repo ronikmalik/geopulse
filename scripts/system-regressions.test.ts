@@ -365,3 +365,25 @@ test("an overloaded model API stops the brief run instead of grinding through 12
   assert.equal(isUpstreamUnavailableStatus(403), false);
   assert.equal(isUpstreamUnavailableStatus(404), false);
 });
+
+test("an alert with nothing to show does not fire", async () => {
+  const { assessAlert, hasEvidence } = await import("../src/lib/alertScoring");
+  // Found in the first day of real output: ROUTINE rows reading
+  // "momentum 38 to 68" with no driving events and no evidence. Momentum
+  // is a ratio against a prior window, so it climbs when old events decay
+  // out of the denominator — nothing happened, the arithmetic moved.
+  const empty = {
+    level: 3, previousLevel: 3, momentum: 68, previousMomentum: 38,
+    maxSeverity: 0, sourceFamilies: 0, anomalySignals: 0, previousAnomalySignals: 0, pillarsActive: 0,
+  };
+  assert.equal(hasEvidence(empty), false);
+  assert.equal(assessAlert(empty).tier, null);
+  assert.ok(assessAlert(empty).gateNotes.some((n) => n.includes("nothing to show")));
+
+  // A sensor spike with no news coverage is exactly the signal worth
+  // keeping, so an anomaly alone counts as evidence.
+  assert.equal(hasEvidence({ ...empty, anomalySignals: 1 }), true);
+  assert.notEqual(assessAlert({ ...empty, anomalySignals: 1, previousAnomalySignals: 0 }).tier, null);
+  // So does a single driving event.
+  assert.equal(hasEvidence({ ...empty, sourceFamilies: 1 }), true);
+});

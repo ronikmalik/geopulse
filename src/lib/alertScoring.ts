@@ -124,6 +124,23 @@ export function hasChanged(input: AlertInputs): boolean {
   );
 }
 
+// An alert has to be able to show its work (2026-09-22, found by reading
+// the first day of real output): several ROUTINE rows fired reading
+// "momentum 38 to 68" with zero driving events and zero evidence behind
+// them. Momentum is a ratio of a recent window against a prior one, so it
+// can climb purely because old events decayed out of the denominator —
+// nothing happened, the arithmetic just moved.
+//
+// That is the exact thing this engine is supposed to filter out, and an
+// alert with no evidence attached contradicts the reason the panel
+// expands at all. So: at least one driving event, or at least one
+// anomaly signal. The second half matters — a GPS-jamming or chokepoint
+// spike with no news coverage is precisely the signal worth having, and
+// requiring a news article would throw it away.
+export function hasEvidence(input: AlertInputs): boolean {
+  return input.sourceFamilies > 0 || input.anomalySignals > 0;
+}
+
 export function assessAlert(input: AlertInputs): AlertAssessment {
   const components: AlertScoreComponent[] = [];
   const add = (name: string, points: number, detail: string) => {
@@ -168,6 +185,15 @@ export function assessAlert(input: AlertInputs): AlertAssessment {
       score,
       components,
       gateNotes: ["no alert: nothing changed since the last evaluation"],
+    };
+  }
+
+  if (!hasEvidence(input)) {
+    return {
+      tier: null,
+      score,
+      components,
+      gateNotes: ["no alert: nothing to show — no driving events and no unusual signals"],
     };
   }
 

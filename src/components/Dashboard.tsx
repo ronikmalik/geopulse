@@ -139,14 +139,19 @@ export default function Dashboard(props: DashboardProps) {
               <button
                 key={tab.id}
                 onClick={() => onTabChange(tab.id)}
-                className={`flex flex-1 flex-col items-center gap-1.5 py-2.5 font-mono text-[10px] uppercase tracking-wider transition ${
+                // text-[9px] and the tighter gaps are what keep six tabs on
+                // ONE line in the ~350px desktop rail. At the previous
+                // 10px/tracking-wider, adding Alerts pushed "Live Wire"
+                // onto a second line and knocked its active underline out
+                // of alignment with the rest.
+                className={`flex min-w-0 flex-1 flex-col items-center gap-1.5 py-2.5 font-mono text-[9px] uppercase tracking-wide transition ${
                   isActive
                     ? "text-red-300"
                     : "text-neutral-600 hover:text-red-700"
                 }`}
               >
-                <span className="flex items-center gap-1.5">
-                  <span className={`h-1.5 w-1.5 rounded-full ${tab.dot}`} />
+                <span className="flex items-center gap-1 whitespace-nowrap">
+                  <span className={`h-1 w-1 shrink-0 rounded-full ${tab.dot}`} />
                   {tab.label}
                   {!!count && count > 0 && <span className="text-neutral-600">{count}</span>}
                 </span>
