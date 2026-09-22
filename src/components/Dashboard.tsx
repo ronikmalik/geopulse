@@ -1,7 +1,6 @@
 "use client";
 
 import FeedPanel from "./FeedPanel";
-import AlertsPanel from "./AlertsPanel";
 import CountryRiskPanel from "./CountryRiskPanel";
 import LayersDashboard from "./LayersDashboard";
 import LiveWirePanel from "./LiveWirePanel";
@@ -12,7 +11,6 @@ import type { GeoEvent } from "@/lib/types";
 import type { Category } from "@/lib/categories";
 import type { CountryRiskScore } from "@/lib/useCountryRisk";
 import type { AnomalyFindingResponse } from "@/lib/useAnomalies";
-import type { AlertView } from "@/lib/useAlerts";
 import type { DataLayerId } from "@/lib/dataLayers";
 import type {
   FlightsResponse,
@@ -36,7 +34,7 @@ import type {
   CommodityResponse,
 } from "@/lib/dataLayerTypes";
 
-export type DashboardTab = "alerts" | "feed" | "risk" | "layers" | "forex" | "trends";
+export type DashboardTab = "feed" | "risk" | "layers" | "forex" | "trends";
 
 const regionNames =
   typeof Intl !== "undefined"
@@ -63,8 +61,6 @@ interface DashboardProps {
 
   countryScores: CountryRiskScore[];
   anomalies: Map<string, AnomalyFindingResponse[]>;
-  alerts: AlertView[];
-  alertsLoading?: boolean;
   selectedCountry: string | null;
   onSelectCountry: (country: string | null) => void;
 
@@ -98,10 +94,6 @@ interface DashboardProps {
 }
 
 const TAB_META: { id: DashboardTab; label: string; dot: string }[] = [
-  // Alerts first: it answers "what changed", which is the question a
-  // reader with five minutes actually has. Every other tab answers "what
-  // is happening", which takes longer to read and rarely has a verdict.
-  { id: "alerts", label: "Alerts", dot: "bg-amber-400" },
   { id: "feed", label: "Feed", dot: "bg-red-500" },
   { id: "risk", label: "Pulse", dot: "bg-orange-500" },
   { id: "layers", label: "Layers", dot: "bg-sky-400" },
@@ -116,7 +108,6 @@ export default function Dashboard(props: DashboardProps) {
   // unlike the other tabs (feed length, country count, active layers, forex
   // pairs).
   const tabCount: Partial<Record<DashboardTab, number>> = {
-    alerts: props.alerts.length,
     feed: props.events.length,
     risk: props.countryScores.length,
     layers: props.activeDataLayers.size,
@@ -139,19 +130,14 @@ export default function Dashboard(props: DashboardProps) {
               <button
                 key={tab.id}
                 onClick={() => onTabChange(tab.id)}
-                // text-[9px] and the tighter gaps are what keep six tabs on
-                // ONE line in the ~350px desktop rail. At the previous
-                // 10px/tracking-wider, adding Alerts pushed "Live Wire"
-                // onto a second line and knocked its active underline out
-                // of alignment with the rest.
-                className={`flex min-w-0 flex-1 flex-col items-center gap-1.5 py-2.5 font-mono text-[9px] uppercase tracking-wide transition ${
+                className={`flex flex-1 flex-col items-center gap-1.5 py-2.5 font-mono text-[10px] uppercase tracking-wider transition ${
                   isActive
                     ? "text-red-300"
                     : "text-neutral-600 hover:text-red-700"
                 }`}
               >
-                <span className="flex items-center gap-1 whitespace-nowrap">
-                  <span className={`h-1 w-1 shrink-0 rounded-full ${tab.dot}`} />
+                <span className="flex items-center gap-1.5">
+                  <span className={`h-1.5 w-1.5 rounded-full ${tab.dot}`} />
                   {tab.label}
                   {!!count && count > 0 && <span className="text-neutral-600">{count}</span>}
                 </span>
@@ -168,20 +154,6 @@ export default function Dashboard(props: DashboardProps) {
         </div>
       )}
       <div className="min-h-0 flex-1">
-        {activeTab === "alerts" && (
-          <AlertsPanel
-            alerts={props.alerts}
-            loading={props.alertsLoading}
-            // Selecting the country is what makes an alert a way into the
-            // rest of the app rather than a dead end: it focuses the globe
-            // and filters the feed, then hands the reader the Pulse tab,
-            // where that country's pillars and evidence already live.
-            onSelectCountry={(country) => {
-              props.onSelectCountry(country);
-              props.onTabChange("risk");
-            }}
-          />
-        )}
         {activeTab === "feed" && (
           <div className="flex h-full flex-col">
             {props.selectedCountry && (

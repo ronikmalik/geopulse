@@ -9,7 +9,6 @@ import { useEventStream } from "@/lib/useEventStream";
 import { usePulsingEvents } from "@/lib/usePulsingEvents";
 import { useCountryRisk } from "@/lib/useCountryRisk";
 import { useAnomalies } from "@/lib/useAnomalies";
-import { useAlerts } from "@/lib/useAlerts";
 import { useLiveLayer } from "@/lib/useLiveLayer";
 import {
   flightsToPoints,
@@ -58,7 +57,6 @@ const CFTC_POLL_MS = 60 * 60_000;
 const COMMODITIES_POLL_MS = 60_000;
 
 const MOBILE_TABS: { id: DashboardTab; label: string }[] = [
-  { id: "alerts", label: "Alerts" },
   { id: "feed", label: "Feed" },
   { id: "risk", label: "Pulse" },
   { id: "layers", label: "Layers" },
@@ -70,7 +68,6 @@ export default function Home() {
   const { events, status, incoming, dismissIncoming } = useEventStream();
   const countryScores = useCountryRisk();
   const anomalies = useAnomalies();
-  const { alerts, loading: alertsLoading } = useAlerts();
   // All eight pillars' event categories are on by default — this is a
   // global risk platform, not a conflict-theater tracker. The five
   // flashpoint pills in the top bar (CategoryFilter) let a user narrow
@@ -386,8 +383,6 @@ export default function Home() {
     },
     countryScores,
     anomalies,
-    alerts,
-    alertsLoading,
     selectedCountry,
     onSelectCountry: setSelectedCountry,
     activeCategories,
