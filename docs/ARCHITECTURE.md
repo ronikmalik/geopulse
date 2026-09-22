@@ -703,3 +703,69 @@ against a 6h cooldown.
 
 **Cost.** Rides `review-pending` inside the chained job, so no new
 database wake-up. Retention is 180 days.
+
+## 15. Exposure: severity is not impact (2026-09-22)
+
+A magnitude-6 earthquake under empty desert used to score exactly like a
+magnitude-6 under a capital, because the risk engine read severity and
+nothing else. USGS, GDACS, EONET and FIRMS all report how big something
+was; none of them reports how much it mattered. `src/lib/exposure.ts`
+supplies the missing half.
+
+**The measurement that justified it.** Across all 2,174 hazard events in
+the database carrying usable coordinates: p10 0, p25 0, **median
+10,375**, p75 67,363, p90 388,350, max 43.9M. **864 of them — 40% — sit
+at exactly zero**: earthquakes out at sea, thermal anomalies over empty
+forest, hurricanes still over water. Every one of those was scoring like
+the same event in a city.
+
+**How it works.** GeoNames `cities15000` (34,143 settlements over 15,000
+people, CC BY 4.0) is loaded into `population_center`. For each hazard
+event, `populationNear` sums the population within 100 km, linearly
+de-weighted by distance, and stores the head count on
+`events.population_exposed`. `exposureMultiplier` turns that into a
+multiplier on the decayed severity weight, anchored so the **measured
+median scores exactly 1.0** — switching the model on leaves the typical
+event where it was and moves only the genuinely empty and the genuinely
+crowded. Range is clamped to [0.4, 1.6].
+
+**Three deliberate limits.**
+
+1. **Hazards only.** `EXPOSURE_WEIGHTED_CATEGORIES` is earthquake,
+   natural-disaster and climate-hazard. A coup, a border incident or a
+   humanitarian emergency does not matter less for happening in a less
+   crowded country; weighting political news by population would encode
+   "events in big countries matter more", which is a bias, not a
+   correction.
+2. **Unknown is not zero.** NULL (an event from before the model) and -1
+   (the backfill's "checked, not applicable") both return a neutral 1.
+   Only a genuinely empty location earns the 0.4 floor. Without that
+   guard the sentinel falls through to `log10(0)` and silently demotes
+   every event with missing coordinates — turning "we do not know" into
+   "this did not matter".
+3. **It undercounts, by design of the data.** A settlement point set has
+   no dispersed rural population, so a hazard over densely-farmed but
+   un-urbanised land reads emptier than it is. The bias runs toward
+   under-weighting, which is the safer direction: it can make a real
+   event look ordinary, but it cannot invent a crisis where nobody lives.
+
+**The before/after, run on live data before enabling.** 68 of 124
+countries changed score, 38 up and 30 down — balanced, not a systemic
+shift. Only **8 of 203 changed Pulse Level** (3 up, 5 down), and **no
+level-4 country moved at all**, so the serious end of the picture is
+untouched. Venezuela 2→3 and Italy 1→2 on hazards near people; Fiji 3→2,
+Tonga, Paraguay, Botswana and Kazakhstan 2→1 on remote ones. Australia's
+raw hazard weight fell 48% — 95 of its 105 events are FIRMS thermal
+detections averaging 3,872 and 269 people nearby, i.e. the outback.
+News-driven scores barely moved: Russia -3%, Iran +1%.
+
+**Switching it off** is one constant, `EXPOSURE_WEIGHTING_ENABLED` in
+`exposure.ts`. A code constant rather than an environment variable
+because it changes published risk scores, so which state it was in on a
+given day has to be answerable from the commit history rather than from
+whatever two dashboards happened to be set to. Off resolves the SQL
+factor to a literal `1`, so the query shape never changes.
+
+The curve exists twice — JS for readers, SQL because the weight is summed
+in Postgres over thousands of rows — and both are generated from the same
+constants, with a regression test pinning the numbers.

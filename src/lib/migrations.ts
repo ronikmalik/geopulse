@@ -579,6 +579,18 @@ export const MIGRATION_STATEMENTS = [
   sql`CREATE INDEX IF NOT EXISTS alerts_fired_at_idx ON alerts (fired_at)`,
   sql`CREATE INDEX IF NOT EXISTS alerts_country_idx ON alerts (country)`,
   sql`CREATE INDEX IF NOT EXISTS alerts_tier_idx ON alerts (tier)`,
+  // 2026-09-22: exposure model — GeoNames settlements, plus the
+  // per-event head count derived from them. See src/lib/exposure.ts.
+  sql`CREATE TABLE IF NOT EXISTS population_center (
+    geoname_id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    country TEXT NOT NULL,
+    lat DOUBLE PRECISION NOT NULL,
+    lon DOUBLE PRECISION NOT NULL,
+    population INTEGER NOT NULL
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS population_center_lat_lon_idx ON population_center (lat, lon)`,
+  sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS population_exposed INTEGER`,
 ];
 
 export async function applyMigrations(): Promise<{ statementsApplied: number }> {

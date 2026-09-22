@@ -44,6 +44,8 @@ import { snapshotAircraftCounts, snapshotCommercialAircraftCounts } from "../src
 import { snapshotGpsJamming } from "../src/lib/gpsJammingHistory";
 import { snapshotChokepointTransits } from "../src/lib/chokepointHistory";
 import { syncSanctions } from "../src/lib/sanctions";
+import { loadPopulationCentersFromSource } from "../src/lib/exposure";
+import { backfillEventExposure } from "../src/lib/exposureBackfill";
 import { runAlertEvaluation } from "../src/lib/alertEngine";
 import { runAnomalyScan } from "../src/lib/anomalyScan";
 import { trainAndShadowPredict } from "../src/lib/riskModel";
@@ -172,6 +174,11 @@ const JOBS: Record<string, () => Promise<unknown>> = {
   // since last time — neither publisher offers a change feed, so the
   // diff has to be computed here. See src/lib/sanctions.ts.
   "sync-sanctions": () => syncSanctions(),
+  // One-off / on-demand: refresh the GeoNames settlement table the
+  // exposure model counts against. Not scheduled -- settlements do not
+  // move. See src/lib/exposure.ts.
+  "load-population-centers": () => loadPopulationCentersFromSource(),
+  "backfill-exposure": () => backfillEventExposure(),
   // Applies src/lib/migrations.ts — idempotent, safe to run any time a
   // schema change ships (the /api/admin/migrate route does the same).
   migrate: () => applyMigrations(),

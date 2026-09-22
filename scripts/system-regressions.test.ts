@@ -387,3 +387,68 @@ test("an alert with nothing to show does not fire", async () => {
   // So does a single driving event.
   assert.equal(hasEvidence({ ...empty, sourceFamilies: 1 }), true);
 });
+
+test("a hazard in an empty place outscores nothing; the same hazard in a city does not", async () => {
+  const { populationNear, exposureMultiplier } = await import("../src/lib/exposure");
+  // A capital and its suburbs, and an empty stretch 20 degrees away.
+  const centers = [
+    { lat: 35.68, lon: 139.69, population: 8_300_000 },
+    { lat: 35.45, lon: 139.63, population: 3_700_000 },
+    { lat: 35.61, lon: 140.11, population: 970_000 },
+  ];
+  const city = populationNear(35.68, 139.69, centers);
+  const desert = populationNear(15.0, 120.0, centers);
+  assert.ok(city > 10_000_000, `expected millions near the capital, got ${city}`);
+  assert.equal(desert, 0);
+  // The whole point of the model: the same magnitude, weighted differently.
+  assert.ok(exposureMultiplier(city) > exposureMultiplier(desert));
+  assert.equal(exposureMultiplier(desert), 0.4); // clamped floor
+  assert.equal(exposureMultiplier(city), 1.6); // clamped ceiling
+
+  // Distance decay: a city on the rim of the radius counts for less than
+  // one underfoot.
+  const near = populationNear(35.68, 139.69, [{ lat: 35.68, lon: 139.69, population: 100_000 }]);
+  const far = populationNear(35.68, 139.69, [{ lat: 36.48, lon: 139.69, population: 100_000 }]);
+  assert.ok(far < near && far > 0, `${far} should be between 0 and ${near}`);
+});
+
+test("unknown exposure is never treated as zero exposure", async () => {
+  const { exposureMultiplier } = await import("../src/lib/exposure");
+  // The distinction that keeps "we don't know" from becoming "this didn't
+  // matter": null is an event from before the model, -1 is the backfill's
+  // "checked, not applicable" sentinel. Both must be neutral, NOT the 0.4
+  // floor that a genuinely empty location earns.
+  assert.equal(exposureMultiplier(null), 1);
+  assert.equal(exposureMultiplier(-1), 1);
+  assert.equal(exposureMultiplier(0), 0.4);
+  // The anchor is the measured median hazard exposure, so a typical event
+  // is left exactly where it was.
+  assert.ok(Math.abs(exposureMultiplier(10_000) - 1) < 0.02);
+});
+
+test("exposure weighting applies to hazards only, never to political events", async () => {
+  const { isExposureWeighted } = await import("../src/lib/exposure");
+  for (const c of ["earthquake", "natural-disaster", "climate-hazard"]) {
+    assert.equal(isExposureWeighted(c), true, c);
+  }
+  // Weighting these by population would encode "events in crowded
+  // countries matter more", which is a bias, not a correction.
+  for (const c of ["political-instability", "humanitarian", "russia-ukraine", "us-iran", "other"]) {
+    assert.equal(isExposureWeighted(c), false, c);
+  }
+});
+
+test("the SQL and JS exposure curves are built from the same constants", async () => {
+  const { exposureMultiplierSqlExpr } = await import("../src/lib/exposure");
+  // The weight is summed in Postgres, so the curve exists twice. These
+  // are the numbers that must not drift apart; the algebra is pinned by
+  // the multiplier assertions above.
+  const expr = exposureMultiplierSqlExpr("population_exposed", "category");
+  assert.match(expr, /least\(1\.6/);
+  assert.match(expr, /greatest\(0\.4/);
+  assert.match(expr, /0\.3 \* log\(10/);
+  assert.match(expr, /10000/);
+  assert.match(expr, /'earthquake'/);
+  assert.match(expr, /population_exposed >= 0/);
+  assert.doesNotMatch(expr, /'political-instability'/);
+});

@@ -1,5 +1,6 @@
 import { sql, getTableColumns, and, eq, isNull, inArray, desc } from "drizzle-orm";
 import { getDb } from "@/db";
+import { EXPOSURE_WEIGHTING_ENABLED, exposureMultiplierSqlExpr } from "@/lib/exposure";
 import { events, type EventRow } from "@/db/schema";
 import { pillarForCategory, PILLAR_LIST, PILLAR_WEIGHT, COVERED_PILLARS, type PillarId } from "@/lib/pillars";
 import type { Category } from "@/lib/categories";
@@ -22,6 +23,14 @@ import { ALPHA2_TO_ALPHA3 } from "@/lib/iso3";
 const HALF_LIFE_DAYS = 3;
 const LOOKBACK_DAYS = 30;
 const DECAY_RATE = Math.LN2 / HALF_LIFE_DAYS;
+
+
+// Resolved once at module load: the exposure curve as SQL, or a literal
+// 1 when the model is switched off, so the query shape never changes and
+// the off state provably multiplies by exactly one.
+const EXPOSURE_FACTOR_SQL = EXPOSURE_WEIGHTING_ENABLED
+  ? exposureMultiplierSqlExpr("population_exposed", "category")
+  : "1";
 
 export interface CountryCategoryRow {
   country: string;
@@ -48,7 +57,13 @@ export async function getCountryCategoryRows(country?: string): Promise<CountryC
     .select({
       country: events.country,
       category: events.category,
-      decayedWeight: sql<number>`sum(${events.severity} * exp(-${sql.raw(String(DECAY_RATE))} * extract(epoch from (now() - ${events.publishedAt})) / 86400))`,
+      // Severity, decayed by age, and — for hazard categories only —
+      // scaled by how many people live where it happened. Before
+      // 2026-09-22 a magnitude-6 under empty desert and one under a
+      // capital produced the identical number here. See
+      // src/lib/exposure.ts, including why this is narrowed to hazards
+      // and why it can be switched off in one constant.
+      decayedWeight: sql<number>`sum(${events.severity} * exp(-${sql.raw(String(DECAY_RATE))} * extract(epoch from (now() - ${events.publishedAt})) / 86400) * ${sql.raw(EXPOSURE_FACTOR_SQL)})`,
       recent24h: sql<number>`sum(case when ${events.publishedAt} > now() - interval '24 hours' then ${events.severity} else 0 end)`,
       prior24h: sql<number>`sum(case when ${events.publishedAt} <= now() - interval '24 hours' and ${events.publishedAt} > now() - interval '48 hours' then ${events.severity} else 0 end)`,
       recent7d: sql<number>`sum(case when ${events.publishedAt} > now() - interval '7 days' then ${events.severity} else 0 end)`,

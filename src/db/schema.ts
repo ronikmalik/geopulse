@@ -164,6 +164,17 @@ export const events = pgTable(
     // (POST /api/admin/kill-switch with action=restore) clears this back to
     // NULL for every row, reversible at any time since nothing was deleted.
     preKillSwitchAt: timestamp("pre_kill_switch_at", { withTimezone: true }),
+    // Roughly how many people live within 100 km of this event's
+    // coordinates, distance-weighted (2026-09-22, src/lib/exposure.ts).
+    // Stored rather than computed on read so a score can be reconstructed
+    // from the row later, and so the 34k-settlement scan happens once per
+    // event instead of once per page view.
+    //
+    // NULL means not computed — an event with no usable coordinates, or
+    // one inserted before this existed. Null is NOT zero: an uncomputed
+    // event keeps its unweighted score rather than being quietly demoted
+    // for missing data.
+    populationExposed: integer("population_exposed"),
   },
   (table) => [
     index("events_created_at_idx").on(table.createdAt),
@@ -549,6 +560,30 @@ export const alerts = pgTable(
 
 export type AlertRow = typeof alerts.$inferSelect;
 export type NewAlertRow = typeof alerts.$inferInsert;
+
+// GeoNames settlements over 15,000 people (2026-09-22) — the reference
+// data the exposure model counts against, so a hazard's severity can be
+// weighted by whether anyone lives where it happened. 34,146 rows, ~3 MB.
+//
+// Static reference data, not a feed: settlements do not move and their
+// populations change on a scale of years, so nothing schedules a refresh
+// (see loadPopulationCentersFromSource in src/lib/exposure.ts). Licensed
+// CC BY 4.0 — attribution recorded in docs/API_SOURCES.md.
+export const populationCenter = pgTable(
+  "population_center",
+  {
+    geonameId: integer("geoname_id").primaryKey(),
+    name: text("name").notNull(),
+    country: text("country").notNull(), // ISO2
+    lat: doublePrecision("lat").notNull(),
+    lon: doublePrecision("lon").notNull(),
+    population: integer("population").notNull(),
+  },
+  (table) => [index("population_center_lat_lon_idx").on(table.lat, table.lon)],
+);
+
+export type PopulationCenterRow = typeof populationCenter.$inferSelect;
+export type NewPopulationCenterRow = typeof populationCenter.$inferInsert;
 
 // Project 1 (2026-09-09, user request for "real ML" beyond linear
 // regression): unsupervised clustering over feed_archive's existing
