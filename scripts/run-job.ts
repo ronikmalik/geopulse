@@ -44,6 +44,7 @@ import { snapshotAircraftCounts, snapshotCommercialAircraftCounts } from "../src
 import { snapshotGpsJamming } from "../src/lib/gpsJammingHistory";
 import { snapshotChokepointTransits } from "../src/lib/chokepointHistory";
 import { syncSanctions } from "../src/lib/sanctions";
+import { runAlertEvaluation } from "../src/lib/alertEngine";
 import { runAnomalyScan } from "../src/lib/anomalyScan";
 import { trainAndShadowPredict } from "../src/lib/riskModel";
 import { trainNarrativeClusters } from "../src/lib/narrativeTraining";
@@ -92,9 +93,19 @@ const JOBS: Record<string, () => Promise<unknown>> = {
   ingest: () => runIngest(),
   "review-pending": async () => {
     const review = await reviewPendingEvents();
+    // Alerts are evaluated here, after the gate and before the purge:
+    // newly approved rows are visible to the risk engine by now, and an
+    // alert written before the purge is served by the same regenerated
+    // cache as the events behind it. Caught — an alerting failure must
+    // never cost the review its cache purge, which is what keeps the
+    // live feed current.
+    const alertsResult = await runAlertEvaluation().catch((err) => {
+      console.error(`alert evaluation failed: ${err}`);
+      return null;
+    });
     const purge = await purgeReadCaches();
     if (!purge.purged) console.error(`read-cache purge skipped/failed: ${purge.detail}`);
-    return { ...review, purge };
+    return { ...review, alerts: alertsResult, purge };
   },
   "generate-briefs": () => generateBriefsForActiveCountries(),
   // Mirrors src/app/api/admin/snapshot/route.ts exactly: grading failure

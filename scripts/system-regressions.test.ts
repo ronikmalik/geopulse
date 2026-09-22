@@ -282,3 +282,71 @@ test("sanctions programmes map to a country only when the programme names one", 
   assert.equal(programCountry("eu", "TERR"), null);
   assert.equal(programCountry("ofac", null), null);
 });
+
+test("alert tiers: a standing crisis is not news, a real escalation is", async () => {
+  const { assessAlert } = await import("../src/lib/alertScoring");
+  // A country that has been at level 4 with heavy coverage for months.
+  // Scores high on every standing component and must still produce
+  // nothing, because nothing changed.
+  const standing = {
+    level: 4, previousLevel: 4, momentum: 70, previousMomentum: 70,
+    maxSeverity: 5, sourceFamilies: 6, anomalySignals: 2, previousAnomalySignals: 2, pillarsActive: 3,
+  };
+  assert.equal(assessAlert(standing).tier, null);
+  assert.ok(assessAlert(standing).score >= 55, "the standing score is high — the change gate is what stops it");
+
+  // The same country escalating one level: news.
+  assert.equal(assessAlert({ ...standing, previousLevel: 3 }).tier, "FLASH");
+  // A new unusual signal alone is enough to be worth looking at.
+  assert.ok(assessAlert({ ...standing, previousAnomalySignals: 1 }).tier !== null);
+});
+
+test("FLASH needs a rise, a serious level, and independent corroboration", async () => {
+  const { assessAlert } = await import("../src/lib/alertScoring");
+  const flashy = {
+    level: 4, previousLevel: 2, momentum: 85, previousMomentum: 40,
+    maxSeverity: 5, sourceFamilies: 4, anomalySignals: 2, previousAnomalySignals: 0, pillarsActive: 3,
+  };
+  assert.equal(assessAlert(flashy).tier, "FLASH");
+
+  // One outlet saying it, however loudly, is not FLASH.
+  const single = assessAlert({ ...flashy, sourceFamilies: 1 });
+  assert.notEqual(single.tier, "FLASH");
+  assert.ok(single.gateNotes.some((n) => n.includes("source family")), single.gateNotes.join("; "));
+
+  // A surge that never reaches a serious level is not FLASH either.
+  const lowLevel = assessAlert({ ...flashy, level: 2, previousLevel: 1 });
+  assert.notEqual(lowLevel.tier, "FLASH");
+});
+
+test("alert cooldown lengthens with repeats but never blocks an escalation", async () => {
+  const { shouldSuppress, cooldownHoursFor } = await import("../src/lib/alertScoring");
+  assert.deepEqual([0, 1, 2, 3, 9].map(cooldownHoursFor), [0, 6, 12, 24, 24]);
+  // Nothing before it: always goes out.
+  assert.equal(shouldSuppress("WATCH", null, null, 0).suppressed, false);
+  // Same tier, inside the window: held.
+  assert.equal(shouldSuppress("PRIORITY", "PRIORITY", 1, 1).suppressed, true);
+  // Same tier, past the window: goes out.
+  assert.equal(shouldSuppress("PRIORITY", "PRIORITY", 7, 1).suppressed, false);
+  // Escalation ignores the cooldown entirely — being told a country just
+  // got materially worse matters more than having mentioned it an hour ago.
+  assert.equal(shouldSuppress("FLASH", "PRIORITY", 0.1, 3).suppressed, false);
+  // De-escalation does not.
+  assert.equal(shouldSuppress("WATCH", "PRIORITY", 0.1, 1).suppressed, true);
+});
+
+test("a fired alert can be recomputed from its own stored inputs", async () => {
+  const { assessAlert } = await import("../src/lib/alertScoring");
+  // The columns the alerts table stores are exactly the scorer's inputs;
+  // this is what makes an alert auditable months later rather than an
+  // opinion with a colour. Values here are a real row from the first live
+  // evaluation (Russia, 2026-09-22).
+  const stored = {
+    level: 4, previousLevel: 3, momentum: 46, previousMomentum: 46,
+    maxSeverity: 4, sourceFamilies: 5, anomalySignals: 1, previousAnomalySignals: 1, pillarsActive: 2,
+  };
+  const again = assessAlert(stored);
+  assert.equal(again.tier, "PRIORITY");
+  assert.equal(again.score, 76);
+  assert.equal(again.components.reduce((s, c) => s + c.points, 0), again.score);
+});

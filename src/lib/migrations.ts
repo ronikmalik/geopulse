@@ -548,6 +548,37 @@ export const MIGRATION_STATEMENTS = [
   )`,
   sql`CREATE INDEX IF NOT EXISTS sanctions_delta_detected_at_idx ON sanctions_delta (detected_at)`,
   sql`CREATE INDEX IF NOT EXISTS sanctions_delta_country_idx ON sanctions_delta (country)`,
+  // 2026-09-22: the alert engine — see alerts/alertCountryState doc
+  // comments in schema.ts, and src/lib/alertScoring.ts for the rules.
+  sql`CREATE TABLE IF NOT EXISTS alert_country_state (
+    country TEXT PRIMARY KEY,
+    level SMALLINT NOT NULL,
+    momentum SMALLINT NOT NULL,
+    evaluated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`,
+  sql`ALTER TABLE alert_country_state ADD COLUMN IF NOT EXISTS anomaly_signals SMALLINT NOT NULL DEFAULT 0`,
+  sql`CREATE TABLE IF NOT EXISTS alerts (
+    id SERIAL PRIMARY KEY,
+    fired_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    tier TEXT NOT NULL,
+    country TEXT NOT NULL,
+    score INTEGER NOT NULL,
+    headline TEXT NOT NULL,
+    level SMALLINT NOT NULL,
+    previous_level SMALLINT NOT NULL,
+    momentum SMALLINT NOT NULL,
+    previous_momentum SMALLINT NOT NULL,
+    max_severity SMALLINT NOT NULL,
+    source_families SMALLINT NOT NULL,
+    anomaly_signals SMALLINT NOT NULL,
+    pillars_active SMALLINT NOT NULL,
+    components TEXT NOT NULL,
+    evidence TEXT NOT NULL,
+    suppressed_reason TEXT
+  )`,
+  sql`CREATE INDEX IF NOT EXISTS alerts_fired_at_idx ON alerts (fired_at)`,
+  sql`CREATE INDEX IF NOT EXISTS alerts_country_idx ON alerts (country)`,
+  sql`CREATE INDEX IF NOT EXISTS alerts_tier_idx ON alerts (tier)`,
 ];
 
 export async function applyMigrations(): Promise<{ statementsApplied: number }> {

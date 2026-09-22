@@ -641,3 +641,65 @@ this project's stated institutional direction.
 already runs the anomaly scan. `sync-sanctions.yml` (Wednesdays 17:00
 UTC) is the only new schedule, because a new wake-up costs real CU-hours
 and everything else could ride a burst that already happens.
+
+## 14. The alert engine (2026-09-22)
+
+Until now this system detected, verified, corroborated, scored and
+explained — and then waited to be looked at. `src/lib/alertEngine.ts` and
+`src/lib/alertScoring.ts` are the part that reaches somebody.
+
+**The unit is a country situation, not an article.** One alert says
+"Country X changed, here is what changed, here is the evidence", anchored
+to the events that drove it. Alerting per article would reproduce the
+feed with a louder voice, which is the problem rather than the fix.
+
+**Nothing decides a tier except arithmetic.** A tier is a threshold over
+a weighted sum of six stored measurements, plus hard gates. No language
+model participates, deliberately: an alert a model decided was important
+cannot be audited, tuned, or defended to somebody asking why they were
+woken up. Every input is stored on the alert row beside the verdict, so
+`assessAlert` can recompute a months-old alert from its own row and must
+land on the same tier — asserted in `scripts/system-regressions.test.ts`.
+
+**The change gate is what makes it usable.** A dry run against live state
+before this shipped made the case: with nothing changing anywhere in the
+world, 14 countries still cleared a tier threshold on standing badness
+alone — severity and volume are high every day in a war zone, so scoring
+alone ranks a grinding conflict above a fresh coup. So no tier is
+reachable without movement in one of the three state variables tracked
+between runs (level, momentum, anomaly-signal count), held in
+`alert_country_state`. `country_state_history` could not serve that
+purpose: it is written once a day and the Trends tab charts it, whereas
+alerts are evaluated every pipeline cycle.
+
+**Tiers and their gates.**
+
+| Tier | Score | Additional gates |
+| --- | --- | --- |
+| FLASH | 85 | level must have RISEN, to at least 3, with 2+ independent source families |
+| PRIORITY | 55 | 2+ independent source families |
+| WATCH | 35 | change gate only |
+| ROUTINE | 20 | change gate only |
+
+Independence is counted by source *family*, and every GDELT contribution
+collapses to one: an aggregator echoing itself is not corroboration.
+
+**Repeat suppression** is the tiering idea from Crucix's alert layer —
+the concept only, written from scratch, since that project is AGPL and
+this one carries no licence. First alert immediately, then 6h, 12h, 24h.
+An escalation always escapes suppression: being told a level-2 country is
+now level-4 matters more than having mentioned it an hour ago. Suppressed
+rows are still written, with their reason, because a suppression rate
+that creeps up is how a threshold gets found to need tuning.
+
+**Verified live before shipping.** Cold start fired nothing (nothing can
+have changed yet). Simulated escalations produced 3 PRIORITY and 2 WATCH
+from 203 countries: Russia and Ukraine and Iran on level rises with 5, 6
+and 3 independent families; Cameroon and Japan on momentum surges held
+down to WATCH by the corroboration gate, each single-family. Japan's
+carried two corroborating anomaly signals and an M5.1 earthquake as
+evidence. A repeat pass suppressed all three PRIORITY alerts at 0.0h
+against a 6h cooldown.
+
+**Cost.** Rides `review-pending` inside the chained job, so no new
+database wake-up. Retention is 180 days.

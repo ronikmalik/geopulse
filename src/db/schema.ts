@@ -481,6 +481,75 @@ export const sanctionsDelta = pgTable(
 export type SanctionsDeltaRow = typeof sanctionsDelta.$inferSelect;
 export type NewSanctionsDeltaRow = typeof sanctionsDelta.$inferInsert;
 
+// What the alert engine saw for each country the last time it looked
+// (2026-09-22). The engine needs a "since when" to say anything changed,
+// and country_state_history cannot be it: that table is written once a
+// day and the Trends tab charts it, whereas alerts are evaluated after
+// every review cycle. One row per country, upserted — ~200 rows total.
+export const alertCountryState = pgTable("alert_country_state", {
+  country: text("country").primaryKey(),
+  level: smallint("level").notNull(),
+  momentum: smallint("momentum").notNull(),
+  // The third state variable the change gate reads, alongside level and
+  // momentum — a country picking up a new unusual signal is news even
+  // when its score has not moved.
+  anomalySignals: smallint("anomaly_signals").notNull().default(0),
+  evaluatedAt: timestamp("evaluated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type AlertCountryStateRow = typeof alertCountryState.$inferSelect;
+export type NewAlertCountryStateRow = typeof alertCountryState.$inferInsert;
+
+// One row per alert the engine fired (2026-09-22) — the product's first
+// push surface, and its own audit trail.
+//
+// Every INPUT to the decision is stored beside the verdict, not just the
+// verdict: level and previous level, momentum and previous momentum, max
+// severity, independent source families, anomaly signals, active pillars,
+// the score, and the individual scoring components as JSON. That is the
+// whole point. An alert nobody can reconstruct six months later is an
+// opinion; this one can be recomputed from its own row by
+// src/lib/alertScoring.ts's pure `assessAlert` and must land on the same
+// tier, which is exactly what the regression tests assert.
+//
+// `suppressedReason` is set on rows the cooldown held back. They are
+// still written, because "we saw this and chose not to push it" is
+// evidence too — and because a suppressed-alert rate that creeps upward
+// is how you find out a threshold needs tuning.
+export const alerts = pgTable(
+  "alerts",
+  {
+    id: serial("id").primaryKey(),
+    firedAt: timestamp("fired_at", { withTimezone: true }).notNull().defaultNow(),
+    tier: text("tier").notNull(), // FLASH | PRIORITY | WATCH | ROUTINE
+    country: text("country").notNull(),
+    score: integer("score").notNull(),
+    headline: text("headline").notNull(),
+    level: smallint("level").notNull(),
+    previousLevel: smallint("previous_level").notNull(),
+    momentum: smallint("momentum").notNull(),
+    previousMomentum: smallint("previous_momentum").notNull(),
+    maxSeverity: smallint("max_severity").notNull(),
+    sourceFamilies: smallint("source_families").notNull(),
+    anomalySignals: smallint("anomaly_signals").notNull(),
+    pillarsActive: smallint("pillars_active").notNull(),
+    // JSON: [{ name, points, detail }] — the scoring breakdown as shown.
+    components: text("components").notNull(),
+    // JSON: [{ id, title, url, source, severity }] — the events that drove
+    // it, so an alert always arrives with its evidence attached.
+    evidence: text("evidence").notNull(),
+    suppressedReason: text("suppressed_reason"),
+  },
+  (table) => [
+    index("alerts_fired_at_idx").on(table.firedAt),
+    index("alerts_country_idx").on(table.country),
+    index("alerts_tier_idx").on(table.tier),
+  ],
+);
+
+export type AlertRow = typeof alerts.$inferSelect;
+export type NewAlertRow = typeof alerts.$inferInsert;
+
 // Project 1 (2026-09-09, user request for "real ML" beyond linear
 // regression): unsupervised clustering over feed_archive's existing
 // embeddings (src/lib/narrativeClustering.ts's spherical k-means), read as
