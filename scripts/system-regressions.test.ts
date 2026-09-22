@@ -350,3 +350,18 @@ test("a fired alert can be recomputed from its own stored inputs", async () => {
   assert.equal(again.score, 76);
   assert.equal(again.components.reduce((s, c) => s + c.points, 0), again.score);
 });
+
+test("an overloaded model API stops the brief run instead of grinding through 120 countries", async () => {
+  const { isUpstreamUnavailableStatus } = await import("../src/lib/countryBriefs");
+  // 2026-09-22: Gemini returned 503 "high demand" continuously and the
+  // loop treated it as a per-country miss, walking the ranked list at up
+  // to 20s each until the runner's job ceiling killed the workflow.
+  assert.equal(isUpstreamUnavailableStatus(503), true);
+  assert.equal(isUpstreamUnavailableStatus(500), true);
+  assert.equal(isUpstreamUnavailableStatus(429), true);
+  // Not the upstream's capacity — this request or this key. Trying the
+  // next country is still the right move.
+  assert.equal(isUpstreamUnavailableStatus(400), false);
+  assert.equal(isUpstreamUnavailableStatus(403), false);
+  assert.equal(isUpstreamUnavailableStatus(404), false);
+});

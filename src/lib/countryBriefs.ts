@@ -94,7 +94,34 @@ interface GenerateContentResponse {
   candidates?: { content?: { parts?: { text?: string }[] } }[];
 }
 
-async function callGemini(prompt: string, apiKey: string): Promise<string | null> {
+// Why this distinguishes failure kinds (2026-09-22): it used to return a
+// bare null, and the loop below treated "Gemini is down" exactly like
+// "this one country produced nothing" — skip it, try the next country.
+// That is fine for one bad country and pathological for an outage. On
+// 2026-09-22 Gemini returned 503 "high demand" continuously; the loop
+// walked the ranked list spending up to REQUEST_TIMEOUT_MS on each of
+// ~120 countries and was still going when the runner's 5-minute job
+// ceiling killed it, so the workflow reported a red failure for what was
+// really somebody else's temporary outage.
+//
+// "unavailable" means the upstream itself is refusing right now (503, or
+// 429 rate limiting) and the next country will get the same answer.
+// "error" means this one request failed and another might not.
+type GeminiCallResult =
+  | { kind: "ok"; text: string }
+  | { kind: "unavailable"; detail: string }
+  | { kind: "error"; detail: string };
+
+// The decision point, exported so it can be tested directly: which HTTP
+// statuses mean "the next country will get the same answer". 5xx is the
+// overload case that caused this; 429 is rate limiting, where marching
+// through more countries actively makes it worse. A 400 or 403 is about
+// this request or this key, and is not a reason to abandon the run.
+export function isUpstreamUnavailableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+async function callGemini(prompt: string, apiKey: string): Promise<GeminiCallResult> {
   let res: Response;
   try {
     res = await fetch(`${GENERATE_ENDPOINT}?key=${apiKey}`, {
@@ -104,23 +131,37 @@ async function callGemini(prompt: string, apiKey: string): Promise<string | null
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
-    console.error(`Brief generation request failed: ${err}`);
-    return null;
+    // A timeout or connection reset is indistinguishable from an
+    // overloaded upstream from here, and retrying it across 120
+    // countries has the same cost, so it counts toward giving up.
+    return { kind: "unavailable", detail: String(err) };
   }
   if (!res.ok) {
     const errBody = await res.text().catch(() => "");
-    console.error(`Brief generation fetch failed: ${res.status} ${errBody.slice(0, 200)}`);
-    return null;
+    const detail = `${res.status} ${errBody.slice(0, 200)}`;
+    console.error(`Brief generation fetch failed: ${detail}`);
+    if (isUpstreamUnavailableStatus(res.status)) return { kind: "unavailable", detail };
+    return { kind: "error", detail };
   }
   const data = (await res.json()) as GenerateContentResponse;
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  return text?.trim() || null;
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  return text ? { kind: "ok", text } : { kind: "error", detail: "empty completion" };
 }
 
 export interface GenerateBriefsResult {
   generated: number;
   skipped: number;
+  // Set when the run stopped early because the model API was refusing.
+  // Reported rather than thrown: an upstream outage is not a defect in
+  // this repo, and failing the workflow for it trains everyone to ignore
+  // a red cross. The next cycle (~30 min) retries from scratch.
+  upstreamUnavailable?: string;
 }
+
+// Two consecutive "the upstream is refusing" answers is enough to
+// conclude the third country will fare no better. One is allowed to be
+// bad luck.
+const MAX_CONSECUTIVE_UNAVAILABLE = 2;
 
 export async function generateBriefsForActiveCountries(): Promise<GenerateBriefsResult> {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -136,6 +177,7 @@ export async function generateBriefsForActiveCountries(): Promise<GenerateBriefs
   const active = summaries.filter((s) => s.eventCount > 0).sort((a, b) => b.score - a.score);
 
   let skipped = 0;
+  let consecutiveUnavailable = 0;
 
   for (const s of active) {
     try {
@@ -157,15 +199,25 @@ export async function generateBriefsForActiveCountries(): Promise<GenerateBriefs
         continue;
       }
 
-      const text = await callGemini(buildPrompt(s.country, top), apiKey);
-      if (!text) {
+      const call = await callGemini(buildPrompt(s.country, top), apiKey);
+      if (call.kind !== "ok") {
         skipped++;
+        if (call.kind === "unavailable") {
+          consecutiveUnavailable++;
+          if (consecutiveUnavailable >= MAX_CONSECUTIVE_UNAVAILABLE) {
+            console.error(
+              `Brief generation stopping early: model API unavailable ${consecutiveUnavailable}x (${call.detail})`,
+            );
+            return { generated: 0, skipped, upstreamUnavailable: call.detail };
+          }
+        }
         continue;
       }
+      consecutiveUnavailable = 0;
 
       await db.insert(countryBriefs).values({
         country: s.country,
-        briefText: text,
+        briefText: call.text,
         eventCount: top.length,
         model: BRIEF_MODEL,
       });
