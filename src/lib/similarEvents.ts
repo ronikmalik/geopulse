@@ -96,7 +96,7 @@ export async function getSimilarEvents(eventId: number): Promise<SimilarEvent[]>
       country: feedArchive.country,
       severity: feedArchive.severity,
       publishedAt: feedArchive.publishedAt,
-      distance: sql<number>`${feedArchive.embedding} <=> ${vectorLiteral}::vector`,
+      distance: sql<number>`${feedArchive.embedding} <=> ${vectorLiteral}::halfvec`,
     })
     .from(feedArchive)
     .where(
@@ -107,7 +107,7 @@ export async function getSimilarEvents(eventId: number): Promise<SimilarEvent[]>
         notInArray(feedArchive.source, [...STRUCTURAL_SOURCES]),
       ),
     )
-    .orderBy(sql`${feedArchive.embedding} <=> ${vectorLiteral}::vector`)
+    .orderBy(sql`${feedArchive.embedding} <=> ${vectorLiteral}::halfvec`)
     .limit(SIMILAR_LIMIT);
 
   return rows.map((r) => ({

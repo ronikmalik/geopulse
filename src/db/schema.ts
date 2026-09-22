@@ -30,6 +30,42 @@ const vector = customType<{ data: number[]; driverData: string; config: { dimens
   },
 });
 
+// Same thing at half the bytes (2026-09-22). pgvector's `halfvec` stores
+// each component as a 16-bit float instead of 32, so a 768-dim embedding
+// costs 1,536 bytes of column plus a correspondingly smaller HNSW index,
+// not 3,072. The wire format is byte-identical to `vector` ("[0.1,...]"),
+// so to/fromDriver stay plain JSON and every JS-side reader
+// (textClassifierTraining, narrativeNoveltyScoring, …) is unaffected.
+//
+// Why: the two tables this is used on are 98 MB of the database's 130 MB,
+// and Neon's free plan stops at 500 MB — see docs/ARCHITECTURE.md §12.
+// Halving the vectors roughly doubles how long this project can keep
+// accumulating the historical corpus that everything downstream trains on.
+//
+// The precision cost is real but not meaningful here: float16 holds ~3
+// decimal digits, embedding components sit in [-1, 1], and every consumer
+// uses these vectors for *ranking* by cosine distance, never for an exact
+// value. Verified on live data before shipping: for 8 probe rows, the
+// top-10 neighbour SET was identical before and after, distances agreed
+// to within 2.3e-5, and the only ordering changes were two exact-tie
+// pairs swapping places — which is already nondeterministic. Measured
+// effect: the database went from 130 MB to 86 MB in one migration.
+// The narrative-cluster centroids and the
+// calibration-pattern vectors stay `vector`: 101 rows between them, so
+// there is nothing to save, and the centroids are averaged in JS where
+// the extra precision is free.
+const halfvec = customType<{ data: number[]; driverData: string; config: { dimensions: number } }>({
+  dataType(config) {
+    return `halfvec(${config?.dimensions ?? 768})`;
+  },
+  toDriver(value: number[]): string {
+    return JSON.stringify(value);
+  },
+  fromDriver(value: string): number[] {
+    return JSON.parse(value);
+  },
+});
+
 export const events = pgTable(
   "events",
   {
@@ -546,7 +582,8 @@ export const classificationArchive = pgTable(
     // were actually KEPT (inserted into events), so the ~2:1 majority of
     // this table (kept=false, the negative-label pool a relevance
     // classifier needs) has no embedding anywhere else to reuse.
-    embedding: vector("embedding", { dimensions: 768 }),
+    // `halfvec` since 2026-09-22 — see the type's own comment above.
+    embedding: halfvec("embedding", { dimensions: 768 }),
   },
   (table) => [
     index("classification_archive_kept_idx").on(table.kept),
@@ -660,7 +697,8 @@ export const feedArchive = pgTable(
     // rows that have since aged out of events' 30-day window or were
     // folded in as a cross-outlet duplicate), and computing/storing the
     // embedding once here avoids doing it twice for the same content.
-    embedding: vector("embedding", { dimensions: 768 }),
+    // `halfvec` since 2026-09-22 — see the type's own comment above.
+    embedding: halfvec("embedding", { dimensions: 768 }),
   },
   (table) => [
     index("feed_archive_country_idx").on(table.country),

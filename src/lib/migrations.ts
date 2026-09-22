@@ -90,8 +90,16 @@ export const MIGRATION_STATEMENTS = [
   sql`ALTER TABLE events ALTER COLUMN review_status SET DEFAULT 'pending'`,
   sql`CREATE INDEX IF NOT EXISTS events_review_status_idx ON events (review_status)`,
   sql`CREATE EXTENSION IF NOT EXISTS vector`,
-  sql`ALTER TABLE feed_archive ADD COLUMN IF NOT EXISTS embedding vector(768)`,
-  sql`CREATE INDEX IF NOT EXISTS feed_archive_embedding_idx ON feed_archive USING hnsw (embedding vector_cosine_ops)`,
+  // 2026-09-22: `vector(768)` → `halfvec(768)` here and on
+  // classification_archive below. These two statements are the one
+  // documented exception to the "never edit a shipped statement" rule at
+  // the top of this file, and the exception is the whole point: a fresh
+  // database and the live one have to converge on the SAME column type,
+  // or the HNSW index at the end of this list can only be valid on one of
+  // them. Creating the column as halfvec on a fresh database and
+  // converting it in place on an existing one is what makes that true.
+  // See the halfvec customType's doc comment in schema.ts for why.
+  sql`ALTER TABLE feed_archive ADD COLUMN IF NOT EXISTS embedding halfvec(768)`,
   sql`CREATE TABLE IF NOT EXISTS ai_usage (
     id SERIAL PRIMARY KEY,
     date TEXT NOT NULL,
@@ -144,7 +152,8 @@ export const MIGRATION_STATEMENTS = [
   // Project 3 (2026-09-09) — see classificationArchive.embedding's own doc
   // comment in schema.ts for why this needs its own backfill, separate
   // from feed_archive.embedding.
-  sql`ALTER TABLE classification_archive ADD COLUMN IF NOT EXISTS embedding vector(768)`,
+  // halfvec since 2026-09-22 — see the feed_archive.embedding statement above.
+  sql`ALTER TABLE classification_archive ADD COLUMN IF NOT EXISTS embedding halfvec(768)`,
   sql`CREATE TABLE IF NOT EXISTS classifier_calibration (
     id SERIAL PRIMARY KEY,
     pattern TEXT NOT NULL UNIQUE,
@@ -477,6 +486,34 @@ export const MIGRATION_STATEMENTS = [
   )`,
   sql`CREATE INDEX IF NOT EXISTS model_registry_family_idx ON model_registry (family)`,
   sql`CREATE INDEX IF NOT EXISTS model_registry_trained_at_idx ON model_registry (trained_at)`,
+  // 2026-09-22: halve the storage cost of the two embedding columns by
+  // converting them from `vector` (float32) to `halfvec` (float16). These
+  // two tables were 98 MB of a 130 MB database against Neon Free's 500 MB
+  // ceiling, and the corpus they hold is what every model downstream
+  // trains on — so the cheapest way to keep accumulating it is to make
+  // each row cost less, not to start throwing rows away.
+  //
+  // Idempotent by inspecting the column's current type rather than by
+  // IF NOT EXISTS, since ALTER ... TYPE has no such form: on a database
+  // that is already halfvec (including a fresh one, built by the ADD
+  // COLUMN statements above) the block does nothing. The index has to be
+  // dropped first — an HNSW index built with `vector_cosine_ops` cannot
+  // survive its column becoming halfvec — and is rebuilt by the statement
+  // after this one, under the same name it has always had.
+  sql`DO $$
+    BEGIN
+      IF (SELECT udt_name FROM information_schema.columns
+            WHERE table_name = 'feed_archive' AND column_name = 'embedding') = 'vector' THEN
+        DROP INDEX IF EXISTS feed_archive_embedding_idx;
+        ALTER TABLE feed_archive ALTER COLUMN embedding TYPE halfvec(768);
+      END IF;
+      IF (SELECT udt_name FROM information_schema.columns
+            WHERE table_name = 'classification_archive' AND column_name = 'embedding') = 'vector' THEN
+        ALTER TABLE classification_archive ALTER COLUMN embedding TYPE halfvec(768);
+      END IF;
+    END
+  $$`,
+  sql`CREATE INDEX IF NOT EXISTS feed_archive_embedding_idx ON feed_archive USING hnsw (embedding halfvec_cosine_ops)`,
 ];
 
 export async function applyMigrations(): Promise<{ statementsApplied: number }> {
