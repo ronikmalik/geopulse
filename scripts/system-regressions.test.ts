@@ -452,3 +452,106 @@ test("the SQL and JS exposure curves are built from the same constants", async (
   assert.match(expr, /population_exposed >= 0/);
   assert.doesNotMatch(expr, /'political-instability'/);
 });
+
+// ---------------------------------------------------------------------
+// Scoring version 3 (2026-09-23): stories not articles, corroboration,
+// sensor saturation, recalibrated Pulse Levels. See src/lib/scoringMethod.ts.
+
+test("corroboration rewards independent confirmation, with diminishing and capped returns", async () => {
+  const { corroborationMultiplier, CORROBORATION_MAX } = await import("../src/lib/scoringMethod");
+  assert.equal(corroborationMultiplier(0), 1);
+  assert.equal(corroborationMultiplier(-3), 1);
+  assert.equal(corroborationMultiplier(NaN), 1);
+  assert.ok(Math.abs(corroborationMultiplier(1) - 1.2) < 1e-9);
+  assert.ok(Math.abs(corroborationMultiplier(3) - 1.4) < 1e-9);
+  assert.equal(corroborationMultiplier(7), CORROBORATION_MAX);
+  assert.equal(corroborationMultiplier(500), CORROBORATION_MAX);
+  // The point of the change: five outlets carrying one story used to
+  // score 5x. Now it scores well under 2x.
+  assert.ok(corroborationMultiplier(4) < 2);
+});
+
+test("corroboration SQL and JS agree on the curve", async () => {
+  const { corroborationMultiplierSqlExpr, CORROBORATION_STEP, CORROBORATION_MAX } = await import("../src/lib/scoringMethod");
+  const expr = corroborationMultiplierSqlExpr(`"c"."sources"`);
+  assert.ok(expr.includes(`least(${CORROBORATION_MAX},`));
+  assert.ok(expr.includes(`${CORROBORATION_STEP} * log(2,`));
+  // A story with no duplicates has no corroboration row at all (LEFT
+  // JOIN -> NULL); it must mean "zero extra sources", not NULL weight.
+  assert.ok(expr.includes(`coalesce("c"."sources", 0)`));
+});
+
+test("one automated sensor can make a country High, never Extreme, on its own", async () => {
+  const { saturateSensorWeight, SENSOR_SATURATION } = await import("../src/lib/scoringMethod");
+  const { weightToThreatLevel } = await import("../src/lib/threat");
+  const { PILLAR_WEIGHT } = await import("../src/lib/pillars");
+  const hazards = PILLAR_WEIGHT["natural-biological-hazards"];
+  // Brazil, 2026-09-23: 189 FIRMS clusters, raw decayed load ~138.
+  const brazilFires = saturateSensorWeight(138) * hazards;
+  assert.equal(weightToThreatLevel(brazilFires), 3);
+  // However much the instrument reports.
+  assert.ok(saturateSensorWeight(1e9) <= SENSOR_SATURATION);
+  assert.ok(weightToThreatLevel(saturateSensorWeight(1e9) * hazards) < 4);
+  // A handful of detections still counts almost in full.
+  assert.ok(saturateSensorWeight(2) > 1.9);
+  assert.equal(saturateSensorWeight(0), 0);
+  assert.equal(saturateSensorWeight(-5), 0);
+});
+
+test("news is never saturated; only the named detection feeds are", async () => {
+  const { isSensorSource } = await import("../src/lib/scoringMethod");
+  for (const s of ["firms", "usgs", "eonet"]) assert.ok(isSensorSource(s), s);
+  for (const s of ["gdelt", "gdacs", "rss:bbc-world", "telegram:kpszsu", "ioda"]) assert.ok(!isSensorSource(s), s);
+});
+
+test("Pulse Level thresholds mean what threat.ts says they mean", async () => {
+  const { weightToThreatLevel } = await import("../src/lib/threat");
+  const { PILLAR_WEIGHT } = await import("../src/lib/pillars");
+  // Steady-state load of r severity-3 security stories a day under a
+  // 3-day half-life: r * 3 * 1.5 / (ln2 / 3).
+  const steady = (perDay: number) => (perDay * 3 * PILLAR_WEIGHT["geopolitical-security"]) / (Math.LN2 / 3);
+  assert.equal(weightToThreatLevel(steady(4)), 4);
+  assert.equal(weightToThreatLevel(steady(3)), 3);
+  assert.equal(weightToThreatLevel(steady(1.1)), 3);
+  assert.equal(weightToThreatLevel(steady(0.2)), 1);
+  assert.equal(weightToThreatLevel(steady(0.25)), 2);
+});
+
+test("a sensor spanning two categories of one pillar is saturated once, not per category", async () => {
+  const { aggregateByCountryAndPillar } = await import("../src/lib/risk");
+  const { SENSOR_SATURATION } = await import("../src/lib/scoringMethod");
+  const { PILLAR_WEIGHT } = await import("../src/lib/pillars");
+  const row = (category: string) => ({
+    country: "BR", category, sensorSource: "firms", decayedWeight: 500,
+    recent24h: 0, prior24h: 0, recent7d: 0, prior7d: 0, eventCount: 1, lastEventAt: "2026-09-23",
+  });
+  const out = aggregateByCountryAndPillar([row("natural-disaster"), row("earthquake")]);
+  const w = out.get("BR")!.get("natural-biological-hazards")!.decayedWeight;
+  assert.ok(w <= SENSOR_SATURATION * PILLAR_WEIGHT["natural-biological-hazards"] + 1e-9);
+});
+
+test("USGS places resolve to the country that owns them", async () => {
+  const { usgsPlaceCountry } = await import("../src/lib/sources/usgs");
+  assert.equal(usgsPlaceCountry("41 km SW of Karluk, Alaska"), "US");
+  assert.equal(usgsPlaceCountry("5 km N of Ridgecrest, CA"), "US");
+  assert.equal(usgsPlaceCountry("off the coast of Oregon"), "US");
+  assert.equal(usgsPlaceCountry("12 km E of Dili, Timor Leste"), "TL");
+  // "Gambiran" contains "iran": a live event was once filed under Iran.
+  assert.equal(usgsPlaceCountry("3 km ESE of Gambiran Satu, Indonesia"), "ID");
+  // USGS writes the Caucasus country as plain "Georgia".
+  assert.equal(usgsPlaceCountry("20 km N of Tbilisi, Georgia"), "GE");
+  // Open ocean stays unplaced rather than guessed.
+  assert.equal(usgsPlaceCountry("southern Mid-Atlantic Ridge"), null);
+});
+
+test("feed cards lift Telegram attribution out of the text without dropping the disclosure", async () => {
+  const { splitAttribution } = await import("../src/lib/displayText");
+  const t = splitAttribution("Ukrainian Air Force (official) [translated from Ukrainian]: Attack UAVs toward Zaporizhzhia", "telegram:kpszsu");
+  assert.equal(t.body, "Attack UAVs toward Zaporizhzhia");
+  assert.equal(t.translatedFrom, "Ukrainian");
+  assert.equal(splitAttribution("PressTV (Iranian state media): Statement on talks", "telegram:presstv").translatedFrom, null);
+  assert.equal(splitAttribution("PressTV (Iranian state media): Statement on talks", "telegram:presstv").body, "Statement on talks");
+  // News is left exactly as stored — a colon in a headline is content.
+  const news = "Explainer: what the ceasefire means";
+  assert.equal(splitAttribution(news, "rss:bbc-world").body, news);
+});

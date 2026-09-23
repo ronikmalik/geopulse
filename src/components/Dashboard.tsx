@@ -104,14 +104,13 @@ const TAB_META: { id: DashboardTab; label: string; dot: string }[] = [
 export default function Dashboard(props: DashboardProps) {
   const { activeTab, onTabChange, showTabBar = true } = props;
 
-  // No count badge for "trends" — it has no single natural count to show,
-  // unlike the other tabs (feed length, country count, active layers, forex
-  // pairs).
+  // Only a count that tells the reader something earns a badge. "Pulse
+  // 203" was the number of countries in the world and "Feed 100" was the
+  // client buffer's cap — constants dressed as data, and wide enough to
+  // push "Live Wire" onto a second line. How many layers are switched on
+  // is the one tab count that changes because of something the user did.
   const tabCount: Partial<Record<DashboardTab, number>> = {
-    feed: props.events.length,
-    risk: props.countryScores.length,
     layers: props.activeDataLayers.size,
-    forex: props.forex?.rates.length ?? 0,
   };
 
   return (
@@ -136,8 +135,8 @@ export default function Dashboard(props: DashboardProps) {
                     : "text-neutral-600 hover:text-red-700"
                 }`}
               >
-                <span className="flex items-center gap-1.5">
-                  <span className={`h-1.5 w-1.5 rounded-full ${tab.dot}`} />
+                <span className="flex items-center gap-1.5 whitespace-nowrap">
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tab.dot}`} />
                   {tab.label}
                   {!!count && count > 0 && <span className="text-neutral-600">{count}</span>}
                 </span>

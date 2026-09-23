@@ -51,3 +51,27 @@ export function stripOutletSuffix(text: string): string {
   }
   return out;
 }
+
+// Telegram rows are stored as "<channel label>[ [translated from X]]: <post>"
+// (src/lib/sources/telegram.ts) — attribution and the machine-translation
+// disclosure baked into the text, by policy (docs/TELEGRAM_SOURCES.md,
+// "Framing discipline"). On a feed card that repeats the source line
+// printed directly beneath it and spends most of the two-line clamp on
+// boilerplate. This splits the two apart for DISPLAY so the card can show
+// the post itself, with the disclosure as its own always-visible badge —
+// both disclosures survive, they just stop competing with the content.
+// Only the exact stored shape is recognised; anything else is returned
+// whole, with no badge.
+const TELEGRAM_ATTRIBUTION = /^(.{2,80}?)(?: \[translated from ([^\]]{2,30})\])?: ([\s\S]+)$/;
+
+export interface AttributedText {
+  body: string;
+  translatedFrom: string | null;
+}
+
+export function splitAttribution(text: string, source: string): AttributedText {
+  if (!source.startsWith("telegram:")) return { body: text, translatedFrom: null };
+  const m = TELEGRAM_ATTRIBUTION.exec(text.trim());
+  if (!m) return { body: text, translatedFrom: null };
+  return { body: m[3].trim(), translatedFrom: m[2] ?? null };
+}

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { GeoEvent } from "@/lib/types";
 import { CATEGORY_LABELS, type Category } from "@/lib/categories";
 import { sourceLabel } from "@/lib/sourceLabels";
-import { stripOutletSuffix } from "@/lib/displayText";
+import { splitAttribution, stripOutletSuffix } from "@/lib/displayText";
 
 interface FeedPanelProps {
   events: GeoEvent[];
@@ -184,6 +184,7 @@ export default function FeedPanel({
         {sorted.map((event) => {
           const isSelected = selectedId === event.id;
           const sourceCount = event.sourceCount ?? 0;
+          const attributed = splitAttribution(event.summary, event.source);
           return (
           <article
             key={event.id}
@@ -220,9 +221,19 @@ export default function FeedPanel({
               )}
             </div>
             <p className={`mt-1 text-sm text-neutral-300 ${isSelected ? "" : "line-clamp-2"}`}>
-              {stripOutletSuffix(event.summary)}
+              {stripOutletSuffix(attributed.body)}
             </p>
-            <p className="mt-1.5 text-[11px] text-neutral-400">{sourceLabel(event.source)}</p>
+            <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-neutral-400">
+              {sourceLabel(event.source)}
+              {attributed.translatedFrom && (
+                <span
+                  className="rounded border border-amber-900/70 px-1 font-mono text-[9px] uppercase tracking-wider text-amber-500/90"
+                  title="Machine-translated. The original post is linked below."
+                >
+                  Translated · {attributed.translatedFrom}
+                </span>
+              )}
+            </p>
             <div className="mt-1.5 flex gap-0.5" role="img" aria-label={`Event severity ${event.severity} of 5`}>
               {Array.from({ length: 5 }).map((_, i) => (
                 <span

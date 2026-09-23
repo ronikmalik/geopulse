@@ -58,13 +58,18 @@ interface Center {
   population: number;
 }
 
+export interface NamedCenter extends Center {
+  name: string;
+  country: string;
+}
+
 // 34k rows at ~24 bytes each is under a megabyte of process memory, and
 // loading them once beats issuing a bounding-box query per event — the
 // backfill alone would otherwise be 8,000 round trips to a database on a
 // metered compute plan.
-let cache: Center[] | null = null;
+let cache: NamedCenter[] | null = null;
 
-export async function loadPopulationCenters(): Promise<Center[]> {
+export async function loadPopulationCenters(): Promise<NamedCenter[]> {
   if (cache) return cache;
   const db = getDb();
   const rows = await db
@@ -72,6 +77,8 @@ export async function loadPopulationCenters(): Promise<Center[]> {
       lat: populationCenter.lat,
       lon: populationCenter.lon,
       population: populationCenter.population,
+      name: populationCenter.name,
+      country: populationCenter.country,
     })
     .from(populationCenter);
   cache = rows;
@@ -110,6 +117,81 @@ export function populationNear(lat: number, lon: number, centers: Center[]): num
     total += c.population * (1 - d / EXPOSURE_RADIUS_KM);
   }
   return Math.round(total);
+}
+
+// Only the settlements that can matter to the given points: everything
+// inside each point's EXPOSURE_RADIUS_KM bounding box, fetched in one
+// query. The incremental pass runs after every ingest, usually for a
+// handful of new events; reading all 34k settlements each time would
+// cost ~1.3 MB of Neon egress per run (~60 MB a day) to use a few dozen
+// rows. There is deliberately no lat/lon index — a sequential scan of 34k
+// narrow rows is a few milliseconds, cheaper than maintaining one.
+export async function loadPopulationCentersNear(
+  points: { lat: number; lon: number }[],
+): Promise<NamedCenter[]> {
+  if (points.length === 0) return [];
+  const db = getDb();
+  const latBand = EXPOSURE_RADIUS_KM / 111;
+  const boxes = points.map(({ lat, lon }) => {
+    const lonBand = Math.min(180, latBand / Math.max(0.05, Math.cos((lat * Math.PI) / 180)));
+    const lonLo = lon - lonBand;
+    const lonHi = lon + lonBand;
+    const lonClause =
+      lonLo < -180 || lonHi > 180
+        ? sql`true` // box crosses the antimeridian: latitude alone bounds it
+        : sql`${populationCenter.lon} between ${lonLo} and ${lonHi}`;
+    return sql`(${populationCenter.lat} between ${lat - latBand} and ${lat + latBand} and ${lonClause})`;
+  });
+  return db
+    .select({
+      lat: populationCenter.lat,
+      lon: populationCenter.lon,
+      population: populationCenter.population,
+      name: populationCenter.name,
+      country: populationCenter.country,
+    })
+    .from(populationCenter)
+    .where(sql.join(boxes, sql` or `));
+}
+
+const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"] as const;
+
+function compassFrom(lat1: number, lon1: number, lat2: number, lon2: number): string {
+  const toRad = Math.PI / 180;
+  const y = Math.sin((lon2 - lon1) * toRad) * Math.cos(lat2 * toRad);
+  const x =
+    Math.cos(lat1 * toRad) * Math.sin(lat2 * toRad) -
+    Math.sin(lat1 * toRad) * Math.cos(lat2 * toRad) * Math.cos((lon2 - lon1) * toRad);
+  const bearing = (Math.atan2(y, x) / toRad + 360) % 360;
+  return COMPASS[Math.round(bearing / 45) % 8];
+}
+
+// A human place label for a point that only has coordinates — satellite
+// fire detections are the bulk of these. Named after the nearest
+// settlement of 15,000+ within EXPOSURE_RADIUS_KM ("62 km SW of Basra"),
+// because a reader can place a city and cannot place "30.50, 47.35". The
+// distance and bearing are stated, never rounded away: "near Basra" for a
+// point 90 km out in the desert would claim a proximity that isn't there.
+// Returns null when no settlement qualifies; the caller decides how to
+// describe a genuinely remote point.
+export function describeNearestPlace(
+  lat: number,
+  lon: number,
+  centers: NamedCenter[],
+): { text: string; center: NamedCenter } | null {
+  let best: NamedCenter | null = null;
+  let bestKm = Infinity;
+  for (const c of centers) {
+    const d = haversineKm(lat, lon, c.lat, c.lon);
+    if (d < bestKm) {
+      best = c;
+      bestKm = d;
+    }
+  }
+  if (!best || bestKm > EXPOSURE_RADIUS_KM) return null;
+  if (bestKm < 5) return { text: best.name, center: best };
+  const km = bestKm < 20 ? Math.round(bestKm) : Math.round(bestKm / 5) * 5;
+  return { text: `${km} km ${compassFrom(best.lat, best.lon, lat, lon)} of ${best.name}`, center: best };
 }
 
 // Turns a head count into a multiplier on an event's severity weight.
