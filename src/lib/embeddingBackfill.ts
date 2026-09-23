@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { feedArchive } from "@/db/schema";
 import { STRUCTURAL_SOURCES } from "./structuralSources";
 import { embedBatch } from "./embeddings";
+import { getEmbeddingBudget } from "./aiUsage";
 
 // Deliberately decoupled from the insert path (src/lib/feedArchive.ts's
 // archiveFeedItems) rather than embedding inline at insert time — ingest
@@ -42,7 +43,19 @@ import { embedBatch } from "./embeddings";
 // paths that DO gate credibility. A bigger backfill delay is an accepted
 // tradeoff (2026-09-10 user priority: credibility over speed) — see
 // embeddings.ts's own circuit-breaker comment for the other half of this.
-const BACKFILL_BATCH_SIZE = 4;
+//
+// 4 -> adaptive, first claim on the budget (2026-09-23, measured). A
+// fixed 4 per cycle is a daily ceiling set by the ingest cadence, not by
+// the budget: 4 x 96 cycles covered the ~270 new events a day, but when
+// ingest went to every 30 minutes on 2026-09-21 the ceiling halved to 192
+// and published events began falling ~100 a day behind (267 unembedded on
+// 2026-09-23) — while the classifier's training archive, which nobody
+// sees, took the rest of the budget adaptively. Published events now take
+// what they need from the paced budget first (this runs before the
+// training archive in the same chain, see ingest.ts); the archive gets
+// what is left. MAX_PER_CYCLE bounds wall-clock: embedBatch paces 4 rows
+// per 3s, so 24 rows is ~18s.
+const MAX_PER_CYCLE = 24;
 const MAX_INPUT_CHARS = 2000;
 
 export interface BackfillResult {
@@ -53,13 +66,16 @@ export interface BackfillResult {
 export async function backfillFeedArchiveEmbeddings(): Promise<BackfillResult> {
   try {
     const db = getDb();
+    const budget = await getEmbeddingBudget();
+    const take = Math.min(MAX_PER_CYCLE, budget.remainingRightNow, budget.remainingToday);
+    if (take <= 0) return { processed: 0, skipped: true };
     const rows = await db
       .select({ id: feedArchive.id, title: feedArchive.title, summary: feedArchive.summary })
       .from(feedArchive)
       // Structural sources are never embedded — see structuralSources.ts.
       .where(and(isNull(feedArchive.embedding), notInArray(feedArchive.source, [...STRUCTURAL_SOURCES])))
       .orderBy(desc(feedArchive.id))
-      .limit(BACKFILL_BATCH_SIZE);
+      .limit(take);
 
     if (rows.length === 0) return { processed: 0, skipped: false };
 

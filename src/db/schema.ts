@@ -858,6 +858,10 @@ export const pendingGdeltTitle = pgTable(
     discoveredAt: timestamp("discovered_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
+    // Set when the title was fetched and the item handed to ingest. The
+    // row then stays until discovered_at expiry, so UNIQUE(url) keeps the
+    // overlapping discovery window (gdeltBulk.ts) from queueing it again.
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   },
   (table) => [index("pending_gdelt_title_discovered_at_idx").on(table.discoveredAt)],
 );

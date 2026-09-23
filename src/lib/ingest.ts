@@ -79,6 +79,15 @@ export interface IngestResult {
   candidates: number;
   inserted: number;
   errors: string[];
+  // Throughput of the steps that run behind the feed (2026-09-23). They
+  // used to report nothing, so when published-event embeddings fell ~100 a
+  // day behind and GDELT lost half its files, the run log said "success"
+  // for two days straight. Absent when a step didn't run.
+  pipeline?: {
+    gdeltTitlesResolved: number;
+    embeddedFeed: number | null;
+    embeddedArchive: number | null;
+  };
 }
 
 // Used by src/lib/backfill.ts — dedupes against already-stored URLs,
@@ -270,7 +279,7 @@ export async function runIngest(
     // REAL title from its own page before it can become a real item.
     //
     // Run CONCURRENTLY (not drain-then-discover), fixed 2026-09-11: they
-    // touch pending_gdelt_title independently (drain reads/deletes the
+    // touch pending_gdelt_title independently (drain reads/marks the
     // oldest rows, discover inserts new ones with onConflictDoNothing) —
     // nothing requires sequencing them, and running them one after another
     // let their worst cases STACK (drain's own uncapped worst case, plus
@@ -819,16 +828,20 @@ export async function runIngest(
   // — so a deadline that fires mid-backfill on the runner would SPEND
   // embedding calls whose results never get written. The deadlines must
   // therefore comfortably exceed each step's real worst case: feed_archive
-  // stays at 4 rows (~1 chunk, seconds); classification_archive is now
-  // adaptive up to 40 rows (~30s at embedBatch's 4-per-3s pacing).
+  // is adaptive up to 24 rows (~18s at embedBatch's 4-per-3s pacing, since
+  // 2026-09-23); classification_archive up to 40 rows (~30s).
+  let embeddedFeed: number | null = null;
+  let embeddedArchive: number | null = null;
   async function runEmbeddingBackfillChain(): Promise<void> {
     try {
-      await withDeadline(backfillFeedArchiveEmbeddings(), 20_000, "embeddingBackfill");
+      embeddedFeed = (await withDeadline(backfillFeedArchiveEmbeddings(), 35_000, "embeddingBackfill")).processed;
     } catch (err) {
       errors.push(`embeddingBackfill: ${err}`);
     }
     try {
-      await withDeadline(backfillClassificationArchiveEmbeddings(), 75_000, "classificationArchiveEmbeddingBackfill");
+      embeddedArchive = (
+        await withDeadline(backfillClassificationArchiveEmbeddings(), 75_000, "classificationArchiveEmbeddingBackfill")
+      ).processed;
     } catch (err) {
       errors.push(`classificationArchiveEmbeddingBackfill: ${err}`);
     }
@@ -853,5 +866,10 @@ export async function runIngest(
     candidates: fresh.length + freshDirect.length,
     inserted,
     errors,
+    pipeline: {
+      gdeltTitlesResolved: gdelt.items.length,
+      embeddedFeed,
+      embeddedArchive,
+    },
   };
 }

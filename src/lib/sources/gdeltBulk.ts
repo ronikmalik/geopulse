@@ -6,7 +6,7 @@ import { fetchRealArticleTitle } from "../articleTitleFetch";
 import {
   enqueuePendingGdeltTitles,
   getPendingGdeltTitleBatch,
-  deletePendingGdeltTitles,
+  markPendingGdeltTitlesResolved,
   expireStalePendingGdeltTitles,
 } from "../pendingGdeltTitle";
 
@@ -50,7 +50,28 @@ import {
 // Only the Event table (export.CSV.zip) is fetched — the Mentions table
 // isn't needed: the Event table's own SOURCEURL field already carries a
 // real article URL per event.
-const LAST_UPDATE_URL = "http://data.gdeltproject.org/gdeltv2/lastupdate.txt";
+
+// HTTPS: as of 2026-09-23 the plain-HTTP host answers every request with
+// a 301 to HTTPS — fetch follows it, but that is a wasted round trip per
+// file, and lastupdate.txt itself still lists http:// URLs.
+const LAST_UPDATE_URL = "https://data.gdeltproject.org/gdeltv2/lastupdate.txt";
+const FILE_BASE_URL = "https://data.gdeltproject.org/gdeltv2/";
+
+// How many of GDELT's 15-minute export files each ingest reads: the newest
+// and the four before it, i.e. a 75-minute window.
+//
+// Until 2026-09-23 only the newest file was read. That silently discarded
+// every file published between two ingest runs: on the 30-minute cadence
+// in force for the last ten days of September (see ingest.yml — a Neon
+// compute-budget measure) exactly half of all GDELT files were never
+// opened, and GDELT's classified volume halved on 2026-09-21, the day that
+// cadence started. Even at 15 minutes, GitHub's scheduler starts runs a
+// median ~10 min late and drops ~4% of slots, each drop another lost file.
+// Reading a window wider than the widest plausible gap costs ~70 KB per
+// extra file; an article seen in an earlier window is absorbed by the
+// queue's UNIQUE(url), resolved or not (see enqueuePendingGdeltTitles).
+const EXPORT_FILES_PER_CYCLE = 5;
+const EXPORT_FILE_INTERVAL_MS = 15 * 60_000;
 const REQUEST_TIMEOUT_MS = 20_000;
 
 // How many queued candidates get a real-title-fetch attempt per ingest
@@ -92,8 +113,15 @@ const REQUEST_TIMEOUT_MS = 20_000;
 // but 100 is a modest fan-out for lightweight capped-read HTML head
 // fetches (MAX_BYTES=200_000 each in articleTitleFetch.ts). See ingest.
 // ts's own GDELT_DRAIN_TIMEOUT_MS for the matching deadline.
-const DRAIN_BATCH_SIZE = 100;
-const DRAIN_CONCURRENCY = 100;
+//
+// 100 -> 200 (2026-09-23), still one round. Measured on the live window:
+// ~80 candidates per 15-minute file, so ~160 new per cycle on the 30-minute
+// cadence once discovery stopped skipping files — more than 100 a cycle
+// could drain. The Vercel fan-out concern above no longer binds: ingest
+// runs on a GitHub Actions runner (scripts/run-job.ts), and the once-daily
+// Vercel floor is the only serverless caller left.
+const DRAIN_BATCH_SIZE = 200;
+const DRAIN_CONCURRENCY = 200;
 
 async function fetchText(url: string): Promise<string> {
   const res = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
@@ -123,6 +151,24 @@ async function getLatestExportCsvUrl(): Promise<string> {
     throw new Error(`GDELT lastupdate.txt's first line didn't look like an export.CSV.zip URL: "${firstLine}"`);
   }
   return url;
+}
+
+// The newest export file and the (count - 1) published before it. File
+// names are the UTC timestamp of their 15-minute slot
+// (YYYYMMDDHHMMSS.export.CSV.zip), so earlier ones are derived rather than
+// looked up — verified live 2026-09-23 against the four slots preceding
+// that day's 23:15 file, all present.
+export function recentExportCsvUrls(latestUrl: string, count: number): string[] {
+  const stamp = /(\d{14})\.export\.CSV\.zip$/.exec(latestUrl)?.[1];
+  const latest = stamp ? parseDateAdded(stamp) : null;
+  if (!latest) return [latestUrl];
+  const urls: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const t = new Date(latest.getTime() - i * EXPORT_FILE_INTERVAL_MS);
+    const name = t.toISOString().replace(/[-:T]/g, "").slice(0, 14);
+    urls.push(`${FILE_BASE_URL}${name}.export.CSV.zip`);
+  }
+  return urls;
 }
 
 // YYYYMMDDHHMMSS (UTC, per the codebook) -> Date.
@@ -155,13 +201,35 @@ const COL = {
 // header comment). Always returns [] to the caller; the real items come
 // from drainPendingGdeltTitles below, once a real title exists.
 export async function discoverGdeltCandidates(): Promise<RawItem[]> {
-  const exportUrl = await getLatestExportCsvUrl();
-  const csv = await fetchAndUnzipCsv(exportUrl);
+  const urls = recentExportCsvUrls(await getLatestExportCsvUrl(), EXPORT_FILES_PER_CYCLE);
+  // Settled, not all-or-nothing: a missing or slow older file costs only
+  // itself, and the next windows read it again anyway. A failure on the
+  // newest file still throws, so a GDELT outage shows up in source_health
+  // instead of passing as a quiet cycle.
+  const files = await Promise.allSettled(urls.map((u) => fetchAndUnzipCsv(u)));
+  if (files[0].status === "rejected") throw files[0].reason;
+  const csvs = files.flatMap((f) => (f.status === "fulfilled" ? [f.value] : []));
 
-  const candidates: { url: string; resolvedCountry: string; publishedAt: Date }[] = [];
+  await enqueuePendingGdeltTitles(parseExportCandidates(csvs)).catch((err) => {
+    console.error(`enqueuePendingGdeltTitles failed: ${err}`);
+  });
+
+  return [];
+}
+
+export interface GdeltCandidate {
+  url: string;
+  resolvedCountry: string;
+  publishedAt: Date;
+}
+
+// The structural filters, as a pure function over raw export files so
+// they can be measured and tested without touching the queue.
+export function parseExportCandidates(csvs: string[]): GdeltCandidate[] {
+  const candidates: GdeltCandidate[] = [];
   const seenUrls = new Set<string>();
 
-  for (const line of csv.split(/\r?\n/)) {
+  for (const line of csvs.join("\n").split(/\r?\n/)) {
     if (!line.trim()) continue;
     const f = line.split("\t");
     if (f.length < 61) continue; // malformed/truncated row — skip rather than guess
@@ -211,11 +279,7 @@ export async function discoverGdeltCandidates(): Promise<RawItem[]> {
     candidates.push({ url: sourceUrl, resolvedCountry: country, publishedAt });
   }
 
-  await enqueuePendingGdeltTitles(candidates).catch((err) => {
-    console.error(`enqueuePendingGdeltTitles failed: ${err}`);
-  });
-
-  return [];
+  return candidates;
 }
 
 // Fetches real titles for a batch of previously-discovered candidates,
@@ -253,8 +317,8 @@ export async function drainPendingGdeltTitles(): Promise<RawItem[]> {
     }
   }
 
-  await deletePendingGdeltTitles(resolvedUrls).catch((err) =>
-    console.error(`deletePendingGdeltTitles failed: ${err}`),
+  await markPendingGdeltTitlesResolved(resolvedUrls).catch((err) =>
+    console.error(`markPendingGdeltTitlesResolved failed: ${err}`),
   );
 
   return items;

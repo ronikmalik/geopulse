@@ -570,3 +570,18 @@ test("a country's Pulse Level explanation states the rule the model actually app
   assert.doesNotMatch(explainPulseLevel([p("Security", 2), p("Cyber", 4, false)]), /Cyber/);
   assert.match(explainPulseLevel([p("Security", 1)]), /^No pillar is above Low/);
 });
+
+test("GDELT discovery reads every 15-minute file in its window, not just the newest", async () => {
+  const { recentExportCsvUrls } = await import("../src/lib/sources/gdeltBulk");
+  const urls = recentExportCsvUrls("http://data.gdeltproject.org/gdeltv2/20260923231500.export.CSV.zip", 5);
+  assert.deepEqual(urls.map((u) => u.slice(-29, -15)), [
+    "20260923231500", "20260923230000", "20260923224500", "20260923223000", "20260923221500",
+  ]);
+  // HTTPS: the plain-HTTP host 301s every request.
+  assert.ok(urls.every((u) => u.startsWith("https://data.gdeltproject.org/gdeltv2/")));
+  // Across midnight and a month boundary, slots still step back 15 minutes.
+  const midnight = recentExportCsvUrls("https://data.gdeltproject.org/gdeltv2/20261001000000.export.CSV.zip", 2);
+  assert.ok(midnight[1].endsWith("20260930234500.export.CSV.zip"));
+  // A name it cannot parse is used as-is rather than guessed around.
+  assert.deepEqual(recentExportCsvUrls("https://x/odd.zip", 5), ["https://x/odd.zip"]);
+});

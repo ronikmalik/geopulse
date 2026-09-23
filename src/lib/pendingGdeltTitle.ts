@@ -1,4 +1,4 @@
-import { desc, inArray, lt } from "drizzle-orm";
+import { desc, inArray, isNull, lt } from "drizzle-orm";
 import { getDb } from "@/db";
 import { pendingGdeltTitle, type NewPendingGdeltTitleRow } from "@/db/schema";
 
@@ -14,7 +14,16 @@ export async function enqueuePendingGdeltTitles(
 ): Promise<void> {
   if (rows.length === 0) return;
   const db = getDb();
-  await db.insert(pendingGdeltTitle).values(rows).onConflictDoNothing({ target: pendingGdeltTitle.url });
+  // Discovery reads an overlapping 75-minute window of GDELT files each
+  // cycle (gdeltBulk.ts), so most candidates have been seen before.
+  // UNIQUE(url) absorbs them: a row stays in this table — resolved or not
+  // — until PENDING_GDELT_TITLE_MAX_AGE_MS, far longer than the window.
+  for (let i = 0; i < rows.length; i += 500) {
+    await db
+      .insert(pendingGdeltTitle)
+      .values(rows.slice(i, i + 500))
+      .onConflictDoNothing({ target: pendingGdeltTitle.url });
+  }
 }
 
 export interface PendingGdeltTitleBatchRow {
@@ -53,14 +62,21 @@ export async function getPendingGdeltTitleBatch(limit: number): Promise<PendingG
       publishedAt: pendingGdeltTitle.publishedAt,
     })
     .from(pendingGdeltTitle)
+    .where(isNull(pendingGdeltTitle.resolvedAt))
     .orderBy(desc(pendingGdeltTitle.discoveredAt))
     .limit(limit);
 }
 
-export async function deletePendingGdeltTitles(urls: string[]): Promise<void> {
+// Marked, not deleted (2026-09-23): a deleted URL would be queued again
+// the next time the overlapping discovery window re-reads its file.
+// expireStalePendingGdeltTitles still removes it after 24 hours.
+export async function markPendingGdeltTitlesResolved(urls: string[]): Promise<void> {
   if (urls.length === 0) return;
   const db = getDb();
-  await db.delete(pendingGdeltTitle).where(inArray(pendingGdeltTitle.url, urls));
+  await db
+    .update(pendingGdeltTitle)
+    .set({ resolvedAt: new Date() })
+    .where(inArray(pendingGdeltTitle.url, urls));
 }
 
 export async function expireStalePendingGdeltTitles(): Promise<void> {

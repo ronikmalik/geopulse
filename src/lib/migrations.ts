@@ -630,6 +630,10 @@ export const MIGRATION_STATEMENTS = [
   sql`DROP INDEX IF EXISTS source_credibility_domain_idx`,
   sql`DROP INDEX IF EXISTS population_center_lat_lon_idx`,
   sql`DROP INDEX IF EXISTS events_correlation_group_idx`,
+  // 2026-09-23: GDELT discovery now reads a 75-minute window of files, so
+  // processed candidates are marked rather than deleted — see
+  // pendingGdeltTitle.resolvedAt in schema.ts.
+  sql`ALTER TABLE pending_gdelt_title ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ`,
 ];
 
 export async function applyMigrations(): Promise<{ statementsApplied: number }> {
