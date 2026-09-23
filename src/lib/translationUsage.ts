@@ -7,12 +7,21 @@ import { translationUsage } from "@/db/schema";
 // standard $20/million rate, not a separate free bucket — see translate.ts's
 // byteLength comment for why this app tracks BYTES against that same
 // 500,000 figure, not JS string length). The user asked for a hard ceiling
-// under that, with no exceptions: 499,000/month, always. This is enforced
+// under that, with no exceptions (499,000/month; 490,000 since 2026-09-23,
+// see MONTHLY_BYTE_CAP), always. This is enforced
 // here, not left to "we probably won't hit it" — translateBatch
 // (src/lib/translate.ts) checks this before every API call and skips
 // translation (falling back to original-language text, same as no key
 // being set at all) rather than risk going over.
-export const MONTHLY_BYTE_CAP = 499_000;
+// 499,000 -> 490,000 (2026-09-23). Still the same "never go over" rule,
+// with room for the two ways the counter can trail Google's meter:
+// concurrent callers can each pass canAfford before either reserves (at
+// most a few calls of dailyBudget/12 each), and this month resets at UTC
+// midnight while Google's billing month may run on Pacific time, putting
+// up to ~7 hours of "next month" spending into Google's current one. Both
+// together stay under the 10,000 margin. Measured usage the day of the
+// change: 342,209 month-to-date, ~10k/day, so the tighter cap costs nothing.
+export const MONTHLY_BYTE_CAP = 490_000;
 
 // One-time reconciliation (2026-09-10): this app's own tracking (character-
 // based until today) showed 128,816 used for the month so far, but Google's
@@ -57,7 +66,7 @@ export interface UsageBudget {
 // Adaptive, not a flat 1/30th split: dailyBudget = whatever's left in the
 // monthly cap, divided by however many days (including today) remain in
 // the month. A light day doesn't waste quota — it just raises tomorrow's
-// share — while the 499,000 hard ceiling below is checked independently
+// share — while the MONTHLY_BYTE_CAP hard ceiling is checked independently
 // regardless of how the daily math comes out, so rounding can't cause an
 // overage.
 export async function getUsageBudget(): Promise<UsageBudget> {

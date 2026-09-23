@@ -57,7 +57,7 @@ export async function translateBatch(
   const apiKey = process.env.GOOGLE_TRANSLATE_API_KEY;
   if (!apiKey || texts.length === 0) return null;
 
-  // Hard cap, checked before every call: 499,000 BYTES/month (see
+  // Hard cap, checked before every call: MONTHLY_BYTE_CAP bytes/month (see
   // byteLength's own comment for why bytes, not JS string length),
   // portioned out across the day rather than front-loaded — see
   // src/lib/translationUsage.ts. A DB read failing here fails safe (skip
@@ -66,6 +66,22 @@ export async function translateBatch(
   const estimatedBytes = texts.reduce((sum, t) => sum + byteLength(t), 0);
   const affordable = await canAfford(estimatedBytes).catch(() => false);
   if (!affordable) return null;
+
+  // Reserved BEFORE the request, not recorded after it (2026-09-23). The
+  // old record-on-success missed every request Google may still have
+  // billed: a timeout (aborted here, possibly processed there) and a
+  // response with the wrong number of translations both returned without
+  // counting anything. Now every request sent is counted; a request that
+  // fails is over-counted, the safe direction for a hard ceiling. If the
+  // reservation itself can't be written, nothing is sent.
+  const reserved = await recordUsage(estimatedBytes).then(
+    () => true,
+    (err) => {
+      console.error(`Failed to reserve translation budget, skipping call: ${err}`);
+      return false;
+    },
+  );
+  if (!reserved) return null;
 
   const body = new URLSearchParams();
   for (const text of texts) body.append("q", text);
@@ -95,15 +111,6 @@ export async function translateBatch(
   const data = (await res.json()) as TranslateApiResponse;
   const translations = data.data?.translations;
   if (!translations || translations.length !== texts.length) return null;
-
-  // Record actual input length billed, not the pre-call estimate — the
-  // two are the same value here (estimatedBytes), but computed
-  // independently on purpose so a future change to what gets sent
-  // (e.g. URL-encoding overhead) can't silently desync the budget from
-  // reality.
-  await recordUsage(texts.reduce((sum, t) => sum + byteLength(t), 0)).catch((err) => {
-    console.error(`Failed to record translation usage: ${err}`);
-  });
 
   return translations.map((t) => t.translatedText);
 }

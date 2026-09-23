@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { STRUCTURAL_SOURCES } from "./structuralSources";
+import { getUsageBudget, MONTHLY_BYTE_CAP } from "./translationUsage";
 
 // Daily alarm for the parts of the pipeline that fail quietly (2026-09-23).
 //
@@ -39,6 +40,10 @@ export interface PipelineMetrics {
   events24hBySource: Record<string, number>;
   // Hours since each polled source last succeeded.
   hoursSinceSourceSuccess: Record<string, number>;
+  // Google Translate bytes used this month. translate.ts can never exceed
+  // MONTHLY_BYTE_CAP, so this is an early warning, not a guard: at the cap,
+  // non-English Telegram posts stop being translated until the month turns.
+  translationMonthUsed: number;
 }
 
 export const HEALTH_LIMITS = {
@@ -51,6 +56,9 @@ export const HEALTH_LIMITS = {
   // feeds (USGS, GDACS, EONET, IODA) are excluded: a quiet day is real.
   mustPublishDaily: ["gdelt", "rss", "telegram"],
   maxHoursSinceSourceSuccess: 6,
+  // Measured 2026-09-23: 342k used by the 23rd (~70% of the cap), heading
+  // for ~410k. 95% means the month is about to run dry.
+  translationShareOfCap: 0.95,
 } as const;
 
 // Pure, so the thresholds themselves are testable.
@@ -81,6 +89,9 @@ export function evaluatePipelineHealth(m: PipelineMetrics): string[] {
     if (hours > L.maxHoursSinceSourceSuccess) {
       failures.push(`${source} has not fetched successfully for ${hours.toFixed(1)} h (limit ${L.maxHoursSinceSourceSuccess} h).`);
     }
+  }
+  if (m.translationMonthUsed > L.translationShareOfCap * MONTHLY_BYTE_CAP) {
+    failures.push(`Translation at ${m.translationMonthUsed.toLocaleString()} of the ${MONTHLY_BYTE_CAP.toLocaleString()} monthly cap — non-English Telegram posts will soon go untranslated until the month turns. The cap itself cannot be exceeded.`);
   }
   return failures;
 }
@@ -114,7 +125,10 @@ export async function gatherPipelineMetrics(): Promise<PipelineMetrics> {
     await db.execute(sql`select source, extract(epoch from now() - last_success_at) / 3600 h from source_health`)
   ).rows as { source: string; h: number | null }[];
 
+  const translation = await getUsageBudget();
+
   return {
+    translationMonthUsed: translation.monthUsed,
     feedEmbeddingBacklog: Number(feed.n ?? 0),
     keptArchiveBacklog: Number(kept.n ?? 0),
     embeddingsToday: Number(embeddings.n ?? 0),

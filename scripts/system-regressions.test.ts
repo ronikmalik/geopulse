@@ -593,6 +593,7 @@ test("the pipeline alarm stays quiet on a healthy day and names each quiet failu
     oldestPendingReviewHours: 0.5, gdeltQueueWaiting: 620,
     events24hBySource: { gdelt: 170, rss: 74, telegram: 49, usgs: 0 },
     hoursSinceSourceSuccess: { gdelt: 0.3, rss: 0.3, usgs: 0.3 },
+    translationMonthUsed: 342_209,
   };
   // A quiet day for a hazard feed (usgs: 0) is real, not a failure.
   assert.deepEqual(evaluatePipelineHealth(healthy), []);
@@ -602,6 +603,7 @@ test("the pipeline alarm stays quiet on a healthy day and names each quiet failu
   assert.match(evaluatePipelineHealth({ ...healthy, embeddingsToday: 0 }).join(), /Gemini key/);
   assert.match(evaluatePipelineHealth({ ...healthy, events24hBySource: { rss: 74, telegram: 49 } }).join(), /No gdelt events/);
   assert.match(evaluatePipelineHealth({ ...healthy, hoursSinceSourceSuccess: { gdelt: Infinity } }).join(), /gdelt has not fetched/);
+  assert.match(evaluatePipelineHealth({ ...healthy, translationMonthUsed: 480_000 }).join(), /monthly cap/);
   // No pending items at all is healthy, not "unknown".
   assert.deepEqual(evaluatePipelineHealth({ ...healthy, oldestPendingReviewHours: null }), []);
 });
