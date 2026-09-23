@@ -82,7 +82,7 @@ export function momentumBucketLabel(magnitude: number): string {
 // countries at Extreme, including the UK, Poland and Australia — a label
 // that had stopped meaning anything. Re-measured the same day on the
 // version-3 score: 7 countries at Extreme (UA, RU, IR, YE, SA, PS, IL —
-// the active war theatres), 11 at High, the rest Medium or Low. These are
+// the active war theatres), 10 at High, the rest Medium or Low. These are
 // fixed constants, not percentiles recomputed daily: a percentile would
 // always put the same share of the world at Extreme however calm or
 // violent the world actually was.
@@ -138,4 +138,37 @@ export function escalateThreatLevel(pillarLevels: ThreatLevel[]): ThreatLevel {
   const highOrAboveCount = pillarLevels.filter((l) => l >= 3).length;
   const bump = highOrAboveCount >= 2 ? 1 : 0;
   return Math.min(4, max + bump) as ThreatLevel;
+}
+
+// What each level means in plain terms, from the threshold derivation
+// above — shown next to a country's reading so the label can be checked
+// rather than taken on trust. Stated for the security pillar, where the
+// numbers are exact; other pillars reach the same load with more or fewer
+// stories according to their weight in pillars.ts.
+export const THREAT_LEVEL_MEANING: Record<ThreatLevel, string> = {
+  4: "a load equal to ~4+ distinct serious security stories a day, sustained",
+  3: "a load equal to ~1 serious security story a day, sustained",
+  2: "a load equal to ~1 serious security story every five days",
+  1: "below one serious story every five days",
+};
+
+export interface ExplainablePillar {
+  shortLabel: string;
+  threatLevel: ThreatLevel;
+  covered: boolean;
+}
+
+// The reason a country sits at its overall level, derived from the same
+// rule escalateThreatLevel applies — so the explanation can never describe
+// a rule the model does not actually use.
+export function explainPulseLevel(pillars: ExplainablePillar[]): string {
+  const covered = pillars.filter((p) => p.covered);
+  const overall = escalateThreatLevel(covered.map((p) => p.threatLevel));
+  if (overall === 1) return `No pillar is above Low: ${THREAT_LEVEL_MEANING[1]}.`;
+  const max = Math.max(...covered.map((p) => p.threatLevel)) as ThreatLevel;
+  const top = covered.filter((p) => p.threatLevel === max).map((p) => p.shortLabel);
+  const lead = `${top.join(" and ")} ${top.length > 1 ? "are" : "is"} ${THREAT_LABELS[max]}: ${THREAT_LEVEL_MEANING[max]}.`;
+  if (overall === max) return lead;
+  const high = covered.filter((p) => p.threatLevel >= 3).map((p) => p.shortLabel);
+  return `${lead} ${high.join(", ")} are all High or above at once, which lifts the overall reading one level to ${THREAT_LABELS[overall]}.`;
 }

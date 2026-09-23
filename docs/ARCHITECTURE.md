@@ -769,3 +769,93 @@ factor to a literal `1`, so the query shape never changes.
 The curve exists twice — JS for readers, SQL because the weight is summed
 in Postgres over thousands of rows — and both are generated from the same
 constants, with a regression test pinning the numbers.
+
+**Correction (2026-09-23).** Until this date nothing computed exposure for
+events ingested *after* the one-off backfill: every new hazard carried
+NULL and scored at a neutral 1, so the model was quietly fading out of
+the score as backfilled events aged past 30 days. The pass now runs after
+every ingest, inside the `review-pending` job, and reads only the
+settlements near the new events rather than all 34k (see §16).
+
+## 16. Scoring version 3: stories, not articles (2026-09-23)
+
+The score used to add up one number per **article**. Two measurements
+against live data, taken before any change, showed what that was really
+measuring:
+
+- **Media echo.** 1,094 of the 5,231 events in the 30-day window (21%)
+  were cross-outlet duplicates that `eventDedup.ts` had already found and
+  hidden from the feed, yet `risk.ts` still counted in full. Saudi Arabia:
+  194 of 289 (67%). A story five outlets carried scored five times.
+- **Sensor volume.** Brazil read Extreme on 189 NASA FIRMS fire
+  detections and essentially nothing else; Indonesia, Australia and
+  Angola likewise. A satellite's detection count tracks land area and
+  fire season, not consequence.
+
+The effect: **23 countries at Extreme**, including the UK, Poland,
+Australia and Brazil. The label had stopped meaning anything.
+
+**What changed** (`src/lib/scoringMethod.ts`, `src/lib/risk.ts`):
+
+1. **A duplicate adds nothing; the story it duplicates gets a bounded
+   corroboration bonus**: `1 + 0.2·log2(1 + k)`, capped at 1.6, where `k`
+   is the number of *distinct sources* that also carried it. Distinct
+   sources, not articles: GDELT is one source however many domains it
+   spans. A duplicate whose primary was rejected or kill-switched is an
+   "orphan"; the earliest such orphan stands in for the story, once.
+2. **Automated detection feeds saturate** per country-pillar-instrument:
+   `20·(1 − e^(−raw/20))`. FIRMS, USGS and EONET only. News is never
+   saturated, because the number of distinct stories is exactly what the
+   score is meant to measure. GDACS isn't saturated either: its alerts are
+   already impact-assessed, one per disaster. With the hazards pillar's
+   1.3 weight, one instrument alone tops out near 26: **High, never
+   Extreme**.
+3. **Pulse Level thresholds 30/12/3 → 75/20/4**, each with a stated
+   meaning. With a 3-day half-life, `r` distinct stories a day of severity
+   `s` settle at `r·s·w / (ln2/3)`, which for severity-3 security stories
+   is about 19.5 per daily story:
+
+   | Level | Load | Meaning |
+   |---|---|---|
+   | Extreme | ≥ 75 | ~4+ distinct serious security stories a day, sustained |
+   | High | ≥ 20 | ~1 a day, sustained |
+   | Medium | ≥ 4 | ~1 every five days |
+
+   Fixed constants, not percentiles: a percentile would put the same
+   share of the world at Extreme whether the world was calm or at war.
+
+**Before/after on live data.** Extreme 23 → 7 (Ukraine, Russia, Iran,
+Yemen, Palestine, Saudi Arabia, Israel: the active war theatres). High:
+10. Brazil → High, driven by hazards alone. Scores fell 15–40% for
+news-heavy countries (Saudi Arabia −72%, Afghanistan −78%), and not at
+all for countries with no duplicated coverage. The live API matched the
+pre-deploy prediction exactly.
+
+**Every score names its methodology.** `scoring_version` (1 original,
+2 exposure, 3 this) is on `country_state_history`, `country_feature_daily`
+and `risk_predictions`, with no column default, so a writer that forgets
+it fails loudly. The forecasting model never pairs an input snapshot with
+an outcome of a different version (a 30% drop on a methodology change is
+not something that happened in the world). A prediction that resolves
+across a change is **voided**: `graded_at` set, `actual_score` NULL,
+excluded from every accuracy figure.
+
+**Explained in the product.** The country panel states *why* a country
+sits at its level (`explainPulseLevel` in `threat.ts`), derived from the
+same rule `escalateThreatLevel` applies so the two cannot drift apart,
+plus a collapsible "How this is scored" summary of the rules above.
+
+**Data fixes found along the way.**
+- Place labels: 42 of 100 live feed cards were headlined by raw
+  coordinates. Detections now read "60 km SW of Sampit, Indonesia" from
+  the GeoNames settlements. When the nearest town sits across a border,
+  its own country is named ("95 km E of La Rinconada (Peru), Bolivia").
+  Genuinely remote points read "Remote area, Brazil".
+- USGS countries: 22% of in-window quakes had no country, because the
+  news resolver knows countries, not US states. `usgsPlaceCountry` maps
+  USGS's region suffixes explicitly (all 50 states and their postal codes,
+  Timor Leste, Micronesia, Puerto Rico); open ocean stays unplaced. This
+  fixed 57 existing quakes and one stale mis-attribution ("Gambiran Satu,
+  Indonesia" filed under Iran by an older resolver).
+- Three indexes with zero scans were dropped, one of which duplicated a
+  UNIQUE constraint's own index.

@@ -32,6 +32,13 @@ const compactNumber = new Intl.NumberFormat("en-US", {
 // nothing composed or inferred. The one-line summary below is template
 // text filled in from those same numbers, not generated — same
 // no-LLM-necessary discipline as src/lib/history.ts's summarizeHistory.
+// World Bank's country metadata still carries some Russian-era or
+// otherwise superseded romanisations. Corrected to the form the country's
+// own government uses; only names seen in the live dossier are listed.
+const CAPITAL_SPELLING: Record<string, string> = {
+  Kiev: "Kyiv",
+};
+
 export async function fetchCountryDossier(iso2: string): Promise<CountryDossier | null> {
   const iso3 = ALPHA2_TO_ALPHA3[iso2.toUpperCase()];
   if (!iso3) return null;
@@ -49,6 +56,7 @@ export async function fetchCountryDossier(iso2: string): Promise<CountryDossier 
     meta?.name ?? gdp?.countryName ?? population?.countryName ?? travelAdvisory?.countryName ?? iso2;
 
   const region = meta?.region?.trim() || null;
+  const capital = meta?.capitalCity ? (CAPITAL_SPELLING[meta.capitalCity] ?? meta.capitalCity) : null;
 
   const parts: string[] = [];
   if (region) {
@@ -64,8 +72,8 @@ export async function fetchCountryDossier(iso2: string): Promise<CountryDossier 
   if (population?.value != null) {
     parts.push(`population ${compactNumber.format(population.value)} (${population.year})`);
   }
-  if (meta?.capitalCity) {
-    parts.push(`capital ${meta.capitalCity}`);
+  if (capital) {
+    parts.push(`capital ${capital}`);
   }
   if (travelAdvisory) {
     parts.push(`US travel advisory Level ${travelAdvisory.level} (${travelAdvisory.levelLabel})`);
@@ -84,7 +92,7 @@ export async function fetchCountryDossier(iso2: string): Promise<CountryDossier 
     countryName,
     region,
     incomeLevel: meta?.incomeLevel ?? null,
-    capitalCity: meta?.capitalCity ?? null,
+    capitalCity: capital,
     gdpUsd: gdp?.value != null ? { value: gdp.value, year: gdp.year } : null,
     population: population?.value != null ? { value: population.value, year: population.year } : null,
     travelAdvisory,

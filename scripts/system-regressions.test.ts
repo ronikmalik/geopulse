@@ -555,3 +555,18 @@ test("feed cards lift Telegram attribution out of the text without dropping the 
   const news = "Explainer: what the ceasefire means";
   assert.equal(splitAttribution(news, "rss:bbc-world").body, news);
 });
+
+test("a country's Pulse Level explanation states the rule the model actually applied", async () => {
+  const { explainPulseLevel, escalateThreatLevel } = await import("../src/lib/threat");
+  const p = (shortLabel: string, threatLevel: 1 | 2 | 3 | 4, covered = true) => ({ shortLabel, threatLevel, covered });
+  const single = [p("Security", 4), p("Hazards", 1)];
+  assert.match(explainPulseLevel(single), /^Security is Extreme: /);
+  // Two pillars at High lift the country to Extreme — the explanation has
+  // to say so, or "Extreme" would appear with no Extreme pillar to show.
+  const lifted = [p("Security", 3), p("Hazards", 3)];
+  assert.equal(escalateThreatLevel([3, 3]), 4);
+  assert.match(explainPulseLevel(lifted), /lifts the overall reading one level to Extreme/);
+  // Uncovered pillars never feature in the reason.
+  assert.doesNotMatch(explainPulseLevel([p("Security", 2), p("Cyber", 4, false)]), /Cyber/);
+  assert.match(explainPulseLevel([p("Security", 1)]), /^No pillar is above Low/);
+});

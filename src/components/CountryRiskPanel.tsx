@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { stripOutletSuffix } from "@/lib/displayText";
+import { splitAttribution, stripOutletSuffix } from "@/lib/displayText";
 import { useWatchlist } from "@/lib/useWatchlist";
 import type { CountryRiskScore } from "@/lib/useCountryRisk";
 import type { AnomalyFindingResponse } from "@/lib/useAnomalies";
@@ -10,6 +10,7 @@ import {
   THREAT_COLORS,
   momentumArrow,
   momentumBucketLabel,
+  explainPulseLevel,
   type ThreatLevel,
   type MomentumDirection,
 } from "@/lib/threat";
@@ -149,6 +150,22 @@ function timeAgo(iso: string): string {
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.floor(hrs / 24)}d ago`;
+}
+
+// Event text for the country list: the post itself, then its source —
+// with the machine-translation disclosure kept on the source line when the
+// stored text carried one (see splitAttribution).
+function RiskEventText({ summary, source }: { summary: string; source: string }) {
+  const { body, translatedFrom } = splitAttribution(summary, source);
+  return (
+    <>
+      <p className="mt-0.5 line-clamp-2 text-[11px] text-neutral-300">{stripOutletSuffix(body)}</p>
+      <span className="mt-0.5 block font-mono text-[9px] text-neutral-600">
+        Source: {sourceLabel(source)}
+        {translatedFrom && ` · machine-translated from ${translatedFrom}`}
+      </span>
+    </>
+  );
 }
 
 function ThreatBadge({ level, label }: { level: ThreatLevel; label: string }) {
@@ -406,6 +423,26 @@ export default function CountryRiskPanel({
                           )}
                         </div>
                       )}
+                      <div className="mb-2 border-b border-red-950/70 pb-2">
+                        <p className="text-[11px] leading-snug text-neutral-400">
+                          <span className="font-mono text-[9px] uppercase tracking-wider text-neutral-500">
+                            Why {detail.threatLabel}:{" "}
+                          </span>
+                          {explainPulseLevel(detail.pillars)}
+                        </p>
+                        <details className="mt-1 text-[10px] leading-snug text-neutral-500">
+                          <summary className="cursor-pointer font-mono uppercase tracking-wider text-neutral-600 hover:text-neutral-400">
+                            How this is scored
+                          </summary>
+                          <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                            <li>Each approved story adds its severity, halving every 3 days; nothing older than 30 days counts.</li>
+                            <li>A story carried by several outlets counts once, with a capped bonus per independent source (up to x1.6).</li>
+                            <li>Hazards are weighted by how many people live within 100 km.</li>
+                            <li>A single automated sensor (satellite fires, seismometers) is capped: alone it can reach High, never Extreme.</li>
+                            <li>The overall level is the highest pillar, one step higher when two or more pillars are High at once.</li>
+                          </ul>
+                        </details>
+                      </div>
                       <div className="mb-2 grid grid-cols-2 gap-1.5 border-b border-red-950/70 pb-2">
                         {detail.pillars.map((p) => (
                           <div
@@ -520,12 +557,7 @@ export default function CountryRiskPanel({
                               {timeAgo(e.publishedAt)}
                             </span>
                           </div>
-                          <p className="mt-0.5 line-clamp-2 text-[11px] text-neutral-300">
-                            {stripOutletSuffix(e.summary)}
-                          </p>
-                          <span className="mt-0.5 block font-mono text-[9px] text-neutral-600">
-                            Source: {sourceLabel(e.source)}
-                          </span>
+                          <RiskEventText summary={e.summary} source={e.source} />
                           {e.clusterSize > 1 && (
                             <span
                               className={`mt-1 inline-block font-mono text-[9px] uppercase tracking-wider ${
