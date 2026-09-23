@@ -143,7 +143,9 @@ async function liveTrackRecord(): Promise<LiveHorizonTrack[]> {
       horizonDays: riskModelRuns.horizonDays,
       modelType: riskModelRuns.modelType,
       predictions: sql<number>`count(*)::int`,
-      graded: sql<number>`count(${riskPredictions.gradedAt})::int`,
+      // actualScore, not gradedAt: a prediction voided by a scoring
+      // methodology change has gradedAt set and no outcome.
+      graded: sql<number>`count(${riskPredictions.actualScore})::int`,
       liveMae: sql<number | null>`avg(${riskPredictions.absoluteError})`,
       livePersistenceMae: sql<number | null>`avg(abs((${riskPredictions.inputFeatures}::jsonb ->> 1)::float - ${riskPredictions.actualScore})) filter (where ${riskPredictions.actualScore} is not null)`,
     })

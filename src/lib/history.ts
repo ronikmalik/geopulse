@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { countryStateHistory } from "@/db/schema";
 import { getCountryThreatSummaries } from "@/lib/risk";
 import { THREAT_LABELS, type ThreatLevel } from "@/lib/threat";
+import { SCORING_VERSION } from "@/lib/scoringMethod";
 
 // Snapshots every country's current Pulse Level/momentum into
 // country_state_history — a daily time series independent of the events
@@ -23,6 +24,7 @@ export async function snapshotCountryStates(): Promise<{ inserted: number }> {
     momentum: s.momentum,
     momentumDirection: s.momentumDirection,
     eventCount: s.eventCount,
+    scoringVersion: SCORING_VERSION,
   }));
 
   const result = await db

@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
   });
   const grading = await gradeResolvedPredictions().catch((err) => {
     console.error(`riskModelGrading failed: ${err}`);
-    return { graded: 0, ungraded: 0 };
+    return { graded: 0, ungraded: 0, voided: 0 };
   });
   return NextResponse.json({ snapshot, features, grading });
 }

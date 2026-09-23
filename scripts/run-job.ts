@@ -95,6 +95,16 @@ const JOBS: Record<string, () => Promise<unknown>> = {
   ingest: () => runIngest(),
   "review-pending": async () => {
     const review = await reviewPendingEvents();
+    // Exposure and place labels for whatever this ingest cycle added —
+    // before alerts and the cache purge, so both see the enriched rows.
+    // Until 2026-09-23 this ran only as a one-off backfill and every new
+    // hazard went unweighted. Reads only the settlements near the new
+    // events, not the whole table (see exposureBackfill.ts). Caught: a
+    // failure here costs one cycle of enrichment, never the review.
+    const geography = await backfillEventExposure().catch((err) => {
+      console.error(`exposure enrichment failed: ${err}`);
+      return null;
+    });
     // Alerts are evaluated here, after the gate and before the purge:
     // newly approved rows are visible to the risk engine by now, and an
     // alert written before the purge is served by the same regenerated
@@ -107,7 +117,7 @@ const JOBS: Record<string, () => Promise<unknown>> = {
     });
     const purge = await purgeReadCaches();
     if (!purge.purged) console.error(`read-cache purge skipped/failed: ${purge.detail}`);
-    return { ...review, alerts: alertsResult, purge };
+    return { ...review, geography, alerts: alertsResult, purge };
   },
   "generate-briefs": () => generateBriefsForActiveCountries(),
   // Mirrors src/app/api/admin/snapshot/route.ts exactly: grading failure
@@ -122,7 +132,7 @@ const JOBS: Record<string, () => Promise<unknown>> = {
     });
     const grading = await gradeResolvedPredictions().catch((err) => {
       console.error(`riskModelGrading failed: ${err}`);
-      return { graded: 0, ungraded: 0 };
+      return { graded: 0, ungraded: 0, voided: 0 };
     });
     return { snapshot, features, grading };
   },
@@ -178,6 +188,7 @@ const JOBS: Record<string, () => Promise<unknown>> = {
   // exposure model counts against. Not scheduled -- settlements do not
   // move. See src/lib/exposure.ts.
   "load-population-centers": () => loadPopulationCentersFromSource(),
+  // Also runs on every review-pending; this is the by-hand entry point.
   "backfill-exposure": () => backfillEventExposure(),
   // Applies src/lib/migrations.ts — idempotent, safe to run any time a
   // schema change ships (the /api/admin/migrate route does the same).

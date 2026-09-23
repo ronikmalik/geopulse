@@ -11,6 +11,7 @@ import {
   type NewCountryFeatureDailyRow,
 } from "@/db/schema";
 import { getCountryThreatSummaries, getCountryCategoryRows, aggregateByCountryAndPillar } from "@/lib/risk";
+import { SCORING_VERSION } from "@/lib/scoringMethod";
 import type { PillarId } from "@/lib/pillars";
 
 // Writes the wide daily feature snapshot (country_feature_daily — see its
@@ -239,6 +240,7 @@ export async function snapshotCountryFeatures(): Promise<FeatureSnapshotResult> 
       momentum: s.momentum,
       momentumDirection: s.momentumDirection,
       eventCount: s.eventCount,
+      scoringVersion: SCORING_VERSION,
     };
     const pillars = pillarsByCountry.get(s.country);
     if (pillars) {

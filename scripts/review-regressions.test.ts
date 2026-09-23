@@ -66,13 +66,26 @@ test("forecast target follows the input snapshot clock, not the noon training sc
 test("regression examples preserve actual target timestamps after burn-in", () => {
   const snapshots: Snapshot[] = Array.from({ length: 12 }, (_, i) => ({
     country: "US", snapshotAt: day(i + 1), score: i, threatLevel: 1,
-    momentum: 0, momentumDirection: 0, eventCount: i,
+    momentum: 0, momentumDirection: 0, eventCount: i, scoringVersion: 1,
   }));
   const examples = buildRegressionExamples(snapshots, [], 1);
   assert.equal(examples.length, 4);
   assert.equal(+examples[0].snapshotAt, +day(8));
   assert.equal(+examples[0].targetAt, +day(9));
   assert.equal(examples[0].targetScore, 8);
+});
+
+test("no training pair straddles a change of scoring methodology", () => {
+  // Same series, but the methodology changes on day 10. The (9 -> 10)
+  // pair would teach the model that a methodology change is something
+  // that happened in the world; it must be dropped, and only it.
+  const snapshots: Snapshot[] = Array.from({ length: 12 }, (_, i) => ({
+    country: "US", snapshotAt: day(i + 1), score: i, threatLevel: 1,
+    momentum: 0, momentumDirection: 0, eventCount: i, scoringVersion: i + 1 >= 10 ? 3 : 2,
+  }));
+  const examples = buildRegressionExamples(snapshots, [], 1);
+  assert.equal(examples.length, 3);
+  assert.ok(examples.every((e) => +e.snapshotAt !== +day(9)));
 });
 
 test("snapshot matching rejects gaps beyond six hours and selects the closest outcome", () => {

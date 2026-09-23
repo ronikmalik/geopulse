@@ -16,6 +16,10 @@ import { findClosestSnapshot, MATCH_TOLERANCE_MS } from "@/lib/riskModel";
 // predictions were made before their outcome was knowable.
 export interface GradingResult {
   graded: number;
+  // Resolved across a change of scoring methodology — the outcome is on a
+  // different scale from the prediction, so no honest error exists. Marked
+  // graded with no actual score, and excluded from every accuracy figure.
+  voided: number;
   ungraded: number; // still waiting on a snapshot within tolerance of resolvesAt
 }
 
@@ -27,11 +31,19 @@ export async function gradeResolvedPredictions(): Promise<GradingResult> {
       country: riskPredictions.country,
       resolvesAt: riskPredictions.resolvesAt,
       predictedScore: riskPredictions.predictedScore,
+      scoringVersion: riskPredictions.scoringVersion,
     })
     .from(riskPredictions)
-    .where(and(isNull(riskPredictions.actualScore), lte(riskPredictions.resolvesAt, new Date())));
+    .where(
+      and(
+        isNull(riskPredictions.actualScore),
+        // gradedAt without actualScore = voided (see below); never retried.
+        isNull(riskPredictions.gradedAt),
+        lte(riskPredictions.resolvesAt, new Date()),
+      ),
+    );
 
-  if (resolvable.length === 0) return { graded: 0, ungraded: 0 };
+  if (resolvable.length === 0) return { graded: 0, ungraded: 0, voided: 0 };
 
   // Fetch each involved country's snapshots once, not once per
   // prediction — a country can have several ungraded predictions
@@ -39,7 +51,7 @@ export async function gradeResolvedPredictions(): Promise<GradingResult> {
   const countries = [...new Set(resolvable.map((p) => p.country))];
   const snapshotsByCountry = new Map<
     string,
-    { snapshotAt: Date; score: number; threatLevel: number }[]
+    { snapshotAt: Date; score: number; threatLevel: number; scoringVersion: number }[]
   >();
   for (const country of countries) {
     const targetTimes = resolvable.filter((p) => p.country === country).map((p) => p.resolvesAt.getTime());
@@ -48,6 +60,7 @@ export async function gradeResolvedPredictions(): Promise<GradingResult> {
         snapshotAt: countryStateHistory.snapshotAt,
         score: countryStateHistory.score,
         threatLevel: countryStateHistory.threatLevel,
+        scoringVersion: countryStateHistory.scoringVersion,
       })
       .from(countryStateHistory)
       .where(
@@ -67,12 +80,22 @@ export async function gradeResolvedPredictions(): Promise<GradingResult> {
 
   let graded = 0;
   let ungraded = 0;
+  let voided = 0;
 
   for (const pred of resolvable) {
     const sorted = snapshotsByCountry.get(pred.country) ?? [];
     const actual = findClosestSnapshot(sorted, pred.resolvesAt.getTime());
     if (!actual) {
       ungraded++; // no snapshot within tolerance yet — a real data gap, try again later
+      continue;
+    }
+
+    if (actual.scoringVersion !== pred.scoringVersion) {
+      await db
+        .update(riskPredictions)
+        .set({ gradedAt: new Date() })
+        .where(eq(riskPredictions.id, pred.id));
+      voided++;
       continue;
     }
 
@@ -88,5 +111,5 @@ export async function gradeResolvedPredictions(): Promise<GradingResult> {
     graded++;
   }
 
-  return { graded, ungraded };
+  return { graded, ungraded, voided };
 }

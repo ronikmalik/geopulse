@@ -180,7 +180,6 @@ export const events = pgTable(
     index("events_created_at_idx").on(table.createdAt),
     index("events_category_idx").on(table.category),
     index("events_country_idx").on(table.country),
-    index("events_correlation_group_idx").on(table.correlationGroupId),
     index("events_primary_event_id_idx").on(table.primaryEventId),
     index("events_review_status_idx").on(table.reviewStatus),
     index("events_geocoded_at_idx").on(table.geocodedAt),
@@ -236,6 +235,9 @@ export const countryStateHistory = pgTable(
     momentum: smallint("momentum").notNull(),
     momentumDirection: smallint("momentum_direction").notNull(),
     eventCount: integer("event_count").notNull(),
+    // Which methodology produced this score — see src/lib/scoringMethod.ts.
+    // No default on purpose: every writer states it.
+    scoringVersion: smallint("scoring_version").notNull(),
   },
   (table) => [
     index("country_state_history_country_idx").on(table.country),
@@ -277,6 +279,8 @@ export const countryFeatureDaily = pgTable(
     // Headline state, duplicated from country_state_history so a training
     // query never has to join on a fuzzy timestamp match.
     score: doublePrecision("score").notNull(),
+    // See src/lib/scoringMethod.ts — every stored score names its method.
+    scoringVersion: smallint("scoring_version").notNull(),
     threatLevel: smallint("threat_level").notNull(),
     momentum: smallint("momentum").notNull(),
     momentumDirection: smallint("momentum_direction").notNull(),
@@ -579,7 +583,7 @@ export const populationCenter = pgTable(
     lon: doublePrecision("lon").notNull(),
     population: integer("population").notNull(),
   },
-  (table) => [index("population_center_lat_lon_idx").on(table.lat, table.lon)],
+  // No lat/lon index: exposure.ts only ever reads this table whole.
 );
 
 export type PopulationCenterRow = typeof populationCenter.$inferSelect;
@@ -962,7 +966,7 @@ export const sourceCredibility = pgTable(
     raw: text("raw"),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("source_credibility_domain_idx").on(table.domain)],
+  // domain is UNIQUE, which already indexes it.
 );
 
 export type SourceCredibilityRow = typeof sourceCredibility.$inferSelect;
@@ -1386,7 +1390,13 @@ export const riskPredictions = pgTable(
     actualScore: doublePrecision("actual_score"),
     actualThreatLevel: smallint("actual_threat_level"),
     absoluteError: doublePrecision("absolute_error"),
+    // Set with actualScore when graded, or alone when the prediction was
+    // voided because the score methodology changed before it resolved.
     gradedAt: timestamp("graded_at", { withTimezone: true }),
+    // The scoring methodology the input snapshot was computed under — a
+    // prediction is only ever graded against an outcome of the same
+    // version (src/lib/riskModelGrading.ts).
+    scoringVersion: smallint("scoring_version").notNull(),
   },
   (table) => [
     index("risk_predictions_resolves_at_idx").on(table.resolvesAt),

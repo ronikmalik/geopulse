@@ -66,17 +66,30 @@ export function momentumBucketLabel(magnitude: number): string {
 }
 
 // Decayed-severity-sum thresholds mapping a pillar's weighted event load to
-// a Pulse Level. Heuristic, tuned for a feed that typically sees a handful
-// of severity 2-3 items/day per pillar in calm conditions and severity 4-5
-// spikes during an active crisis — expect to recalibrate against real
-// usage data rather than treat these as fixed truth. The top bucket (30+)
-// is set deliberately high, well above what a single bad news day
-// produces, so "Extreme" stays rare — Ukraine, an active Iran-region
-// conflict, a catastrophic disaster, not routine escalation language.
+// a Pulse Level (scoring version 3, 2026-09-23 — see scoringMethod.ts).
+//
+// Why they read the way they do. With a 3-day half-life, a pillar that
+// receives r distinct stories a day of severity s settles at a load of
+// r x s x pillarWeight / ln(2)/3 — about 19.5 x r for severity-3
+// geopolitical-security stories. So each threshold has a plain meaning:
+//
+//   Extreme  75  ~4 distinct serious security stories a day, sustained
+//   High     20  ~1 a day, sustained
+//   Medium    4  ~1 every five days
+//
+// The previous values (30/12/3) were set when the pipeline carried far
+// fewer sources and counted duplicate articles; by 2026-09-23 they put 23
+// countries at Extreme, including the UK, Poland and Australia — a label
+// that had stopped meaning anything. Re-measured the same day on the
+// version-3 score: 7 countries at Extreme (UA, RU, IR, YE, SA, PS, IL —
+// the active war theatres), 11 at High, the rest Medium or Low. These are
+// fixed constants, not percentiles recomputed daily: a percentile would
+// always put the same share of the world at Extreme however calm or
+// violent the world actually was.
 const THREAT_LEVEL_THRESHOLDS: [min: number, level: ThreatLevel][] = [
-  [30, 4],
-  [12, 3],
-  [3, 2],
+  [75, 4],
+  [20, 3],
+  [4, 2],
 ];
 
 export function weightToThreatLevel(weight: number): ThreatLevel {

@@ -1,6 +1,8 @@
-import { sql, getTableColumns, and, eq, isNull, inArray, desc } from "drizzle-orm";
+import { sql, getTableColumns, and, eq, isNull, isNotNull, inArray, desc, type SQL, type AnyColumn } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { getDb } from "@/db";
 import { EXPOSURE_WEIGHTING_ENABLED, exposureMultiplierSqlExpr } from "@/lib/exposure";
+import { corroborationMultiplierSqlExpr, saturateSensorWeight, sensorSourceList } from "@/lib/scoringMethod";
 import { events, type EventRow } from "@/db/schema";
 import { pillarForCategory, PILLAR_LIST, PILLAR_WEIGHT, COVERED_PILLARS, type PillarId } from "@/lib/pillars";
 import type { Category } from "@/lib/categories";
@@ -24,17 +26,30 @@ const HALF_LIFE_DAYS = 3;
 const LOOKBACK_DAYS = 30;
 const DECAY_RATE = Math.LN2 / HALF_LIFE_DAYS;
 
-
 // Resolved once at module load: the exposure curve as SQL, or a literal
 // 1 when the model is switched off, so the query shape never changes and
-// the off state provably multiplies by exactly one.
+// the off state provably multiplies by exactly one. Table-qualified
+// because the scoring query below joins events to itself.
 const EXPOSURE_FACTOR_SQL = EXPOSURE_WEIGHTING_ENABLED
-  ? exposureMultiplierSqlExpr("population_exposed", "category")
+  ? exposureMultiplierSqlExpr(`"events"."population_exposed"`, `"events"."category"`)
   : "1";
+
+const CORROBORATION_FACTOR_SQL = corroborationMultiplierSqlExpr(`"corroboration"."sources"`);
+
+// Visible to the scoring engine: approved at the gate, not hidden by the
+// kill switch. One definition for the scored row, its primary and its
+// duplicates alike.
+function scoreable(table: { reviewStatus: AnyColumn; preKillSwitchAt: AnyColumn }): SQL {
+  return sql`${table.reviewStatus} = 'approved' and ${table.preKillSwitchAt} is null`;
+}
 
 export interface CountryCategoryRow {
   country: string;
   category: string;
+  // Set only for the automated detection feeds in scoringMethod.ts's
+  // SENSOR_SOURCES, so their load can be saturated per instrument; null
+  // for everything else, which is summed as-is.
+  sensorSource: string | null;
   decayedWeight: number;
   recent24h: number;
   prior24h: number;
@@ -44,26 +59,49 @@ export interface CountryCategoryRow {
   lastEventAt: string;
 }
 
-// One query, grouped by (country, category) — everything downstream
-// (pillar rollups, Threat Level, Momentum) is pure JS aggregation over
-// these rows, so the scoring model lives in one place (src/lib/threat.ts)
-// rather than being re-derived in SQL.
+// One query, grouped by (country, category, sensor) — everything
+// downstream (pillar rollups, Threat Level, Momentum) is pure JS
+// aggregation over these rows, so the scoring model lives in one place
+// (src/lib/threat.ts + src/lib/scoringMethod.ts) rather than being
+// re-derived in SQL.
+//
+// What is counted is a STORY, not an article (scoring version 3 — see
+// scoringMethod.ts). A row eventDedup.ts filed as a duplicate of another
+// scoreable row adds nothing itself; the story it duplicates is instead
+// multiplied by a bounded bonus for the number of distinct sources that
+// carried it. A duplicate whose primary was rejected or kill-switched is
+// "orphaned" and stands in for the story — but only the earliest such
+// orphan per primary, so a rejected primary's echoes cannot re-enter the
+// score as several separate stories.
 export async function getCountryCategoryRows(country?: string): Promise<CountryCategoryRow[]> {
   const db = getDb();
-  const countryFilter = country
-    ? sql`and ${events.country} = ${country.toUpperCase()}`
-    : sql``;
+  const primary = alias(events, "primary_event");
+  const sibling = alias(events, "sibling_event");
+  const duplicate = alias(events, "duplicate_event");
+
+  const corroboration = db
+    .select({
+      primaryId: sql<number>`${duplicate.primaryEventId}`.as("primary_id"),
+      sources: sql<number>`count(distinct ${duplicate.source})`.as("sources"),
+    })
+    .from(duplicate)
+    .where(and(isNotNull(duplicate.primaryEventId), scoreable(duplicate)))
+    .groupBy(duplicate.primaryEventId)
+    .as("corroboration");
+
+  const countryFilter = country ? sql`and ${events.country} = ${country.toUpperCase()}` : sql``;
+  const sensorKey = sql<string | null>`case when ${events.source} in (${sql.raw(sensorSourceList())}) then ${events.source} end`;
+  const decay = sql`exp(-${sql.raw(String(DECAY_RATE))} * extract(epoch from (now() - ${events.publishedAt})) / 86400)`;
+
   const rows = await db
     .select({
       country: events.country,
       category: events.category,
-      // Severity, decayed by age, and — for hazard categories only —
-      // scaled by how many people live where it happened. Before
-      // 2026-09-22 a magnitude-6 under empty desert and one under a
-      // capital produced the identical number here. See
-      // src/lib/exposure.ts, including why this is narrowed to hazards
-      // and why it can be switched off in one constant.
-      decayedWeight: sql<number>`sum(${events.severity} * exp(-${sql.raw(String(DECAY_RATE))} * extract(epoch from (now() - ${events.publishedAt})) / 86400) * ${sql.raw(EXPOSURE_FACTOR_SQL)})`,
+      sensorSource: sensorKey,
+      // Severity, decayed by age, scaled by how many people live where it
+      // happened (hazards only — exposure.ts) and by how many independent
+      // sources carried the story (scoringMethod.ts).
+      decayedWeight: sql<number>`sum(${events.severity} * ${decay} * ${sql.raw(EXPOSURE_FACTOR_SQL)} * ${sql.raw(CORROBORATION_FACTOR_SQL)})`,
       recent24h: sql<number>`sum(case when ${events.publishedAt} > now() - interval '24 hours' then ${events.severity} else 0 end)`,
       prior24h: sql<number>`sum(case when ${events.publishedAt} <= now() - interval '24 hours' and ${events.publishedAt} > now() - interval '48 hours' then ${events.severity} else 0 end)`,
       recent7d: sql<number>`sum(case when ${events.publishedAt} > now() - interval '7 days' then ${events.severity} else 0 end)`,
@@ -72,16 +110,31 @@ export async function getCountryCategoryRows(country?: string): Promise<CountryC
       lastEventAt: sql<string>`max(${events.publishedAt})`,
     })
     .from(events)
+    .leftJoin(corroboration, eq(corroboration.primaryId, events.id))
+    .leftJoin(primary, eq(primary.id, events.primaryEventId))
     .where(
-      sql`${events.country} is not null and ${events.reviewStatus} = 'approved' and ${events.preKillSwitchAt} is null and ${events.publishedAt} > now() - interval '${sql.raw(String(LOOKBACK_DAYS))} days' ${countryFilter}`,
+      sql`${events.country} is not null and ${scoreable(events)} and ${events.publishedAt} > now() - interval '${sql.raw(String(LOOKBACK_DAYS))} days' ${countryFilter}
+        and (
+          ${events.primaryEventId} is null
+          or (
+            (${primary.id} is null or not (${scoreable(primary)}))
+            and not exists (
+              select 1 from ${events} ${sql.raw(`"sibling_event"`)}
+              where ${sibling.primaryEventId} = ${events.primaryEventId}
+                and ${sibling.id} < ${events.id}
+                and ${scoreable(sibling)}
+            )
+          )
+        )`,
     )
-    .groupBy(events.country, events.category);
+    .groupBy(events.country, events.category, sensorKey);
 
   return rows
     .filter((r): r is typeof r & { country: string } => r.country !== null)
     .map((r) => ({
       country: r.country,
       category: r.category,
+      sensorSource: r.sensorSource ?? null,
       decayedWeight: Number(r.decayedWeight),
       recent24h: Number(r.recent24h),
       prior24h: Number(r.prior24h),
@@ -120,6 +173,11 @@ export function aggregateByCountryAndPillar(
   rows: CountryCategoryRow[],
 ): Map<string, Map<PillarId, PillarAgg>> {
   const byCountry = new Map<string, Map<PillarId, PillarAgg>>();
+  // Raw decayed load per (country, pillar, sensor), saturated only once
+  // the whole of an instrument's contribution to that pillar is known —
+  // saturating each category separately would let a sensor that spans
+  // two categories of the same pillar exceed the cap.
+  const sensorLoad = new Map<string, { country: string; pillarId: PillarId; raw: number }>();
 
   for (const row of rows) {
     const pillarId = pillarForCategory(row.category as Category);
@@ -130,7 +188,14 @@ export function aggregateByCountryAndPillar(
     // Pillar weight applies to the Pulse Level input only — recent/prior
     // (momentum's inputs) are left unweighted since a constant multiplier
     // cancels out of a percentage-change ratio anyway.
-    agg.decayedWeight += row.decayedWeight * PILLAR_WEIGHT[pillarId];
+    if (row.sensorSource) {
+      const key = `${row.country}|${pillarId}|${row.sensorSource}`;
+      const load = sensorLoad.get(key) ?? { country: row.country, pillarId, raw: 0 };
+      load.raw += row.decayedWeight;
+      sensorLoad.set(key, load);
+    } else {
+      agg.decayedWeight += row.decayedWeight * PILLAR_WEIGHT[pillarId];
+    }
     agg.recent24h += row.recent24h;
     agg.prior24h += row.prior24h;
     agg.recent7d += row.recent7d;
@@ -139,6 +204,11 @@ export function aggregateByCountryAndPillar(
     if (row.lastEventAt > agg.lastEventAt) agg.lastEventAt = row.lastEventAt;
 
     pillars.set(pillarId, agg);
+  }
+
+  for (const { country, pillarId, raw } of sensorLoad.values()) {
+    const agg = byCountry.get(country)!.get(pillarId)!;
+    agg.decayedWeight += saturateSensorWeight(raw) * PILLAR_WEIGHT[pillarId];
   }
 
   return byCountry;

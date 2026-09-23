@@ -376,7 +376,6 @@ export const MIGRATION_STATEMENTS = [
     raw TEXT,
     fetched_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`,
-  sql`CREATE INDEX IF NOT EXISTS source_credibility_domain_idx ON source_credibility (domain)`,
   // bias_rating -> bias + political_bias (2026-09-11, same day, first
   // live sync) — MBFC's real schema turned out to carry two distinct
   // fields (see schema.ts's own doc comment on `bias`), confirmed only
@@ -589,8 +588,48 @@ export const MIGRATION_STATEMENTS = [
     lon DOUBLE PRECISION NOT NULL,
     population INTEGER NOT NULL
   )`,
-  sql`CREATE INDEX IF NOT EXISTS population_center_lat_lon_idx ON population_center (lat, lon)`,
   sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS population_exposed INTEGER`,
+  // 2026-09-23: scoring methodology version (src/lib/scoringMethod.ts).
+  // Every history snapshot and every risk prediction records which
+  // version of the score it was computed under, so a series is never
+  // compared across a methodology change. Rows written before the column
+  // existed are backfilled from the known deploy time of version 2; the
+  // default is then dropped on purpose, so a writer that forgets to state
+  // its version fails loudly instead of silently claiming version 1.
+  sql`DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                     WHERE table_name = 'country_state_history' AND column_name = 'scoring_version') THEN
+        ALTER TABLE country_state_history ADD COLUMN scoring_version SMALLINT NOT NULL DEFAULT 1;
+        UPDATE country_state_history SET scoring_version = 2 WHERE snapshot_at >= '2026-09-22T20:49:38Z';
+        ALTER TABLE country_state_history ALTER COLUMN scoring_version DROP DEFAULT;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                     WHERE table_name = 'risk_predictions' AND column_name = 'scoring_version') THEN
+        ALTER TABLE risk_predictions ADD COLUMN scoring_version SMALLINT NOT NULL DEFAULT 1;
+        UPDATE risk_predictions SET scoring_version = 2 WHERE generated_at >= '2026-09-22T20:49:38Z';
+        ALTER TABLE risk_predictions ALTER COLUMN scoring_version DROP DEFAULT;
+      END IF;
+      -- Every feature row so far predates version 2 (the table's last write
+      -- was the 2026-09-22 18:00 UTC snapshot), so all of them are version 1.
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                     WHERE table_name = 'country_feature_daily' AND column_name = 'scoring_version') THEN
+        ALTER TABLE country_feature_daily ADD COLUMN scoring_version SMALLINT NOT NULL DEFAULT 1;
+        ALTER TABLE country_feature_daily ALTER COLUMN scoring_version DROP DEFAULT;
+      END IF;
+    END
+  $$`,
+  // 2026-09-23: indexes that cost writes and storage and serve no query.
+  // source_credibility_domain_idx duplicated the index the UNIQUE
+  // constraint on the same column already builds; population_center is
+  // only ever read whole (exposure.ts caches all 34k rows), so its
+  // lat/lon index had 0 scans; nothing filters on correlation_group_id,
+  // so events_correlation_group_idx had 0 scans too. Their CREATE
+  // statements were removed rather than left to fight these DROPs, so a
+  // fresh database and the live one converge on the same state.
+  sql`DROP INDEX IF EXISTS source_credibility_domain_idx`,
+  sql`DROP INDEX IF EXISTS population_center_lat_lon_idx`,
+  sql`DROP INDEX IF EXISTS events_correlation_group_idx`,
 ];
 
 export async function applyMigrations(): Promise<{ statementsApplied: number }> {

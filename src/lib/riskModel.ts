@@ -102,6 +102,9 @@ export interface Snapshot {
   momentum: number;
   momentumDirection: number;
   eventCount: number;
+  // See src/lib/scoringMethod.ts. Two snapshots are only ever paired as
+  // (input, outcome) when they share a version.
+  scoringVersion: number;
 }
 
 export interface AnomalyRow {
@@ -120,6 +123,7 @@ export async function fetchSnapshotsSince(start: Date): Promise<Snapshot[]> {
       momentum: countryStateHistory.momentum,
       momentumDirection: countryStateHistory.momentumDirection,
       eventCount: countryStateHistory.eventCount,
+      scoringVersion: countryStateHistory.scoringVersion,
     })
     .from(countryStateHistory)
     .where(gte(countryStateHistory.snapshotAt, start))
@@ -249,6 +253,12 @@ export function buildRegressionExamples(
     for (const s of sorted) {
       const target = findClosestSnapshot(sorted, s.snapshotAt.getTime() + horizonMs);
       if (!target) continue; // window unresolved, or a real data gap — excluded, not fabricated
+      // A pair that straddles a change of scoring methodology would teach
+      // the model that the methodology change was something that happened
+      // in the world (the 2026-09-23 change moved most scores 15-40% in
+      // one step). Excluded, like any other target that was never really
+      // observed.
+      if (target.scoringVersion !== s.scoringVersion) continue;
 
       examples.push({
         country: s.country,
@@ -422,6 +432,7 @@ async function fitAndRecordModel(
       predictedThreatLevel: weightToThreatLevel(predictedScore),
       inputFeatures: JSON.stringify(features),
       resolvesAt: predictionTargetAt(s.snapshotAt, horizonDays),
+      scoringVersion: s.scoringVersion,
     };
   });
 
