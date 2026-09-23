@@ -53,6 +53,7 @@ import { trainNarrativeClusters } from "../src/lib/narrativeTraining";
 import { trainAndEvaluateTextClassifier } from "../src/lib/textClassifierTraining";
 import { syncSourceCredibility } from "../src/lib/sourceCredibility";
 import { sampleGateDecisions, checkGradingProgress } from "../src/lib/gateReview";
+import { checkPipelineHealth } from "../src/lib/pipelineHealth";
 
 // Hard ceiling on any single job so a hung upstream can never pin a runner
 // for the workflow's full timeout-minutes. Derived from the caller's own
@@ -196,6 +197,10 @@ const JOBS: Record<string, () => Promise<unknown>> = {
   // Weekly alarm, not a metric: throws (and so fails the workflow) when a
   // week passed with no human gate grades — see checkGradingProgress.
   "grading-check": () => checkGradingProgress(),
+  // Daily alarm, same shape: throws (fails the workflow, GitHub emails the
+  // owner) when a backlog grows, a source goes quiet or review sticks.
+  // Runs right after the 18:00 snapshot — see daily-snapshots.yml.
+  "pipeline-health": () => checkPipelineHealth(),
 };
 
 async function main() {

@@ -51,3 +51,15 @@ jobs:
       job: ${{ needs.pick.outputs.job }}
       timeout-minutes: 10
     secrets: inherit
+  # 2026-09-23: the daily pipeline alarm (src/lib/pipelineHealth.ts). Runs
+  # straight after the snapshot, while the database is still awake from it,
+  # so it costs no extra Neon wake-up. A failure here turns the run red and
+  # GitHub emails the owner. always() so a failed snapshot doesn't hide it.
+  health:
+    needs: [pick, run]
+    if: always() && needs.pick.outputs.job == 'snapshot'
+    uses: ./.github/workflows/_run-job.yml
+    with:
+      job: pipeline-health
+      timeout-minutes: 3
+    secrets: inherit

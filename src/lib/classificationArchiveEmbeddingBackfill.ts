@@ -1,4 +1,4 @@
-import { isNull, eq, desc } from "drizzle-orm";
+import { isNull, isNotNull, eq, desc, and, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { classificationArchive } from "@/db/schema";
 import { embedBatch } from "./embeddings";
@@ -31,13 +31,25 @@ import { getEmbeddingBudget } from "./aiUsage";
 // is all-or-nothing on budget (asks for N, embeds nothing if N isn't
 // affordable), so the request is sized to the budget FIRST, never the
 // other way round. feed_archive's backfill (the live "similar events"
-// feature) runs before this one in ingest.ts and keeps its small fixed
-// batch, so it is never starved by this one.
+// feature) runs before this one in ingest.ts and takes its share of the
+// same paced budget first (since 2026-09-23), so this one gets what is left.
 //
 // MAX_PER_CYCLE bounds wall-clock (embedBatch paces 4 rows per 3s, so 40
 // rows is ~30s) and keeps well inside ingest.ts's deadline for this step.
 const MAX_PER_CYCLE = 40;
 const MAX_INPUT_CHARS = 2000;
+
+// Dropped rows are embedded only while the embedded negative pool is below
+// this multiple of the embedded kept pool (2026-09-23). Measured that day:
+// ~340 kept and ~1,250 dropped rows archived a day, against ~630 embedding
+// calls a day left once published events are served. Kept rows fit in
+// that; dropped rows never can, so "embed everything" was a backlog
+// that could only grow (20,920 rows and rising). A nearest-neighbour
+// classifier gains little from negatives beyond a small multiple of its
+// positives (chooseBestK already subsamples to 1,200 for cross-validation),
+// so past this ratio an unembedded dropped row is a decision, not a debt —
+// and the only backlog that has to reach zero is the kept one.
+const MAX_DROPPED_PER_KEPT = 2;
 
 export interface ClassificationArchiveBackfillResult {
   processed: number;
@@ -57,10 +69,22 @@ export async function backfillClassificationArchiveEmbeddings(): Promise<Classif
     // reference pool where it is weakest; the ~14k dropped rows are far
     // more negatives than a k-NN needs (chooseBestK subsamples to 1,200
     // for CV anyway), so they take the remainder rather than the lead.
+    const [pool] = await db
+      .select({
+        kept: sql<number>`count(*) filter (where ${classificationArchive.kept})::int`,
+        dropped: sql<number>`count(*) filter (where not ${classificationArchive.kept})::int`,
+      })
+      .from(classificationArchive)
+      .where(isNotNull(classificationArchive.embedding));
+    const wantDropped = (pool?.dropped ?? 0) < MAX_DROPPED_PER_KEPT * (pool?.kept ?? 0);
     const rows = await db
       .select({ id: classificationArchive.id, title: classificationArchive.title, snippet: classificationArchive.snippet })
       .from(classificationArchive)
-      .where(isNull(classificationArchive.embedding))
+      .where(
+        wantDropped
+          ? isNull(classificationArchive.embedding)
+          : and(isNull(classificationArchive.embedding), eq(classificationArchive.kept, true)),
+      )
       .orderBy(desc(classificationArchive.kept), desc(classificationArchive.id))
       .limit(take);
 

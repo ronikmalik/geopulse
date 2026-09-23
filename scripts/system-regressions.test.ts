@@ -585,3 +585,23 @@ test("GDELT discovery reads every 15-minute file in its window, not just the new
   // A name it cannot parse is used as-is rather than guessed around.
   assert.deepEqual(recentExportCsvUrls("https://x/odd.zip", 5), ["https://x/odd.zip"]);
 });
+
+test("the pipeline alarm stays quiet on a healthy day and names each quiet failure", async () => {
+  const { evaluatePipelineHealth } = await import("../src/lib/pipelineHealth");
+  const healthy = {
+    feedEmbeddingBacklog: 12, keptArchiveBacklog: 2675, embeddingsToday: 620,
+    oldestPendingReviewHours: 0.5, gdeltQueueWaiting: 620,
+    events24hBySource: { gdelt: 170, rss: 74, telegram: 49, usgs: 0 },
+    hoursSinceSourceSuccess: { gdelt: 0.3, rss: 0.3, usgs: 0.3 },
+  };
+  // A quiet day for a hazard feed (usgs: 0) is real, not a failure.
+  assert.deepEqual(evaluatePipelineHealth(healthy), []);
+  // Each of 2026-09-23's silent problems would now fail the run:
+  assert.match(evaluatePipelineHealth({ ...healthy, feedEmbeddingBacklog: 267 }).join(), /published events have no embedding/);
+  assert.match(evaluatePipelineHealth({ ...healthy, oldestPendingReviewHours: 52 }).join(), /pending review for 52\.0 h/);
+  assert.match(evaluatePipelineHealth({ ...healthy, embeddingsToday: 0 }).join(), /Gemini key/);
+  assert.match(evaluatePipelineHealth({ ...healthy, events24hBySource: { rss: 74, telegram: 49 } }).join(), /No gdelt events/);
+  assert.match(evaluatePipelineHealth({ ...healthy, hoursSinceSourceSuccess: { gdelt: Infinity } }).join(), /gdelt has not fetched/);
+  // No pending items at all is healthy, not "unknown".
+  assert.deepEqual(evaluatePipelineHealth({ ...healthy, oldestPendingReviewHours: null }), []);
+});
