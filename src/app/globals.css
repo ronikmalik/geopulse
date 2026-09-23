@@ -19,8 +19,18 @@ body {
   overflow: hidden;
 }
 
+/* height as well as width: without it every horizontal scrollbar fell
+   back to the browser's full default thickness, drawn as a solid red slab. */
 ::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
+}
+/* For strips whose edge fade already says "there is more". */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 ::-webkit-scrollbar-track {
   background: #000000;
