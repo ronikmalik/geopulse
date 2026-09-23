@@ -634,6 +634,10 @@ export const MIGRATION_STATEMENTS = [
   // processed candidates are marked rather than deleted — see
   // pendingGdeltTitle.resolvedAt in schema.ts.
   sql`ALTER TABLE pending_gdelt_title ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ`,
+  // 2026-09-23: bounded retries at the review gate — see
+  // MAX_REVIEW_ATTEMPTS in classifierAudit.ts. A counter, so a default of 0
+  // is the true value for every existing row.
+  sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS review_attempts SMALLINT NOT NULL DEFAULT 0`,
 ];
 
 export async function applyMigrations(): Promise<{ statementsApplied: number }> {

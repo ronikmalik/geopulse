@@ -138,6 +138,11 @@ export const events = pgTable(
     // fact, which is how the self-taught "exclude Gaza" lesson ran for
     // four days before anyone could tell it was the cause.
     reviewReasoning: text("review_reasoning"),
+    // Review rounds that returned no usable verdict for this row (see
+    // MAX_REVIEW_ATTEMPTS in classifierAudit.ts). Without it such a row sat
+    // at the head of the oldest-first queue indefinitely, resent to Gemini
+    // every cycle.
+    reviewAttempts: smallint("review_attempts").notNull().default(0),
     // NULL = not yet run through src/lib/geocodeBackfill.ts's Gemini
     // location-resolution pass — still sitting at classify.ts's
     // country-centroid fallback lat/lon. Set the moment that pass has

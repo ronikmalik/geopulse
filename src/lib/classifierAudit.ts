@@ -1769,6 +1769,8 @@ async function applyPendingAssessment(
 export interface PendingReviewResult {
   approved: number;
   rejected: number;
+  // Withheld after MAX_REVIEW_ATTEMPTS rounds with no usable verdict.
+  withheld: number;
   autoPromoted: number;
   skipped: boolean;
 }
@@ -1776,11 +1778,46 @@ export interface PendingReviewResult {
 // Called from every runIngest cycle (see ingest.ts) — this is what makes
 // "before it hits the feed" actually true in near-real-time rather than
 // waiting for the once-daily full sweep.
+// Bounded retries at the gate (2026-09-23, live-caught). An item whose
+// Gemini answer fails validKeptAssessments — typically a changed country
+// or severity with no stated reason, which the validator rightly refuses
+// to apply unexplained — used to be left pending and resent every cycle.
+// The queue is oldest-first, so such an item sat at the head of every
+// batch for good: five had been stuck since 2026-09-21, four of them GDELT
+// stories about attacks in Ukraine filed under Russia. After this many
+// rounds that returned an answer but no usable verdict for the item, it is
+// rejected with the reason stated, not published unverified — the same
+// credibility-first call the gate makes everywhere else. A failed call
+// (outage, quota) is never counted against an item.
+const MAX_REVIEW_ATTEMPTS = 3;
+
+async function recordUnusableVerdicts(ids: number[]): Promise<number> {
+  const db = getDb();
+  const bumped = await db
+    .update(events)
+    .set({ reviewAttempts: sql`${events.reviewAttempts} + 1` })
+    .where(and(inArray(events.id, ids), eq(events.reviewStatus, "pending")))
+    .returning({ id: events.id, attempts: events.reviewAttempts });
+  const exhausted = bumped.filter((r) => r.attempts >= MAX_REVIEW_ATTEMPTS).map((r) => r.id);
+  if (exhausted.length === 0) return 0;
+  const withheld = await db
+    .update(events)
+    .set({
+      reviewStatus: "rejected",
+      reviewReasoning: `Withheld: the review gate returned no usable verdict in ${MAX_REVIEW_ATTEMPTS} attempts, so the item was never verified.`,
+    })
+    .where(and(inArray(events.id, exhausted), eq(events.reviewStatus, "pending")))
+    .returning({ id: events.id });
+  console.warn(`review gate: withheld ${withheld.length} item(s) after ${MAX_REVIEW_ATTEMPTS} unusable verdicts: ${withheld.map((r) => r.id).join(", ")}`);
+  return withheld.length;
+}
+
 export async function reviewPendingEvents(): Promise<PendingReviewResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   const deadlineAt = Date.now() + PENDING_REVIEW_DEADLINE_MS;
   let approved = 0;
   let rejected = 0;
+  let withheld = 0;
 
   if (apiKey) {
     try {
@@ -1821,9 +1858,16 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
           const justApproved: DedupCandidate[] = [];
 
           for (let j = 0; j < round.length; j++) {
+            // A failed call (null) is an outage, not a verdict on any item —
+            // it never counts toward an item's attempts.
             if (!results[j]) continue;
             const assessments = validKeptAssessments(results[j]!, round[j]);
             const byId = new Map(round[j].map((c) => [c.id, c]));
+            const answered = new Set(assessments.map((a) => a.id));
+            const unanswered = round[j].filter((c) => !answered.has(c.id)).map((c) => c.id);
+            if (unanswered.length > 0) {
+              withheld += await recordUnusableVerdicts(unanswered);
+            }
 
             for (const a of assessments) {
               if (typeof a.id !== "number") continue;
@@ -1900,7 +1944,7 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
     console.error(`pending-review auto-promote failed: ${err}`);
   }
 
-  return { approved, rejected, autoPromoted, skipped: !apiKey };
+  return { approved, rejected, withheld, autoPromoted, skipped: !apiKey };
 }
 
 export interface AuditFinding {
