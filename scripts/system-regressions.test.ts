@@ -607,3 +607,17 @@ test("the pipeline alarm stays quiet on a healthy day and names each quiet failu
   // No pending items at all is healthy, not "unknown".
   assert.deepEqual(evaluatePipelineHealth({ ...healthy, oldestPendingReviewHours: null }), []);
 });
+
+test("one slow article page costs only itself, not the whole GDELT title batch", async () => {
+  const { settleWithin } = await import("../src/lib/sources/gdeltBulk");
+  const after = <T,>(ms: number, v: T) => new Promise<T>((r) => setTimeout(() => r(v), ms));
+  const started = Date.now();
+  const out = await settleWithin(
+    [after(5, "fast"), after(10_000, "straggler"), Promise.reject(new Error("dead link")), after(10, "also fast")],
+    100,
+  );
+  // Before 2026-09-24 the straggler held the whole round past ingest's
+  // deadline and every title — the fast ones included — was discarded.
+  assert.deepEqual(out, ["fast", null, null, "also fast"]);
+  assert.ok(Date.now() - started < 1_000);
+});

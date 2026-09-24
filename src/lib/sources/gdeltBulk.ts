@@ -122,6 +122,11 @@ const REQUEST_TIMEOUT_MS = 20_000;
 // Vercel floor is the only serverless caller left.
 const DRAIN_BATCH_SIZE = 200;
 const DRAIN_CONCURRENCY = 200;
+// Well inside ingest.ts's 15s GDELT_DRAIN_TIMEOUT_MS, leaving room for the
+// queue reads before the fetches and the resolved-marking after them.
+// Longer than articleTitleFetch.ts's own 8s per-page timeout, so a page
+// that answers within its own limit is never cut off by this one.
+const DRAIN_SOFT_DEADLINE_MS = 10_000;
 
 async function fetchText(url: string): Promise<string> {
   const res = await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
@@ -287,6 +292,21 @@ export function parseExportCandidates(csvs: string[]): GdeltCandidate[] {
 // gdelt-sourced RawItem gets created now (see this file's header comment).
 // A candidate whose fetch fails simply stays queued; nothing here ever
 // falls back to a synthesized guess.
+// Every promise's value if it settles successfully within `ms`, else null
+// in its place — a rejection or a straggler costs only its own slot, never
+// the others'. Order is preserved.
+export async function settleWithin<T>(promises: Promise<T>[], ms: number): Promise<(T | null)[]> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  try {
+    return await Promise.all(promises.map((p) => Promise.race([p.catch(() => null), deadline])));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function drainPendingGdeltTitles(): Promise<RawItem[]> {
   await expireStalePendingGdeltTitles().catch((err) =>
     console.error(`expireStalePendingGdeltTitles failed: ${err}`),
@@ -300,9 +320,20 @@ export async function drainPendingGdeltTitles(): Promise<RawItem[]> {
 
   for (let start = 0; start < pending.length; start += DRAIN_CONCURRENCY) {
     const chunk = pending.slice(start, start + DRAIN_CONCURRENCY);
-    const results = await Promise.all(
-      chunk.map(async (row) => ({ row, article: await fetchRealArticleTitle(row.url).catch(() => null) })),
+    // Keep what arrives, drop only what doesn't (2026-09-24, live-caught).
+    // This used to wait for every page in the round, so one straggler past
+    // ingest.ts's 15s GDELT_DRAIN_TIMEOUT_MS discarded the whole batch —
+    // including every title already fetched. Two consecutive runs on
+    // 2026-09-24 (01:03, 01:35 UTC) published zero GDELT items that way,
+    // right after the batch doubled to 200. Each page now races a shared
+    // soft deadline instead; a page that loses stays queued for the next
+    // cycle, the same as a failed fetch, and the round always returns in
+    // time with everything that made it.
+    const articles = await settleWithin(
+      chunk.map((row) => fetchRealArticleTitle(row.url)),
+      DRAIN_SOFT_DEADLINE_MS,
     );
+    const results = chunk.map((row, i) => ({ row, article: articles[i] }));
     for (const { row, article } of results) {
       if (!article) continue; // leave queued for retry next cycle
       resolvedUrls.push(row.url);
