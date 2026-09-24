@@ -1,5 +1,11 @@
 # GeoPulse: Technical Architecture
 
+Latest operational audit: [2026-09-24 budget and explainability audit](AUDIT-2026-09-24.md).
+This records the atomic attempt-reservation guards, unchanged scoring-v3
+arithmetic, country-panel weighted loads and freshness metadata, production
+measurements, and remaining evaluation/coverage gaps. Older sections below
+retain historical descriptions; use the dated updates when they conflict.
+
 A real-time global **non-financial** risk intelligence platform. This document is the
 architecture reference requested against the platform brief — inspired by the broad
 category of world-monitoring dashboards, built from GeoPulse's own taxonomy, scoring

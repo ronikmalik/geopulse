@@ -114,32 +114,8 @@ function todayPacific(): string {
   }).format(new Date());
 }
 
-export async function recordAiUsage(kind: AiUsageKind, count: number): Promise<void> {
-  if (count <= 0) return;
-  try {
-    const db = getDb();
-    const today = todayPacific();
-    await db
-      .insert(aiUsage)
-      .values({ date: today, kind, count })
-      .onConflictDoUpdate({
-        target: [aiUsage.date, aiUsage.kind],
-        set: { count: sql`${aiUsage.count} + ${count}` },
-      });
-  } catch (err) {
-    console.error(`recordAiUsage failed: ${err}`);
-  }
-}
-
-// Read today's count for one kind. Fails OPEN (0, i.e. "assume nothing
-// spent yet") on a DB error — the real Google-side 429 is still the
-// backstop if this read fails and a caller goes over; this is a courtesy
-// cap to stay well clear of that, not the only thing standing between the
-// app and an overage. Shared by both the flat gemini-lite caps below and
-// embedding's own adaptive pacing (widened from the narrower "audit" |
-// "brief" | "geocode" union, 2026-09-11 — the underlying query is already
-// generic over AiUsageKind, this was only ever narrowed to match its two
-// original callers).
+// Advisory preflight only; reserveAiCalls is the atomic authority. Reads
+// fail closed (2026-09-24): a missing ledger is not fresh allowance.
 async function todayCountFor(kind: AiUsageKind): Promise<number> {
   try {
     const db = getDb();
@@ -152,7 +128,8 @@ async function todayCountFor(kind: AiUsageKind): Promise<number> {
     return rows[0]?.count ?? 0;
   } catch (err) {
     console.error(`todayCountFor(${kind}) failed: ${err}`);
-    return 0;
+    // Unknown usage must never grant fresh allowance during a DB outage.
+    return Number.POSITIVE_INFINITY;
   }
 }
 
@@ -166,6 +143,30 @@ export async function canAffordGeminiLiteCall(
 ): Promise<boolean> {
   const used = await todayCountFor(kind);
   return used + estimatedCalls <= GEMINI_LITE_DAILY_CAPS[kind];
+}
+
+// Reserve before sending, atomically across Actions jobs and manual runs.
+// ON CONFLICT locks the existing daily row and checks its CURRENT count;
+// a read followed by an unconditional increment cannot enforce a ceiling.
+// Failed/time-out requests keep their reservation: upstream may have served
+// them even when we never received a response. No schema or transaction needed.
+export async function reserveAiCalls(kind: AiUsageKind, count: number): Promise<boolean> {
+  if (!Number.isSafeInteger(count) || count <= 0) return false;
+  const limit = kind === "embedding" ? embeddingLimitNow() : GEMINI_LITE_DAILY_CAPS[kind];
+  if (count > limit) return false;
+  try {
+    const result = await getDb().execute(sql`
+      insert into ai_usage (date, kind, count)
+      values (to_char(now() at time zone 'America/Los_Angeles', 'YYYY-MM-DD'), ${kind}, ${count})
+      on conflict (date, kind) do update set count = ai_usage.count + excluded.count
+      where ai_usage.count + excluded.count <= ${limit}
+      returning count
+    `);
+    return result.rows.length === 1;
+  } catch {
+    console.error(`AI budget reservation failed for ${kind}; request skipped`);
+    return false;
+  }
 }
 
 // Same "remaining pool / remaining time" adaptive idea as
@@ -183,26 +184,20 @@ export interface EmbeddingBudget {
   remainingRightNow: number;
 }
 
+function embeddingLimitNow(): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles", hour: "numeric", minute: "numeric", hourCycle: "h23",
+  }).formatToParts(new Date());
+  const hour = Number(parts.find((p) => p.type === "hour")?.value);
+  const minute = Number(parts.find((p) => p.type === "minute")?.value);
+  return Math.floor(EMBEDDING_DAILY_CAP * Math.max(EMBEDDING_HOURLY_FLOOR_FRACTION, (hour + minute / 60) / 24));
+}
+
 export async function getEmbeddingBudget(): Promise<EmbeddingBudget> {
   const todayUsed = await todayCountFor("embedding");
   const remainingToday = Math.max(0, EMBEDDING_DAILY_CAP - todayUsed);
 
-  // Pacific hour:minute, not UTC (this budget's "today" is the Pacific
-  // calendar day — see todayPacific() — so elapsed-time-today has to be
-  // measured against that same clock, not UTC's).
-  const [pacificHour, pacificMinute] = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles",
-    hour: "numeric",
-    minute: "numeric",
-    hourCycle: "h23",
-  })
-    .format(new Date())
-    .split(":")
-    .map(Number);
-  const hoursElapsedToday = pacificHour + pacificMinute / 60;
-  const hourlyFloor = EMBEDDING_DAILY_CAP * EMBEDDING_HOURLY_FLOOR_FRACTION;
-  const fairShareByNow = Math.max(hourlyFloor, EMBEDDING_DAILY_CAP * (hoursElapsedToday / 24));
-  const remainingRightNow = Math.max(0, Math.min(remainingToday, Math.floor(fairShareByNow) - todayUsed));
+  const remainingRightNow = Math.max(0, Math.min(remainingToday, embeddingLimitNow() - todayUsed));
 
   return { todayUsed, remainingToday, remainingRightNow };
 }

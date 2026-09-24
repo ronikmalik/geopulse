@@ -7,6 +7,7 @@
 // storyDedup.ts's runStoryDedupPass from within reviewPendingEvents).
 import { SlidingWindowLimiter } from "./slidingWindowLimiter";
 import { generateContent } from "./geminiGenerate";
+import { geminiAnswerText } from "./geminiResponse";
 
 // Primary model; geminiGenerate.ts falls back to others when it's down.
 const AUDIT_MODEL = process.env.GEMINI_AUDIT_MODEL || "gemini-3.5-flash-lite";
@@ -70,6 +71,7 @@ export async function callGeminiJsonWithModel<T>(
     },
     apiKey,
     REQUEST_TIMEOUT_MS,
+    "audit",
   );
   if (!outcome.ok) {
     console.error(`Classifier audit call failed${outcome.unavailable ? " (all models unavailable)" : ""}: ${outcome.detail}`);
@@ -79,9 +81,7 @@ export async function callGeminiJsonWithModel<T>(
   const model = outcome.model;
   try {
     const data = await res.json();
-    const candidate = data?.candidates?.[0];
-    if (candidate?.finishReason && candidate.finishReason !== "STOP") return null;
-    const text = candidate?.content?.parts?.filter((part: { text?: unknown; thought?: boolean }) => !part.thought && typeof part.text === "string").map((part: { text: string }) => part.text).join("");
+    const text = geminiAnswerText(data);
     if (!text) return null;
     const parsed = JSON.parse(text);
     return Array.isArray(parsed) ? { items: parsed, model } : null;

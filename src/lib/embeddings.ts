@@ -1,4 +1,4 @@
-import { recordAiUsage, canAffordEmbeddingCalls } from "./aiUsage";
+import { reserveAiCalls, canAffordEmbeddingCalls } from "./aiUsage";
 
 // Gemini embeddings, REST + simple API key — same shape as translate.ts's
 // Google Cloud Translation integration (no OAuth/service account, no
@@ -45,9 +45,9 @@ interface EmbedOneResult {
 async function embedOne(text: string, apiKey: string): Promise<EmbedOneResult> {
   let res: Response;
   try {
-    res = await fetch(`${EMBED_ENDPOINT_BASE}:embedContent?key=${apiKey}`, {
+    res = await fetch(`${EMBED_ENDPOINT_BASE}:embedContent`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({
         content: { parts: [{ text }] },
         outputDimensionality: OUTPUT_DIMENSIONALITY,
@@ -115,6 +115,9 @@ export async function embedBatch(texts: string[]): Promise<(number[] | null)[] |
   for (let start = 0; start < texts.length; start += CONCURRENCY) {
     if (start > 0) await sleep(CHUNK_SPACING_MS);
     const chunk = texts.slice(start, start + CONCURRENCY);
+    // Reserve attempts, not successful vectors. Concurrent consumers of
+    // the last slots cannot both pass, and timeouts still count as spend.
+    if (!(await reserveAiCalls("embedding", chunk.length))) break;
     const chunkResults = await Promise.all(chunk.map((t) => embedOne(t, apiKey)));
     let quotaExceeded = false;
     chunkResults.forEach((r, i) => {
@@ -136,9 +139,6 @@ export async function embedBatch(texts: string[]): Promise<(number[] | null)[] |
     // credibility (reviewPendingEvents/classifierAuditSlice).
     if (quotaExceeded) break;
   }
-
-  const succeeded = results.filter((r): r is number[] => r !== null).length;
-  if (succeeded > 0) await recordAiUsage("embedding", succeeded);
 
   return results;
 }

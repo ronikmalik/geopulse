@@ -986,16 +986,10 @@ export const sourceCredibility = pgTable(
 export type SourceCredibilityRow = typeof sourceCredibility.$inferSelect;
 export type NewSourceCredibilityRow = typeof sourceCredibility.$inferInsert;
 
-// Lightweight daily counter for Gemini API calls (embeddings now, country
-// briefs next) — NOT a hard billing cap the way translation_usage is.
-// Google Translate has no meaningful free tier, so translationUsage exists
-// to stop a real bill. Gemini's free tier has zero cost as long as no
-// billing account is linked to the project — exceeding it just gets a
-// 429, which embedBatch/backfillFeedArchiveEmbeddings already treat as a
-// soft failure to retry next cycle (same shape as translateBatch's null
-// return). This table exists purely for visibility (see
-// GET /api/admin/ai-usage) — "is this actually running, and how much" —
-// not to enforce a limit.
+// Daily Gemini attempt reservations. Since 2026-09-24 every HTTP attempt
+// (including fallbacks and failures) reserves against the existing caps
+// atomically BEFORE sending. Older counts mixed logical calls/successes,
+// so historical rows are not an exact provider-billing reconciliation.
 export const aiUsage = pgTable(
   "ai_usage",
   {

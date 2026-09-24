@@ -3,11 +3,14 @@
 import { useEffect, useState } from "react";
 import { splitAttribution, stripOutletSuffix } from "@/lib/displayText";
 import { useWatchlist } from "@/lib/useWatchlist";
+import { useTabVisible } from "@/lib/useTabVisible";
 import type { CountryRiskScore } from "@/lib/useCountryRisk";
 import type { AnomalyFindingResponse } from "@/lib/useAnomalies";
 import { signalDescription } from "@/lib/anomalyLabels";
 import {
   THREAT_COLORS,
+  THREAT_LEVEL_THRESHOLDS,
+  THREAT_LABELS,
   momentumArrow,
   momentumBucketLabel,
   explainPulseLevel,
@@ -35,6 +38,7 @@ interface CountryRiskEvent {
 }
 
 interface PillarBreakdownEntry {
+  weightedLoad?: number;
   pillarId: string;
   label: string;
   shortLabel: string;
@@ -55,6 +59,8 @@ interface CountryBrief {
 }
 
 interface CountryThreatDetail {
+  calculatedAt?: string;
+  scoringVersion?: number;
   country: string;
   threatLevel: ThreatLevel;
   threatLabel: string;
@@ -204,15 +210,17 @@ export default function CountryRiskPanel({
 }: CountryRiskPanelProps) {
   const [detail, setDetail] = useState<CountryThreatDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [detailErrorCountry, setDetailErrorCountry] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<CountrySnapshot | null>(null);
   const { watchlist, toggle } = useWatchlist();
+  const visible = useTabVisible();
 
   useEffect(() => {
     // No setDetail(null) reset here: every render site below already
     // guards on `detail.country === r.country`, so stale detail for a
     // deselected country is simply never shown — resetting it would only
     // trigger an extra render for no visible effect.
-    if (!selectedCountry) return;
+    if (!selectedCountry || !visible) return;
     let cancelled = false;
     // react-hooks/set-state-in-effect flags this, but it's React's own
     // canonical fetch-with-loading-flag pattern (react.dev/learn/
@@ -222,21 +230,38 @@ export default function CountryRiskPanel({
     // on. Not worth restructuring into a reducer for a lint nit.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingDetail(true);
-    fetch(`/api/risk?country=${selectedCountry}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (!cancelled) setDetail(data);
-      })
-      .catch(() => {
-        if (!cancelled) setDetail(null);
-      })
-      .finally(() => {
+    const controller = new AbortController();
+    let inFlight = false;
+    const load = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const res = await fetch(`/api/risk?country=${selectedCountry}`, { signal: controller.signal });
+        if (!res.ok) throw new Error("Risk details unavailable");
+        const data = await res.json();
+        if (data.country !== selectedCountry || !Array.isArray(data.pillars)) throw new Error("Invalid risk details");
+        if (!cancelled) {
+          setDetail(data);
+          setDetailErrorCountry(null);
+        }
+      } catch {
+        // Preserve the last known explanation, visibly marked as stale.
+        if (!cancelled) setDetailErrorCountry(selectedCountry);
+      } finally {
+        inFlight = false;
         if (!cancelled) setLoadingDetail(false);
-      });
+      }
+    };
+    void load();
+    // Match the globe's 15-minute CDN horizon (2026-09-24). Previously an
+    // open panel stayed frozen indefinitely. Hidden tabs do no polling.
+    const interval = setInterval(load, 15 * 60_000);
     return () => {
       cancelled = true;
+      clearInterval(interval);
+      controller.abort();
     };
-  }, [selectedCountry]);
+  }, [selectedCountry, visible]);
 
   useEffect(() => {
     // Same reasoning as the detail effect above: render already guards on
@@ -338,6 +363,11 @@ export default function CountryRiskPanel({
               </div>
               {isExpanded && (
                 <div className="border-t border-red-950/70 bg-black/40 px-4 py-2">
+                  {detailErrorCountry === r.country && (
+                    <p role="status" className="mb-2 font-mono text-[10px] text-amber-500">
+                      Refresh unavailable. {detail?.country === r.country ? "Showing the last known calculation." : "Risk details could not be loaded."}
+                    </p>
+                  )}
                   {loadingDetail && (
                     <p className="font-mono text-[10px] text-neutral-600">
                       loading pulse…
@@ -345,6 +375,14 @@ export default function CountryRiskPanel({
                   )}
                   {!loadingDetail && detail && detail.country === r.country && (
                     <>
+                      <p className="mb-2 font-mono text-[10px] text-neutral-400">
+                        {detail.scoringVersion !== undefined && `Method v${detail.scoringVersion}`}
+                        {detail.calculatedAt && (
+                          <time dateTime={detail.calculatedAt} title={new Date(detail.calculatedAt).toUTCString()}>
+                            {` · Calculated ${timeAgo(detail.calculatedAt)}`}
+                          </time>
+                        )}
+                      </p>
                       {detail.brief && (
                         <div className="mb-2 border-b border-red-950/70 pb-2">
                           <div className="flex items-center justify-between gap-2">
@@ -435,6 +473,8 @@ export default function CountryRiskPanel({
                             How this is scored
                           </summary>
                           <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                            <li>Weighted load measures observed activity, not the probability of a future crisis. Low coverage can hide real risk.</li>
+                            <li>Pillar thresholds: {[...THREAT_LEVEL_THRESHOLDS].reverse().map(([min, level]) => `${THREAT_LABELS[level]} at ${min}`).join("; ")}.</li>
                             <li>Each approved story adds its severity, halving every 3 days; nothing older than 30 days counts.</li>
                             <li>A story carried by several outlets counts once, with a capped bonus per independent source (up to x1.6).</li>
                             <li>Hazards are weighted by how many people live within 100 km.</li>
@@ -466,6 +506,11 @@ export default function CountryRiskPanel({
                                 </span>
                               )}
                             </div>
+                            {p.covered && (
+                              <div className="mt-1 font-mono text-[9px] text-neutral-400" title={p.weightedLoad === undefined ? undefined : `Exact weighted load: ${p.weightedLoad}`}>
+                                {p.weightedLoad !== undefined && `Weighted load ${p.weightedLoad.toFixed(2)}`}
+                              </div>
+                            )}
                             {p.covered && (
                               <div className="mt-0.5 flex items-center justify-between">
                                 <span className="font-mono text-[9px] text-neutral-600">

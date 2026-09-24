@@ -2,7 +2,7 @@ import { and, desc, eq, isNull, ne, or, like } from "drizzle-orm";
 import { getDb } from "@/db";
 import { events } from "@/db/schema";
 import { resolveLocationsBatch, GEOCODE_BATCH_SIZE, type GeocodeCandidate } from "./geocodeEvents";
-import { canAffordGeminiLiteCall, recordAiUsage } from "./aiUsage";
+import { canAffordGeminiLiteCall } from "./aiUsage";
 
 // Decoupled backfill pass — same posture as embeddingBackfill.ts: never
 // block the insert path (ingest.ts inserts every event with
@@ -73,9 +73,7 @@ export async function backfillEventGeocodes(): Promise<GeocodeBackfillResult> {
       .map((r) => ({ id: r.id, title: r.title, snippet: r.summary, country: r.country }));
 
     const resolved = await resolveLocationsBatch(candidates, apiKey);
-    // resolveLocationsBatch no-ops (no real call) when candidates is
-    // empty — only record spend when a call could actually have happened.
-    if (candidates.length > 0) await recordAiUsage("geocode", 1);
+    // generateContent reserves every actual attempt before sending it.
 
     // The whole call failed (network/timeout/parse error) — leave every
     // row's geocodedAt untouched so this exact backlog is retried next

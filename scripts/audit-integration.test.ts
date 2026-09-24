@@ -18,6 +18,7 @@ test("pending review rejects malformed responses and cannot overwrite a concurre
       neonConfig.fetchFunction = async (_url: unknown, init?: RequestInit) => {
         const query = JSON.parse(String(init?.body));
         let rows: unknown[][] = [];
+        if (query.query.includes("insert into ai_usage")) rows = [[1]];
         if (query.query.includes('from "events"') && query.query.includes('"country" is not null')) {
           rows = [[1, "rss:fixture", "https://example.invalid/story", "2026-09-12T12:00:00Z", "Fixture incident", "Fixture incident", 3, "UA", "russia-ukraine"]];
         }

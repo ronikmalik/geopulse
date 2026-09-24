@@ -14,13 +14,10 @@ import { translationUsage } from "@/db/schema";
 // translation (falling back to original-language text, same as no key
 // being set at all) rather than risk going over.
 // 499,000 -> 490,000 (2026-09-23). Still the same "never go over" rule,
-// with room for the two ways the counter can trail Google's meter:
-// concurrent callers can each pass canAfford before either reserves (at
-// most a few calls of dailyBudget/12 each), and this month resets at UTC
-// midnight while Google's billing month may run on Pacific time, putting
-// up to ~7 hours of "next month" spending into Google's current one. Both
-// together stay under the 10,000 margin. Measured usage the day of the
-// change: 342,209 month-to-date, ~10k/day, so the tighter cap costs nothing.
+// retaining 10,000 units of headroom. Measured 2026-09-23: 342,209
+// month-to-date, ~10k/day. Since 2026-09-24, concurrent reservations use
+// compare-and-swap and the first eight UTC hours of each month stay
+// closed; neither concurrency nor a Pacific reset relies on that margin.
 export const MONTHLY_BYTE_CAP = 490_000;
 
 // One-time reconciliation (2026-09-10): this app's own tracking (character-
@@ -37,8 +34,8 @@ export const MONTHLY_BYTE_CAP = 490_000;
 // read once by that reconciliation, not by any ongoing code path.
 export const RECONCILIATION_2026_09_10 = { priorMonthTotal: 128_816, googleReportedTotal: 168_500 };
 
-function todayUtc(): string {
-  return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+function todayUtc(now = new Date()): string {
+  return now.toISOString().slice(0, 10); // "YYYY-MM-DD"
 }
 
 function daysInMonthUtc(d: Date): number {
@@ -69,10 +66,9 @@ export interface UsageBudget {
 // share — while the MONTHLY_BYTE_CAP hard ceiling is checked independently
 // regardless of how the daily math comes out, so rounding can't cause an
 // overage.
-export async function getUsageBudget(): Promise<UsageBudget> {
+export async function getUsageBudget(now = new Date()): Promise<UsageBudget> {
   const db = getDb();
-  const now = new Date();
-  const today = todayUtc();
+  const today = todayUtc(now);
   const monthPrefix = today.slice(0, 7); // "YYYY-MM"
 
   const rows = await db
@@ -153,6 +149,45 @@ export async function canAfford(estimatedBytes: number): Promise<boolean> {
     estimatedBytes <= maxPerCall &&
     budget.monthUsed + estimatedBytes <= MONTHLY_BYTE_CAP
   );
+}
+
+// The ledger historically uses UTC days. Do not open a new month's pool
+// during the first eight UTC hours: Pacific midnight is at 07:00 or 08:00
+// UTC, so this conservative boundary also covers the possible billing-day
+// mismatch without relabelling historical usage or assuming a DST offset.
+export function translationMonthReady(now: Date): boolean {
+  return now.getUTCDate() !== 1 || now.getUTCHours() >= 8;
+}
+
+export async function reserveTranslationBytes(bytes: number): Promise<boolean> {
+  if (!Number.isSafeInteger(bytes) || bytes <= 0) return false;
+  const now = new Date();
+  if (!translationMonthReady(now)) return false;
+  try {
+    const budget = await getUsageBudget(now);
+    const allowed = Math.min(budget.remainingRightNow, budget.remainingToday,
+      Math.floor(budget.dailyBudget / MAX_CHARS_PER_CALL_FRACTION), MONTHLY_BYTE_CAP - budget.monthUsed);
+    if (bytes > allowed) return false;
+    const date = todayUtc(now);
+    // Compare-and-swap: if another caller reserved since our monthly read,
+    // decline and let the next pipeline cycle recompute the allowance.
+    // Every live writer uses today's row, so matching todayUsed protects
+    // both the daily pace and the monthly sum. The date predicate rejects
+    // a budget read that straddled midnight. No multi-statement transaction.
+    const result = await getDb().execute(sql`
+      insert into translation_usage (date, characters)
+      select ${date}, ${bytes}
+      where to_char(clock_timestamp() at time zone 'UTC', 'YYYY-MM-DD') = ${date}
+      on conflict (date) do update set characters = translation_usage.characters + excluded.characters
+      where translation_usage.characters = ${budget.todayUsed}
+        and to_char(clock_timestamp() at time zone 'UTC', 'YYYY-MM-DD') = ${date}
+      returning characters
+    `);
+    return result.rows.length === 1;
+  } catch {
+    console.error("Translation budget reservation failed; request skipped");
+    return false;
+  }
 }
 
 export async function recordUsage(bytes: number): Promise<void> {

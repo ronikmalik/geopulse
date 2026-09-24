@@ -6,6 +6,7 @@ import {
 } from "@/lib/risk";
 import { getLatestCountryBrief } from "@/lib/countryBriefs";
 import { badRequest, cachedJson, parseCountryParam } from "@/lib/apiParams";
+import { SCORING_VERSION } from "@/lib/scoringMethod";
 
 // The globe's colour layer (every country's current score, no param) and
 // the per-country risk panel (?country=XX). Scores only move when an
@@ -14,6 +15,8 @@ import { badRequest, cachedJson, parseCountryParam } from "@/lib/apiParams";
 // ~1 invocation/minute — this was the single most-invoked non-stream
 // route on Vercel before the 2026-09-19 pass.
 export async function GET(req: NextRequest) {
+  // Keep the calculation time in the cached payload, not the viewer's clock.
+  const calculatedAt = new Date().toISOString();
   const rawCountry = req.nextUrl.searchParams.get("country");
 
   if (rawCountry) {
@@ -24,7 +27,7 @@ export async function GET(req: NextRequest) {
       getCountryRiskEvents(country),
       getLatestCountryBrief(country),
     ]);
-    return cachedJson({ ...detail, events: eventsForCountry, brief }, 300, 300);
+    return cachedJson({ ...detail, events: eventsForCountry, brief, calculatedAt, scoringVersion: SCORING_VERSION }, 300, 300);
   }
 
   // 15 min at the CDN (was 60s, 2026-09-21): the map polls this every
@@ -32,5 +35,5 @@ export async function GET(req: NextRequest) {
   // scores only move with decay and with the pipeline's ~15-min cycles,
   // so a minute of freshness was buying nothing but compute hours.
   const scores = await getCountryThreatSummaries();
-  return cachedJson({ scores }, 900, 300);
+  return cachedJson({ scores, calculatedAt, scoringVersion: SCORING_VERSION }, 900, 300);
 }

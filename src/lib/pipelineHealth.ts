@@ -36,7 +36,7 @@ export interface PipelineMetrics {
   oldestPendingReviewHours: number | null;
   // GDELT candidates discovered but not yet title-fetched.
   gdeltQueueWaiting: number;
-  // Events inserted in the last 24 hours, per source family.
+  // Approved, visible events inserted in the last 24 hours, per family.
   events24hBySource: Record<string, number>;
   // Hours since each polled source last succeeded.
   hoursSinceSourceSuccess: Record<string, number>;
@@ -119,7 +119,8 @@ export async function gatherPipelineMetrics(): Promise<PipelineMetrics> {
   );
   const bySource = (
     await db.execute(sql`select split_part(source, ':', 1) family, count(*)::int n from events
-                         where created_at > now() - interval '24 hours' group by 1`)
+                         where created_at > now() - interval '24 hours'
+                           and review_status = 'approved' and pre_kill_switch_at is null group by 1`)
   ).rows as { family: string; n: number }[];
   const health = (
     await db.execute(sql`select source, extract(epoch from now() - last_success_at) / 3600 h from source_health`)

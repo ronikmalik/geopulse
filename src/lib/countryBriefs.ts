@@ -1,9 +1,10 @@
 import { generateContent } from "./geminiGenerate";
+import { geminiAnswerText } from "./geminiResponse";
 import { eq, desc } from "drizzle-orm";
 import { getDb } from "@/db";
 import { countryBriefs } from "@/db/schema";
 import { getCountryRiskEvents, getCountryThreatSummaries } from "./risk";
-import { recordAiUsage, canAffordGeminiLiteCall } from "./aiUsage";
+import { canAffordGeminiLiteCall } from "./aiUsage";
 
 // AI-generated situation briefs per active country — see GET
 // /api/admin/generate-briefs. NOT piggybacked on the ingest cycle: ingest
@@ -125,13 +126,13 @@ export function isUpstreamUnavailableStatus(status: number): boolean {
 async function callGemini(prompt: string, apiKey: string): Promise<GeminiCallResult> {
   // Timeouts, resets, 429 and 5xx on every model in the chain all come back
   // as "unavailable", which counts toward giving up the run.
-  const outcome = await generateContent(BRIEF_MODEL, { contents: [{ parts: [{ text: prompt }] }] }, apiKey, REQUEST_TIMEOUT_MS);
+  const outcome = await generateContent(BRIEF_MODEL, { contents: [{ parts: [{ text: prompt }] }] }, apiKey, REQUEST_TIMEOUT_MS, "brief");
   if (!outcome.ok) {
     console.error(`Brief generation failed: ${outcome.detail}`);
     return outcome.unavailable ? { kind: "unavailable", detail: outcome.detail } : { kind: "error", detail: outcome.detail };
   }
   const data = (await outcome.res.json()) as GenerateContentResponse;
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  const text = geminiAnswerText(data);
   return text ? { kind: "ok", text, model: outcome.model } : { kind: "error", detail: "empty completion" };
 }
 
@@ -210,7 +211,6 @@ export async function generateBriefsForActiveCountries(): Promise<GenerateBriefs
         // fallback, not BRIEF_MODEL.
         model: call.model,
       });
-      await recordAiUsage("brief", 1);
       // One per invocation — see this file's own header comment. The
       // next call (this cadence fires every ~15min) re-ranks and picks up
       // the next-highest-scoring country that still needs a refresh.

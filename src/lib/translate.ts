@@ -1,4 +1,4 @@
-import { canAfford, recordUsage } from "./translationUsage";
+import { reserveTranslationBytes } from "./translationUsage";
 
 // Google's own Cloud Translation - Basic pricing table lists the rate as
 // "$20.00 / 1,000,000 byte" (checked live 2026-09-10) — despite the same
@@ -64,9 +64,6 @@ export async function translateBatch(
   // translation, not skip the check) since the whole point is never
   // risking an overage.
   const estimatedBytes = texts.reduce((sum, t) => sum + byteLength(t), 0);
-  const affordable = await canAfford(estimatedBytes).catch(() => false);
-  if (!affordable) return null;
-
   // Reserved BEFORE the request, not recorded after it (2026-09-23). The
   // old record-on-success missed every request Google may still have
   // billed: a timeout (aborted here, possibly processed there) and a
@@ -74,13 +71,7 @@ export async function translateBatch(
   // counting anything. Now every request sent is counted; a request that
   // fails is over-counted, the safe direction for a hard ceiling. If the
   // reservation itself can't be written, nothing is sent.
-  const reserved = await recordUsage(estimatedBytes).then(
-    () => true,
-    (err) => {
-      console.error(`Failed to reserve translation budget, skipping call: ${err}`);
-      return false;
-    },
-  );
+  const reserved = await reserveTranslationBytes(estimatedBytes);
   if (!reserved) return null;
 
   const body = new URLSearchParams();

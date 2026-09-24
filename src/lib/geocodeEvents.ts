@@ -1,4 +1,5 @@
 import { generateContent } from "./geminiGenerate";
+import { geminiAnswerText } from "./geminiResponse";
 import { COUNTRY_CENTROIDS } from "./countryCentroids";
 import { countryFromLatLon } from "./geoResolve";
 
@@ -98,13 +99,14 @@ async function callGemini(prompt: string, apiKey: string): Promise<RawGeocodeIte
     { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } },
     apiKey,
     REQUEST_TIMEOUT_MS,
+    "geocode",
   );
   if (!outcome.ok) {
     console.error(`Geocode call failed: ${outcome.detail}`);
     return null;
   }
   const data = await outcome.res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  const text = geminiAnswerText(data);
   if (typeof text !== "string") return null;
   try {
     const parsed = JSON.parse(text);

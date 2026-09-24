@@ -30,6 +30,8 @@
 // hence last — and every review records which model decided
 // (events.review_model), so its verdicts can be audited on their own.
 // gemma-4-31b-it was also listed but timed out at 30 s.
+import { reserveAiCalls, type AiUsageKind } from "./aiUsage";
+
 const FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemma-4-26b-a4b-it"];
 
 // A model that just failed on availability is skipped for this long by
@@ -69,16 +71,27 @@ export async function generateContent(
   body: unknown,
   apiKey: string,
   timeoutMs: number,
+  kind: Exclude<AiUsageKind, "embedding">,
 ): Promise<GenerateOutcome> {
   const now = Date.now();
   const chain = modelChain(primaryModel);
-  // If every model is cooling down, try them all anyway rather than
-  // failing without a single request.
+  // Respect the circuit breaker even when the whole provider is down.
+  // Retrying all cooling models for every batch spent quota and runner
+  // time while extending the database's awake period during the outage.
   const live = chain.filter((m) => (unavailableUntil.get(m) ?? 0) <= now);
-  const order = live.length > 0 ? live : chain;
+  if (live.length === 0) {
+    exhaustedCalls++;
+    return { ok: false, unavailable: true, detail: "All models are cooling down; retry on a later cycle" };
+  }
 
   const failures: string[] = [];
-  for (const model of order) {
+  for (const model of live) {
+    // Every HTTP attempt, including fallback and timeouts, spends one of
+    // the owner's existing daily call allowance. Never spend on a failed
+    // reservation, and never refund an ambiguous upstream failure.
+    if (!(await reserveAiCalls(kind, 1))) {
+      return { ok: false, unavailable: true, detail: `${kind} budget unavailable; request skipped` };
+    }
     let res: Response;
     try {
       res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {

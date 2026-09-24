@@ -309,6 +309,9 @@ export async function getCountryThreatSummaries(): Promise<CountryThreatSummary[
 }
 
 export interface PillarBreakdownEntry {
+  // The exact weighted load used by weightToThreatLevel; exposed for
+  // auditing, not a second scoring calculation or a probability of harm.
+  weightedLoad: number;
   pillarId: PillarId;
   label: string;
   shortLabel: string;
@@ -344,6 +347,7 @@ export async function getCountryThreatDetail(country: string): Promise<CountryTh
     const momentum = agg ? pillarMomentum(agg) : { magnitude: 0, direction: 0 as MomentumDirection };
 
     return {
+      weightedLoad: agg?.decayedWeight ?? 0,
       pillarId: def.id,
       label: def.label,
       shortLabel: def.shortLabel,

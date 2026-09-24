@@ -36,8 +36,9 @@ export function useCountryRisk() {
     const load = async () => {
       try {
         const res = await fetch("/api/risk");
+        if (!res.ok) return; // An error payload must not erase the globe's last known scores.
         const data = await res.json();
-        if (!cancelled) setScores(data.scores ?? []);
+        if (!cancelled && Array.isArray(data.scores)) setScores(data.scores);
       } catch {
         // keep last known scores on transient failure
       }

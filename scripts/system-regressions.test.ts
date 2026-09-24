@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
+import { getDb } from "../src/db";
+
+// These tests exercise response handling, not a real quota ledger. Mock
+// only the DB reservation; every upstream response remains a fixture.
+function allowBudget(t: TestContext) {
+  process.env.DATABASE_URL ??= "postgresql://test:test@localhost/test";
+  t.mock.method(getDb(), "execute", async () => ({ rows: [{ count: 1 }] }));
+}
 import { validKeptAssessments, validDroppedFindings } from "../src/lib/auditValidation";
 import { callGeminiJson } from "../src/lib/geminiAuditClient";
 import { withCache } from "../src/lib/layerCache";
@@ -127,7 +135,8 @@ test("source credibility restrictions retain mixed-factual coverage and reject e
   assert.equal(lookupCredibility("notexample.com", map), undefined);
 });
 
-test("Gemini client enforces instruction boundary, joins answer parts and ignores thought parts", async () => {
+test("Gemini client enforces instruction boundary, joins answer parts and ignores thought parts", async (t) => {
+  allowBudget(t);
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_input, init) => {
     const request = JSON.parse(String(init?.body));
@@ -138,7 +147,8 @@ test("Gemini client enforces instruction boundary, joins answer parts and ignore
   finally { globalThis.fetch = originalFetch; }
 });
 
-test("truncated, blocked and invalid Gemini responses remain retryable failures", async () => {
+test("truncated, blocked and invalid Gemini responses remain retryable failures", async (t) => {
+  allowBudget(t);
   const originalFetch = globalThis.fetch;
   const originalError = console.error;
   console.error = () => {};
@@ -152,7 +162,20 @@ test("truncated, blocked and invalid Gemini responses remain retryable failures"
   } finally { globalThis.fetch = originalFetch; console.error = originalError; }
 });
 
-test("location enrichment cannot put a Russia-attributed event in Kyiv", async () => {
+test("every Gemini consumer excludes thoughts and incomplete answers", async () => {
+  const { geminiAnswerText } = await import("../src/lib/geminiResponse");
+  const answer = { content: { parts: [{ text: "private reasoning", thought: true }, { text: "public " }, { text: "answer" }] } };
+  assert.equal(geminiAnswerText({ candidates: [answer] }), "public answer");
+  for (const finishReason of ["MAX_TOKENS", "SAFETY", "RECITATION"]) {
+    assert.equal(geminiAnswerText({ candidates: [{ ...answer, finishReason }] }), null);
+  }
+  for (const data of [null, {}, { candidates: [] }, { candidates: [{ content: { parts: [null, { thought: true, text: "thought only" }] } }] }]) {
+    assert.equal(geminiAnswerText(data), null);
+  }
+});
+
+test("location enrichment cannot put a Russia-attributed event in Kyiv", async (t) => {
+  allowBudget(t);
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify([{ id: 1, lat: 50.45, lon: 30.52, location: "Kyiv" }, { id: 2, lat: 55.75, lon: 37.62, location: "Moscow" }]) }] } }] });
   try {
@@ -622,7 +645,8 @@ test("one slow article page costs only itself, not the whole GDELT title batch",
   assert.ok(Date.now() - started < 1_000);
 });
 
-test("a Gemini outage on one model falls through to the next instead of stalling review", async () => {
+test("a Gemini outage on one model falls through to the next instead of stalling review", async (t) => {
+  allowBudget(t);
   const { generateContent, resetModelCooldowns, modelChain } = await import("../src/lib/geminiGenerate");
   const realFetch = globalThis.fetch;
   const asked: string[] = [];
@@ -635,11 +659,11 @@ test("a Gemini outage on one model falls through to the next instead of stalling
       asked.push(model);
       return respond(model === "gemini-3.5-flash-lite" ? 503 : 200);
     }) as typeof fetch;
-    const first = await generateContent("gemini-3.5-flash-lite", {}, "k", 1000);
+    const first = await generateContent("gemini-3.5-flash-lite", {}, "k", 1000, "audit");
     assert.ok(first.ok && first.model === "gemini-3.5-flash");
     // The dead model is not retried on the next call in the same run.
     asked.length = 0;
-    await generateContent("gemini-3.5-flash-lite", {}, "k", 1000);
+    await generateContent("gemini-3.5-flash-lite", {}, "k", 1000, "audit");
     assert.deepEqual(asked, ["gemini-3.5-flash"]);
 
     // A retired fallback (404) is skipped, not fatal.
@@ -648,20 +672,27 @@ test("a Gemini outage on one model falls through to the next instead of stalling
       const model = /models\/([^:]+):/.exec(url)![1];
       return respond(model === "gemini-3.1-flash-lite" ? 200 : model === "gemini-3.5-flash" ? 404 : 503);
     }) as typeof fetch;
-    const retired = await generateContent("gemini-3.5-flash-lite", {}, "k", 1000);
+    const retired = await generateContent("gemini-3.5-flash-lite", {}, "k", 1000, "audit");
     assert.ok(retired.ok && retired.model === "gemini-3.1-flash-lite");
 
     // Everything down: reported as unavailable (retry later), not as a bad request.
     resetModelCooldowns();
     globalThis.fetch = (async () => respond(503)) as typeof fetch;
-    const down = await generateContent("gemini-3.5-flash-lite", {}, "k", 1000);
+    const down = await generateContent("gemini-3.5-flash-lite", {}, "k", 1000, "audit");
     assert.ok(!down.ok && down.unavailable);
+    // All cooling down means zero requests, including retired models.
+    globalThis.fetch = async () => { throw new Error("must not fetch during cooldown"); };
+    const reservations = t.mock.method(getDb(), "execute", async () => { throw new Error("must not reserve during cooldown"); });
+    const cooling = await generateContent("gemini-3.5-flash-lite", {}, "k", 1000, "audit");
+    assert.ok(!cooling.ok && cooling.detail.includes("cooling down"));
+    assert.equal(reservations.mock.callCount(), 0);
+    reservations.mock.restore();
 
     // A malformed request fails at once rather than burning every model.
     resetModelCooldowns();
     asked.length = 0;
     globalThis.fetch = (async (url: string) => { asked.push(url); return respond(400); }) as typeof fetch;
-    const bad = await generateContent("gemini-3.5-flash-lite", {}, "k", 1000);
+    const bad = await generateContent("gemini-3.5-flash-lite", {}, "k", 1000, "audit");
     assert.ok(!bad.ok && !bad.unavailable);
     assert.equal(asked.length, 1);
     assert.equal(new Set(modelChain("gemini-3.5-flash")).size, modelChain("gemini-3.5-flash").length);

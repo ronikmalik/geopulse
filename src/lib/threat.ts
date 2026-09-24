@@ -86,7 +86,7 @@ export function momentumBucketLabel(magnitude: number): string {
 // fixed constants, not percentiles recomputed daily: a percentile would
 // always put the same share of the world at Extreme however calm or
 // violent the world actually was.
-const THREAT_LEVEL_THRESHOLDS: [min: number, level: ThreatLevel][] = [
+export const THREAT_LEVEL_THRESHOLDS: [min: number, level: ThreatLevel][] = [
   [75, 4],
   [20, 3],
   [4, 2],

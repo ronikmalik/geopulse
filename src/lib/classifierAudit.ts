@@ -11,7 +11,7 @@ import {
 } from "@/db/schema";
 import { embedBatch } from "./embeddings";
 import { NOT_KILL_SWITCHED } from "./killSwitch";
-import { recordAiUsage, canAffordGeminiLiteCall } from "./aiUsage";
+import { canAffordGeminiLiteCall } from "./aiUsage";
 import { PILLAR_LIST } from "./pillars";
 import { deriveFieldsForRecovery } from "./classify";
 import { correlationGroupId } from "./correlation";
@@ -779,7 +779,6 @@ async function evaluateLessonGuard(pattern: string, lesson: string, appliesTo: "
   if (!apiKey) return null;
   if (!(await canAffordGeminiLiteCall("audit", 1))) return null;
   const raw = await callGeminiJson<unknown>(buildLessonGuardPrompt(lesson, appliesTo), apiKey);
-  await recordAiUsage("audit", 1);
   const parsed = parseGuardVerdict(raw);
   if (!parsed) return null;
   const db = getDb();
@@ -1308,16 +1307,7 @@ async function processKeptCandidates(
     const results = await Promise.all(
       round.map((batch) => callGeminiJson<RawKeptAssessment>(buildKeptAuditPrompt(batch, calibration), apiKey)),
     );
-    // Recorded immediately, not once at the end with batches.length (fixed
-    // 2026-09-11 — see aiUsage.ts's own history for the bug this caused: a
-    // stale total is why the daily audit cap's check couldn't see this same
-    // call's own in-progress spending across rounds, letting a single
-    // invocation blow past GEMINI_LITE_DAILY_CAPS.audit before the trailing
-    // recordAiUsage ever caught up. This also means canAffordGeminiLiteCall
-    // now sees real up-to-the-round usage, including from a concurrent
-    // caller (processDroppedCandidates/reviewPendingEvents), not a number
-    // that's already stale by the time this call started.
-    await recordAiUsage("audit", round.length);
+    // Actual attempts are reserved atomically inside generateContent.
 
     for (let j = 0; j < round.length; j++) {
       if (!results[j]) continue;
@@ -1430,10 +1420,6 @@ async function processDroppedCandidates(
     const results = await Promise.all(
       round.map((batch) => callGeminiJson<RawDroppedFinding>(buildFalseNegativePrompt(batch, calibration), apiKey)),
     );
-    // Recorded immediately, not once at the end — see processKeptCandidates'
-    // own comment above for why the old batches.length-at-the-end shape let
-    // the daily cap be overshot.
-    await recordAiUsage("audit", round.length);
 
     for (let j = 0; j < round.length; j++) {
       if (!results[j]) continue;
@@ -1847,12 +1833,13 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
           const results = await Promise.all(
             round.map((batch) => callGeminiJsonWithModel<RawKeptAssessment>(buildKeptAuditPrompt(batch, calibration), apiKey)),
           );
-          // Recorded immediately, not once at the end of each while-loop
-          // iteration — see processKeptCandidates' own comment for why the
-          // old batches.length-at-the-end shape let the daily cap be
-          // overshot (this caller's own iteration ran multiple rounds
-          // before that trailing call ever caught up).
-          await recordAiUsage("audit", round.length);
+          // A round with no answers cannot advance the queue. Stop this
+          // invocation so cooldowns don't turn a provider outage into a
+          // tight reread loop over the same oldest pending rows.
+          if (results.every((result) => result === null)) {
+            exhausted = true;
+            break;
+          }
 
           // Collected across this round's batches so the story-dedup pass
           // (below) can run ONCE per round in one Gemini call, not once
@@ -1908,11 +1895,10 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
           // route's 55s maxDuration on a call that was never the priority
           // one to begin with.
           if (Date.now() < deadlineAt && justApproved.length > 0 && (await canAffordGeminiLiteCall("audit", 1))) {
-            const dedup = await runStoryDedupPass(justApproved, apiKey).catch((err) => {
+            await runStoryDedupPass(justApproved, apiKey).catch((err) => {
               console.error(`runStoryDedupPass failed: ${err}`);
               return { checked: 0, merged: 0 };
             });
-            if (dedup.checked > 0) await recordAiUsage("audit", 1);
           }
         }
       }
