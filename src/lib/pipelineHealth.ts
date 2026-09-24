@@ -22,10 +22,17 @@ export interface PipelineMetrics {
   // Published events with no embedding yet. Healthy: roughly one cycle's
   // arrivals (~10). It was 267 when the fixed per-cycle batch fell behind.
   feedEmbeddingBacklog: number;
-  // Kept classifier-archive rows with no embedding. Must trend to zero
-  // (2,675 on 2026-09-23, clearing ~290/day); dropped rows are capped by
-  // design and deliberately not counted (classificationArchiveEmbeddingBackfill.ts).
-  keptArchiveBacklog: number;
+  // Kept classifier rows archived 1-4 days ago that still have no
+  // embedding: "is the backfill keeping up with new data". New rows are
+  // embedded newest-first within the day, so anything a full day old and
+  // still waiting means the budget no longer covers arrivals. Measured
+  // 2026-09-24: 6. (Replaced a total-backlog check the same day: the ~2,900
+  // rows archived Sept 9-20 drain slowly by design, and counting them
+  // against a fixed limit would alarm on history, not on a fault.)
+  keptArchiveFallingBehind: number;
+  // The whole historical tail of kept rows without an embedding — reported
+  // for context, never alarmed on. See classificationArchiveEmbeddingBackfill.ts.
+  keptArchiveBacklogTotal: number;
   // Embedding calls recorded today (Pacific day, per ai_usage). Every
   // ingest cycle embeds something, so zero by 18:00 UTC — 11 hours into
   // the Pacific day — means the Gemini key or quota is broken.
@@ -48,7 +55,7 @@ export interface PipelineMetrics {
 
 export const HEALTH_LIMITS = {
   feedEmbeddingBacklog: 150,
-  keptArchiveBacklog: 3_000,
+  keptArchiveFallingBehind: 100,
   minEmbeddingsToday: 1,
   maxPendingReviewHours: 6,
   gdeltQueueWaiting: 2_500,
@@ -68,8 +75,8 @@ export function evaluatePipelineHealth(m: PipelineMetrics): string[] {
   if (m.feedEmbeddingBacklog > L.feedEmbeddingBacklog) {
     failures.push(`${m.feedEmbeddingBacklog} published events have no embedding (limit ${L.feedEmbeddingBacklog}) — the embedding backfill is falling behind.`);
   }
-  if (m.keptArchiveBacklog > L.keptArchiveBacklog) {
-    failures.push(`${m.keptArchiveBacklog} kept classifier rows have no embedding (limit ${L.keptArchiveBacklog}) — that backlog should only shrink.`);
+  if (m.keptArchiveFallingBehind > L.keptArchiveFallingBehind) {
+    failures.push(`${m.keptArchiveFallingBehind} kept classifier rows from the last few days still have no embedding (limit ${L.keptArchiveFallingBehind}) — the daily embedding budget no longer covers new arrivals.`);
   }
   if (m.embeddingsToday < L.minEmbeddingsToday) {
     failures.push(`No embedding calls today — check the Gemini key (GitHub secret GEMINI_API_KEY) and quota.`);
@@ -104,8 +111,11 @@ export async function gatherPipelineMetrics(): Promise<PipelineMetrics> {
   const feed = await one<{ n: number }>(
     sql`select count(*)::int n from feed_archive where embedding is null and source not in (${structural})`,
   );
-  const kept = await one<{ n: number }>(
-    sql`select count(*)::int n from classification_archive where embedding is null and kept`,
+  const kept = await one<{ behind: number; total: number }>(
+    sql`select count(*) filter (where archived_at < now() - interval '1 day' and archived_at > now() - interval '4 days')::int behind,
+               count(*)::int total
+        from classification_archive
+        where embedding is null and kept and snippet not like '%Reported via GDELT%'`,
   );
   const embeddings = await one<{ n: number | null }>(
     sql`select max(count)::int n from ai_usage where kind = 'embedding'
@@ -131,7 +141,8 @@ export async function gatherPipelineMetrics(): Promise<PipelineMetrics> {
   return {
     translationMonthUsed: translation.monthUsed,
     feedEmbeddingBacklog: Number(feed.n ?? 0),
-    keptArchiveBacklog: Number(kept.n ?? 0),
+    keptArchiveFallingBehind: Number(kept.behind ?? 0),
+    keptArchiveBacklogTotal: Number(kept.total ?? 0),
     embeddingsToday: Number(embeddings.n ?? 0),
     oldestPendingReviewHours: pending.h === null || pending.h === undefined ? null : Number(pending.h),
     gdeltQueueWaiting: Number(gdelt.n ?? 0),

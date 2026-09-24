@@ -1,4 +1,4 @@
-import { isNull, isNotNull, eq, desc, and, sql } from "drizzle-orm";
+import { isNull, isNotNull, eq, desc, and, sql, notLike } from "drizzle-orm";
 import { getDb } from "@/db";
 import { classificationArchive } from "@/db/schema";
 import { embedBatch } from "./embeddings";
@@ -51,6 +51,25 @@ const MAX_INPUT_CHARS = 2000;
 // and the only backlog that has to reach zero is the kept one.
 const MAX_DROPPED_PER_KEPT = 2;
 
+// Never embedded (2026-09-24). For about three hours on 2026-09-10 the
+// GDELT path published a sentence synthesized from CAMEO codes instead of
+// the article's real headline ("FIGHT: Ottawa is fighting Terrorist ...
+// Reported via GDELT's structured ..."); gdeltBulk.ts has fetched real
+// titles ever since. 407 such rows were archived. Training the classifier
+// on text it will never see again teaches it the wrong thing, and each
+// one would spend a call of a budget that is already the bottleneck.
+const SYNTHESIZED_GDELT_MARKER = "%Reported via GDELT%";
+
+// Throughput, measured 2026-09-24: the 900/day budget is paced evenly
+// (~19 calls per 30-minute cycle); published events take ~8 of them and
+// kept rows now arrive at ~400/day, up from ~270 once GDELT stopped
+// skipping files. New kept rows are embedded within the day (newest
+// first). The ~2,900 older rows archived Sept 9-20 drain from what is
+// left, ~100-200/day: weeks, not days. That is an accepted cost; the
+// classifier already has 4,001 kept and 3,211 dropped rows to learn from,
+// and the health check (pipelineHealth.ts) alarms on RECENT rows being
+// left behind, not on the size of this historical tail.
+
 export interface ClassificationArchiveBackfillResult {
   processed: number;
   skipped: boolean;
@@ -81,9 +100,11 @@ export async function backfillClassificationArchiveEmbeddings(): Promise<Classif
       .select({ id: classificationArchive.id, title: classificationArchive.title, snippet: classificationArchive.snippet })
       .from(classificationArchive)
       .where(
-        wantDropped
-          ? isNull(classificationArchive.embedding)
-          : and(isNull(classificationArchive.embedding), eq(classificationArchive.kept, true)),
+        and(
+          isNull(classificationArchive.embedding),
+          notLike(classificationArchive.snippet, SYNTHESIZED_GDELT_MARKER),
+          wantDropped ? undefined : eq(classificationArchive.kept, true),
+        ),
       )
       .orderBy(desc(classificationArchive.kept), desc(classificationArchive.id))
       .limit(take);

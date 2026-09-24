@@ -612,7 +612,7 @@ test("GDELT discovery reads every 15-minute file in its window, not just the new
 test("the pipeline alarm stays quiet on a healthy day and names each quiet failure", async () => {
   const { evaluatePipelineHealth } = await import("../src/lib/pipelineHealth");
   const healthy = {
-    feedEmbeddingBacklog: 12, keptArchiveBacklog: 2675, embeddingsToday: 620,
+    feedEmbeddingBacklog: 12, keptArchiveFallingBehind: 6, keptArchiveBacklogTotal: 2885, embeddingsToday: 620,
     oldestPendingReviewHours: 0.5, gdeltQueueWaiting: 620,
     events24hBySource: { gdelt: 170, rss: 74, telegram: 49, usgs: 0 },
     hoursSinceSourceSuccess: { gdelt: 0.3, rss: 0.3, usgs: 0.3 },
@@ -627,6 +627,10 @@ test("the pipeline alarm stays quiet on a healthy day and names each quiet failu
   assert.match(evaluatePipelineHealth({ ...healthy, events24hBySource: { rss: 74, telegram: 49 } }).join(), /No gdelt events/);
   assert.match(evaluatePipelineHealth({ ...healthy, hoursSinceSourceSuccess: { gdelt: Infinity } }).join(), /gdelt has not fetched/);
   assert.match(evaluatePipelineHealth({ ...healthy, translationMonthUsed: 480_000 }).join(), /monthly cap/);
+  // A large historical tail is context, not a fault; recent rows being
+  // left behind is.
+  assert.deepEqual(evaluatePipelineHealth({ ...healthy, keptArchiveBacklogTotal: 50_000 }), []);
+  assert.match(evaluatePipelineHealth({ ...healthy, keptArchiveFallingBehind: 400 }).join(), /no longer covers new arrivals/);
   // No pending items at all is healthy, not "unknown".
   assert.deepEqual(evaluatePipelineHealth({ ...healthy, oldestPendingReviewHours: null }), []);
 });
