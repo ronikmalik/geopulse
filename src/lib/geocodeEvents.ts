@@ -1,3 +1,4 @@
+import { generateContent } from "./geminiGenerate";
 import { COUNTRY_CENTROIDS } from "./countryCentroids";
 import { countryFromLatLon } from "./geoResolve";
 
@@ -24,8 +25,8 @@ import { countryFromLatLon } from "./geoResolve";
 // documented in classify.ts) — reusing an LLM to re-decide any of that
 // risks quietly regressing it. This asks Gemini nothing except "where,
 // specifically" for an item already judged relevant.
+// Primary model; geminiGenerate.ts falls back to others when it's down.
 const GEOCODE_MODEL = process.env.GEMINI_GEOCODE_MODEL || "gemini-3.5-flash-lite";
-const GENERATE_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEOCODE_MODEL}:generateContent`;
 const REQUEST_TIMEOUT_MS = 20_000;
 const SNIPPET_CHARS = 300;
 
@@ -92,27 +93,17 @@ function buildPrompt(batch: GeocodeCandidate[]): string {
 }
 
 async function callGemini(prompt: string, apiKey: string): Promise<RawGeocodeItem[] | null> {
-  let res: Response;
-  try {
-    res = await fetch(`${GENERATE_ENDPOINT}?key=${apiKey}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json" },
-      }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-  } catch (err) {
-    console.error(`Geocode request failed: ${err}`);
+  const outcome = await generateContent(
+    GEOCODE_MODEL,
+    { contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json" } },
+    apiKey,
+    REQUEST_TIMEOUT_MS,
+  );
+  if (!outcome.ok) {
+    console.error(`Geocode call failed: ${outcome.detail}`);
     return null;
   }
-  if (!res.ok) {
-    const errBody = await res.text().catch(() => "");
-    console.error(`Geocode fetch failed: ${res.status} ${errBody.slice(0, 200)}`);
-    return null;
-  }
-  const data = await res.json();
+  const data = await outcome.res.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (typeof text !== "string") return null;
   try {

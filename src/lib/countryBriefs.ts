@@ -1,3 +1,4 @@
+import { generateContent } from "./geminiGenerate";
 import { eq, desc } from "drizzle-orm";
 import { getDb } from "@/db";
 import { countryBriefs } from "@/db/schema";
@@ -37,8 +38,8 @@ import { recordAiUsage, canAffordGeminiLiteCall } from "./aiUsage";
 // models/gemini-3.5-flash-lite" — ListModels lists a model as knowable,
 // not necessarily as callable by every project. gemini-3.5-flash-lite is
 // Google's own explicit replacement recommendation from that same error.
+// Primary model; geminiGenerate.ts falls back to others when it's down.
 const BRIEF_MODEL = process.env.GEMINI_BRIEF_MODEL || "gemini-3.5-flash-lite";
-const GENERATE_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${BRIEF_MODEL}:generateContent`;
 const REQUEST_TIMEOUT_MS = 20_000;
 
 const MAX_EVENTS_IN_PROMPT = 8;
@@ -108,7 +109,7 @@ interface GenerateContentResponse {
 // 429 rate limiting) and the next country will get the same answer.
 // "error" means this one request failed and another might not.
 type GeminiCallResult =
-  | { kind: "ok"; text: string }
+  | { kind: "ok"; text: string; model: string }
   | { kind: "unavailable"; detail: string }
   | { kind: "error"; detail: string };
 
@@ -122,30 +123,16 @@ export function isUpstreamUnavailableStatus(status: number): boolean {
 }
 
 async function callGemini(prompt: string, apiKey: string): Promise<GeminiCallResult> {
-  let res: Response;
-  try {
-    res = await fetch(`${GENERATE_ENDPOINT}?key=${apiKey}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-  } catch (err) {
-    // A timeout or connection reset is indistinguishable from an
-    // overloaded upstream from here, and retrying it across 120
-    // countries has the same cost, so it counts toward giving up.
-    return { kind: "unavailable", detail: String(err) };
+  // Timeouts, resets, 429 and 5xx on every model in the chain all come back
+  // as "unavailable", which counts toward giving up the run.
+  const outcome = await generateContent(BRIEF_MODEL, { contents: [{ parts: [{ text: prompt }] }] }, apiKey, REQUEST_TIMEOUT_MS);
+  if (!outcome.ok) {
+    console.error(`Brief generation failed: ${outcome.detail}`);
+    return outcome.unavailable ? { kind: "unavailable", detail: outcome.detail } : { kind: "error", detail: outcome.detail };
   }
-  if (!res.ok) {
-    const errBody = await res.text().catch(() => "");
-    const detail = `${res.status} ${errBody.slice(0, 200)}`;
-    console.error(`Brief generation fetch failed: ${detail}`);
-    if (isUpstreamUnavailableStatus(res.status)) return { kind: "unavailable", detail };
-    return { kind: "error", detail };
-  }
-  const data = (await res.json()) as GenerateContentResponse;
+  const data = (await outcome.res.json()) as GenerateContentResponse;
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-  return text ? { kind: "ok", text } : { kind: "error", detail: "empty completion" };
+  return text ? { kind: "ok", text, model: outcome.model } : { kind: "error", detail: "empty completion" };
 }
 
 export interface GenerateBriefsResult {
@@ -219,7 +206,9 @@ export async function generateBriefsForActiveCountries(): Promise<GenerateBriefs
         country: s.country,
         briefText: call.text,
         eventCount: top.length,
-        model: BRIEF_MODEL,
+        // The model that actually wrote it, which during an outage is a
+        // fallback, not BRIEF_MODEL.
+        model: call.model,
       });
       await recordAiUsage("brief", 1);
       // One per invocation — see this file's own header comment. The

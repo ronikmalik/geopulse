@@ -621,3 +621,52 @@ test("one slow article page costs only itself, not the whole GDELT title batch",
   assert.deepEqual(out, ["fast", null, null, "also fast"]);
   assert.ok(Date.now() - started < 1_000);
 });
+
+test("a Gemini outage on one model falls through to the next instead of stalling review", async () => {
+  const { generateContent, resetModelCooldowns, modelChain } = await import("../src/lib/geminiGenerate");
+  const realFetch = globalThis.fetch;
+  const asked: string[] = [];
+  const respond = (status: number) => new Response(status === 200 ? "{}" : '{"error":{"code":' + status + "}}", { status });
+  try {
+    // The 2026-09-24 shape: primary 503, the next model answers.
+    resetModelCooldowns();
+    globalThis.fetch = (async (url: string) => {
+      const model = /models\/([^:]+):/.exec(url)![1];
+      asked.push(model);
+      return respond(model === "gemini-3.5-flash-lite" ? 503 : 200);
+    }) as typeof fetch;
+    const first = await generateContent("gemini-3.5-flash-lite", {}, "k", 1000);
+    assert.ok(first.ok && first.model === "gemini-3.5-flash");
+    // The dead model is not retried on the next call in the same run.
+    asked.length = 0;
+    await generateContent("gemini-3.5-flash-lite", {}, "k", 1000);
+    assert.deepEqual(asked, ["gemini-3.5-flash"]);
+
+    // A retired fallback (404) is skipped, not fatal.
+    resetModelCooldowns();
+    globalThis.fetch = (async (url: string) => {
+      const model = /models\/([^:]+):/.exec(url)![1];
+      return respond(model === "gemini-3.1-flash-lite" ? 200 : model === "gemini-3.5-flash" ? 404 : 503);
+    }) as typeof fetch;
+    const retired = await generateContent("gemini-3.5-flash-lite", {}, "k", 1000);
+    assert.ok(retired.ok && retired.model === "gemini-3.1-flash-lite");
+
+    // Everything down: reported as unavailable (retry later), not as a bad request.
+    resetModelCooldowns();
+    globalThis.fetch = (async () => respond(503)) as typeof fetch;
+    const down = await generateContent("gemini-3.5-flash-lite", {}, "k", 1000);
+    assert.ok(!down.ok && down.unavailable);
+
+    // A malformed request fails at once rather than burning every model.
+    resetModelCooldowns();
+    asked.length = 0;
+    globalThis.fetch = (async (url: string) => { asked.push(url); return respond(400); }) as typeof fetch;
+    const bad = await generateContent("gemini-3.5-flash-lite", {}, "k", 1000);
+    assert.ok(!bad.ok && !bad.unavailable);
+    assert.equal(asked.length, 1);
+    assert.equal(new Set(modelChain("gemini-3.5-flash")).size, modelChain("gemini-3.5-flash").length);
+  } finally {
+    globalThis.fetch = realFetch;
+    resetModelCooldowns();
+  }
+});

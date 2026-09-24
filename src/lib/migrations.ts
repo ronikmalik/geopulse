@@ -638,6 +638,8 @@ export const MIGRATION_STATEMENTS = [
   // MAX_REVIEW_ATTEMPTS in classifierAudit.ts. A counter, so a default of 0
   // is the true value for every existing row.
   sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS review_attempts SMALLINT NOT NULL DEFAULT 0`,
+  // 2026-09-24: which model gave each review verdict — see schema.ts.
+  sql`ALTER TABLE events ADD COLUMN IF NOT EXISTS review_model TEXT`,
 ];
 
 export async function applyMigrations(): Promise<{ statementsApplied: number }> {

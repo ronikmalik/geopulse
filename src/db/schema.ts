@@ -143,6 +143,11 @@ export const events = pgTable(
     // at the head of the oldest-first queue indefinitely, resent to Gemini
     // every cycle.
     reviewAttempts: smallint("review_attempts").notNull().default(0),
+    // Which model gave the verdict (2026-09-24): the gate falls back
+    // across models when one is down (src/lib/geminiGenerate.ts), so
+    // verdicts from a fallback can be audited separately. NULL for rows
+    // reviewed before this existed, or published without review.
+    reviewModel: text("review_model"),
     // NULL = not yet run through src/lib/geocodeBackfill.ts's Gemini
     // location-resolution pass — still sitting at classify.ts's
     // country-centroid fallback lat/lon. Set the moment that pass has

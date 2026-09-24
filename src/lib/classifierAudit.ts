@@ -20,7 +20,7 @@ import { archiveFeedItems } from "./feedArchive";
 import { COUNTRY_CENTROIDS } from "./countryCentroids";
 import { resolveCountryFromText } from "./countryNames";
 import { isPressTvInScope } from "./sources/telegram";
-import { callGeminiJson } from "./geminiAuditClient";
+import { callGeminiJson, callGeminiJsonWithModel } from "./geminiAuditClient";
 import { runStoryDedupPass, type DedupCandidate } from "./storyDedup";
 import { validKeptAssessments, validDroppedFindings, type KeptAssessment } from "./auditValidation";
 
@@ -1716,6 +1716,7 @@ interface PendingAssessmentOutcome {
 async function applyPendingAssessment(
   item: PendingEventCandidate,
   a: KeptAssessment,
+  reviewModel: string,
 ): Promise<PendingAssessmentOutcome> {
   const db = getDb();
 
@@ -1725,7 +1726,7 @@ async function applyPendingAssessment(
   const reviewReasoning = a.reasoning.trim().slice(0, 500) || null;
 
   if (a.validInclusion === false) {
-    const updated = await db.update(events).set({ reviewStatus: "rejected", reviewReasoning })
+    const updated = await db.update(events).set({ reviewStatus: "rejected", reviewReasoning, reviewModel })
       .where(and(eq(events.id, item.id), eq(events.reviewStatus, "pending")))
       .returning({ id: events.id });
     if (updated.length === 0) return { status: "skipped", finalCountry: null };
@@ -1743,6 +1744,7 @@ async function applyPendingAssessment(
         .set({
           reviewStatus: "approved",
           reviewReasoning,
+          reviewModel,
           severity,
           country: assessedCountry,
           location: centroid.name,
@@ -1759,7 +1761,7 @@ async function applyPendingAssessment(
     }
   }
 
-  const updated = await db.update(events).set({ reviewStatus: "approved", reviewReasoning, severity })
+  const updated = await db.update(events).set({ reviewStatus: "approved", reviewReasoning, reviewModel, severity })
     .where(and(eq(events.id, item.id), eq(events.reviewStatus, "pending")))
     .returning({ id: events.id });
   if (updated.length === 0) return { status: "skipped", finalCountry: null };
@@ -1843,7 +1845,7 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
             break;
           }
           const results = await Promise.all(
-            round.map((batch) => callGeminiJson<RawKeptAssessment>(buildKeptAuditPrompt(batch, calibration), apiKey)),
+            round.map((batch) => callGeminiJsonWithModel<RawKeptAssessment>(buildKeptAuditPrompt(batch, calibration), apiKey)),
           );
           // Recorded immediately, not once at the end of each while-loop
           // iteration — see processKeptCandidates' own comment for why the
@@ -1861,7 +1863,8 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
             // A failed call (null) is an outage, not a verdict on any item —
             // it never counts toward an item's attempts.
             if (!results[j]) continue;
-            const assessments = validKeptAssessments(results[j]!, round[j]);
+            const assessments = validKeptAssessments(results[j]!.items, round[j]);
+            const reviewModel = results[j]!.model;
             const byId = new Map(round[j].map((c) => [c.id, c]));
             const answered = new Set(assessments.map((a) => a.id));
             const unanswered = round[j].filter((c) => !answered.has(c.id)).map((c) => c.id);
@@ -1873,7 +1876,7 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
               if (typeof a.id !== "number") continue;
               const item = byId.get(a.id);
               if (!item) continue;
-              const outcome = await applyPendingAssessment(item, a);
+              const outcome = await applyPendingAssessment(item, a, reviewModel);
               if (outcome.status === "approved") {
                 approved++;
                 if (outcome.finalCountry) {

@@ -54,6 +54,7 @@ import { trainAndEvaluateTextClassifier } from "../src/lib/textClassifierTrainin
 import { syncSourceCredibility } from "../src/lib/sourceCredibility";
 import { sampleGateDecisions, checkGradingProgress } from "../src/lib/gateReview";
 import { checkPipelineHealth } from "../src/lib/pipelineHealth";
+import { exhaustedCallCount } from "../src/lib/geminiGenerate";
 
 // Hard ceiling on any single job so a hung upstream can never pin a runner
 // for the workflow's full timeout-minutes. Derived from the caller's own
@@ -118,7 +119,10 @@ const JOBS: Record<string, () => Promise<unknown>> = {
     });
     const purge = await purgeReadCaches();
     if (!purge.purged) console.error(`read-cache purge skipped/failed: ${purge.detail}`);
-    return { ...review, geography, alerts: alertsResult, purge };
+    // Calls where every Gemini model in the fallback chain was down. Non-
+    // zero means GDELT items waited this cycle (they are never auto-
+    // published without review) — see src/lib/geminiGenerate.ts.
+    return { ...review, geminiAllModelsUnavailable: exhaustedCallCount(), geography, alerts: alertsResult, purge };
   },
   "generate-briefs": () => generateBriefsForActiveCountries(),
   // Mirrors src/app/api/admin/snapshot/route.ts exactly: grading failure
