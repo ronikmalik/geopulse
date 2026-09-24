@@ -4,6 +4,7 @@ import { feedArchive } from "@/db/schema";
 import { STRUCTURAL_SOURCES } from "./structuralSources";
 import { embedBatch } from "./embeddings";
 import { getEmbeddingBudget } from "./aiUsage";
+import { splitAttribution } from "./displayText";
 
 // Deliberately decoupled from the insert path (src/lib/feedArchive.ts's
 // archiveFeedItems) rather than embedding inline at insert time — ingest
@@ -58,6 +59,21 @@ import { getEmbeddingBudget } from "./aiUsage";
 const MAX_PER_CYCLE = 24;
 const MAX_INPUT_CHARS = 2000;
 
+// What gets embedded for a feed row: its title and summary — except that
+// a Telegram post's stored text opens with the channel's attribution
+// ("Press TV (Iran state media): ..."), and its title is a truncated copy of
+// its summary, so the label was embedded twice. Every post from a channel
+// therefore resembled every other post from it, and 93-100% of a Telegram
+// post's related events were the same channel (measured 2026-09-24). The
+// label is policy for display (docs/TELEGRAM_SOURCES.md), not content, so
+// it is stripped here; the card still shows it. Rows embedded before this
+// keep their old vectors: re-embedding them would cost roughly a day of the
+// 900/day budget, and similarEvents.ts excludes same-channel matches anyway.
+export function embeddingText(row: { source: string; title: string; summary: string }): string {
+  if (!row.source.startsWith("telegram:")) return `${row.title}\n${row.summary}`;
+  return splitAttribution(row.summary, row.source).body;
+}
+
 export interface BackfillResult {
   processed: number;
   skipped: boolean;
@@ -70,7 +86,7 @@ export async function backfillFeedArchiveEmbeddings(): Promise<BackfillResult> {
     const take = Math.min(MAX_PER_CYCLE, budget.remainingRightNow, budget.remainingToday);
     if (take <= 0) return { processed: 0, skipped: true };
     const rows = await db
-      .select({ id: feedArchive.id, title: feedArchive.title, summary: feedArchive.summary })
+      .select({ id: feedArchive.id, source: feedArchive.source, title: feedArchive.title, summary: feedArchive.summary })
       .from(feedArchive)
       // Structural sources are never embedded — see structuralSources.ts.
       .where(and(isNull(feedArchive.embedding), notInArray(feedArchive.source, [...STRUCTURAL_SOURCES])))
@@ -79,7 +95,7 @@ export async function backfillFeedArchiveEmbeddings(): Promise<BackfillResult> {
 
     if (rows.length === 0) return { processed: 0, skipped: false };
 
-    const texts = rows.map((r) => `${r.title}\n${r.summary}`.slice(0, MAX_INPUT_CHARS));
+    const texts = rows.map((r) => embeddingText(r).slice(0, MAX_INPUT_CHARS));
     const embeddings = await embedBatch(texts);
     if (!embeddings) return { processed: 0, skipped: true };
 

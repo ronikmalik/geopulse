@@ -87,7 +87,17 @@ export async function getSimilarEvents(eventId: number): Promise<SimilarEvent[]>
   if (!embedding) return [];
 
   const vectorLiteral = JSON.stringify(embedding);
-  const rows = await db
+  // Iterative index scan, in the same transaction as the query (2026-09-24).
+  // The HNSW index returns its ~40 nearest candidates and only THEN applies
+  // the WHERE clause; once same-channel Telegram rows were excluded, a
+  // PressTV post's 40 nearest were nearly all PressTV and its related list
+  // shrank to 0-1. iterative_scan (pgvector >= 0.8; this database runs
+  // 0.8.6) keeps scanning until the LIMIT is met — 5 results in ~74 ms,
+  // measured. relaxed_order may return them slightly out of order, so
+  // they're re-sorted by distance below.
+  const [, rawRows] = await db.batch([
+    db.execute(sql`set local hnsw.iterative_scan = relaxed_order`),
+    db
     .select({
       id: feedArchive.id,
       source: feedArchive.source,
@@ -105,10 +115,21 @@ export async function getSimilarEvents(eventId: number): Promise<SimilarEvent[]>
         // Older structural rows may still carry an embedding from before
         // 2026-09-20; they'd rarely rank anyway, but keep the list to news.
         notInArray(feedArchive.source, [...STRUCTURAL_SOURCES]),
+        // A Telegram post's related list excludes its own channel
+        // (2026-09-24, measured): 93-100% of related results for PressTV,
+        // the Ukrainian Air Force and other channels were more posts from
+        // the same channel — "related" had become "more from this feed".
+        // Partly because every stored post carried the channel's label
+        // (embeddingBackfill.ts no longer embeds it), partly because one
+        // channel does post about one theme. GDELT is left alone: it is
+        // one source label spanning many different outlets.
+        event.source.startsWith("telegram:") ? ne(feedArchive.source, event.source) : undefined,
       ),
     )
     .orderBy(sql`${feedArchive.embedding} <=> ${vectorLiteral}::halfvec`)
-    .limit(SIMILAR_LIMIT);
+    .limit(SIMILAR_LIMIT),
+  ]);
+  const rows = [...rawRows].sort((a, b) => Number(a.distance) - Number(b.distance));
 
   return rows.map((r) => ({
     id: r.id,

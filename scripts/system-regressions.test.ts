@@ -705,3 +705,19 @@ test("a Gemini outage on one model falls through to the next instead of stalling
     resetModelCooldowns();
   }
 });
+
+test("Telegram posts are embedded as their content, not their channel label", async () => {
+  const { embeddingText } = await import("../src/lib/embeddingBackfill");
+  const summary = "Press TV (Iran state media): Yemen launches preemptive strikes on Saudi positions in Jizan";
+  const tg = embeddingText({ source: "telegram:presstv", title: summary.slice(0, 60), summary });
+  assert.equal(tg, "Yemen launches preemptive strikes on Saudi positions in Jizan");
+  assert.doesNotMatch(tg, /Press TV/);
+  const translated = embeddingText({
+    source: "telegram:kpszsu", title: "x",
+    summary: "Ukrainian Air Force (official) [translated from Ukrainian]: Attack UAVs toward Zaporizhzhia",
+  });
+  assert.equal(translated, "Attack UAVs toward Zaporizhzhia");
+  // News keeps its title + summary exactly as before.
+  assert.equal(embeddingText({ source: "rss:bbc-world", title: "T", summary: "S" }), "T\nS");
+  assert.equal(embeddingText({ source: "gdelt", title: "T", summary: "S" }), "T\nS");
+});
