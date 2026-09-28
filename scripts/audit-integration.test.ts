@@ -35,8 +35,10 @@ test("pending review rejects malformed responses and cannot overwrite a concurre
       assert.equal(result.rejected, 0);
       assert.equal(updates.length, scenario === "malformed" ? 0 : 1, scenario);
       for (const update of updates) {
-        assert.match(update.query, /where \("events"\."id" = .* and "events"\."review_status" =/);
-        assert.ok(update.params.includes("pending"));
+        // Only a row the gate still owes a verdict can change: pending, or
+        // published by the local gate model during an outage (2026-09-28).
+        assert.match(update.query, /where \("events"\."id" = .* and \("events"\."review_status" = 'pending' or \("events"\."review_status" = 'approved' and "events"\."review_model" = /);
+        assert.ok(update.params.includes("gate-student:hashed-ngram-logreg"));
       }
     }
   } finally {

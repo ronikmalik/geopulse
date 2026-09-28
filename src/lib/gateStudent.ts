@@ -1,4 +1,4 @@
-import { and, gt, inArray, isNotNull, like, notLike, or, eq } from "drizzle-orm";
+import { and, gt, inArray, isNotNull, isNull, like, lt, notLike, or, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { events } from "@/db/schema";
 import { splitAttribution } from "./displayText";
@@ -16,12 +16,31 @@ import { recordModelRun } from "./modelRegistry";
 // The loop it opens: every gate verdict is a training label, so each day of
 // reviewing makes the next training run larger (~250 labels a day at the
 // time of writing), and the registry keeps every run so the trend is
-// visible on /models. What it does NOT do: decide anything. It is scored
-// on the newest fifth of decisions it never saw, beside two naive
-// baselines, and reports how many decisions it could take on alone at a
-// given agreement with the gate ("cascade" rows). Letting it skip Gemini
-// for any item is a separate, owner-approved step that would also need
-// human-graded evidence (see textClassifierTraining.ts's promotion rule).
+// visible on /models. It is scored on the newest fifth of decisions it
+// never saw, beside two naive baselines, and reports how many decisions
+// it could take on alone at a given agreement with the gate ("cascade"
+// rows).
+//
+// It decides nothing while Gemini is working. The one exception, approved
+// by the owner on 2026-09-28, is the outage fallback below: GDELT items
+// are never auto-published unreviewed (2026-09-10 owner decision), so a
+// Gemini outage used to leave GDELT off the feed for hours. When a GDELT
+// item has waited FALLBACK_MIN_AGE_MINUTES (the gate has failed on it at
+// least twice), the model is retrained on the spot and may publish it if
+// it is at least FALLBACK_THRESHOLD sure the gate would, and only if, in
+// that same run, at least FALLBACK_MIN_PRECISION of its held-out
+// FALLBACK_THRESHOLD-confident "publish" calls (FALLBACK_MIN_PUBLISH_CALLS
+// or more of them) were items the gate did publish. Such rows carry
+// reviewModel GATE_STUDENT_MODEL_ID; the gate re-checks every one when
+// Gemini is back and can withdraw it (classifierAudit.ts), and they are
+// never used as training labels.
+//
+// Measured 2026-09-28: 9 such held-out calls at 0.95, all correct, so it
+// stays off until the evidence grows. At 0.9, publish precision ranged
+// 86-100% across three time windows: short of the bar GDELT is held to.
+// Features are text, source and category only. The stored severity and
+// country are NOT used: the gate rewrites them on approval (severity on
+// 362 of 497 approvals), so as features they leak the label.
 //
 // Labels: approved/rejected rows from the classified sources whose status
 // was set by a judgment with recorded reasoning, i.e. the Gemini gate, the
@@ -207,20 +226,29 @@ export interface GateStudentEvaluation {
 // (by time) is held out, so the score says how well the past predicts the
 // future, not how well the model memorised a shuffled sample.
 export function evaluateGateStudent(examples: GateExample[]): GateStudentEvaluation {
+  return fitGateStudent(examples).evaluation;
+}
+
+// The evaluation plus the exact model it describes, so the outage fallback
+// scores items with the model whose held-out numbers it just checked.
+export function fitGateStudent(examples: GateExample[]): {
+  evaluation: GateStudentEvaluation;
+  model: GateStudentModel | null;
+} {
   const sorted = [...examples].sort((a, b) => a.at.getTime() - b.at.getTime());
   const cut = Math.floor(sorted.length * (1 - TEST_FRACTION));
   const train = sorted.slice(0, cut);
   const test = sorted.slice(cut);
   const classes = (xs: GateExample[]) => new Set(xs.map((x) => x.label)).size;
   if (sorted.length < MIN_EXAMPLES || classes(train) < 2 || classes(test) < 2) {
-    return {
+    return { model: null, evaluation: {
       trained: false,
       trainSize: train.length,
       testSize: test.length,
       metrics: { labeledExamples: sorted.length },
       baseline: null,
       notes: `insufficient data: ${sorted.length} labeled gate decisions (need ${MIN_EXAMPLES}+, both outcomes in the training and the held-out period).`,
-    };
+    } };
   }
 
   const trainNames = train.map(gateFeatureNames);
@@ -261,8 +289,18 @@ export function evaluateGateStudent(examples: GateExample[]): GateStudentEvaluat
   for (const t of CASCADE_THRESHOLDS) {
     const covered = testScores.map((s, i) => ({ s, y: testLabels[i] })).filter(({ s }) => s >= t || s <= 1 - t);
     metrics[`coverage@${t}`] = round(covered.length / testScores.length);
+    metrics[`covered@${t}`] = covered.length;
     metrics[`agreement@${t}`] = covered.length
       ? round(covered.filter(({ s, y }) => (s >= t ? 1 : 0) === y).length / covered.length)
+      : null;
+    // The publish side alone: of the held-out items it is at least t sure
+    // the gate would publish, the share the gate did publish. This, not
+    // agreement (which confident rejections dominate), is what the outage
+    // fallback is judged on.
+    const publishCalls = testScores.map((s, i) => ({ s, y: testLabels[i] })).filter(({ s }) => s >= t);
+    metrics[`publishN@${t}`] = publishCalls.length;
+    metrics[`publishPrecision@${t}`] = publishCalls.length
+      ? round(publishCalls.filter(({ y }) => y === 1).length / publishCalls.length)
       : null;
   }
 
@@ -298,7 +336,7 @@ export function evaluateGateStudent(examples: GateExample[]): GateStudentEvaluat
     majorityAccuracy: round(testLabels.filter((y) => y === majority).length / testLabels.length),
   };
 
-  return {
+  return { model, evaluation: {
     trained: true,
     trainSize: train.length,
     testSize: test.length,
@@ -306,12 +344,21 @@ export function evaluateGateStudent(examples: GateExample[]): GateStudentEvaluat
     baseline,
     notes:
       `Trained on ${train.length} gate decisions, scored on the newest ${test.length} it never saw. ` +
-      "Shadow only: it takes no decisions. Labels are the gate's own verdicts (plus audit and human corrections), " +
-      "so agreement measures how well it reproduces the gate, not ground truth.",
-  };
+      "Decides nothing while Gemini is working; during a Gemini outage it may publish GDELT items it is at least 95% sure of, each re-checked by Gemini later. " +
+      "Labels are the gate's own verdicts (plus audit and human corrections), so agreement measures how well it reproduces the gate, not ground truth.",
+  } };
 }
 
 const GATE_LABELS_SINCE = new Date("2026-09-18T00:00:00Z");
+
+// What the model reads for one event, the same at training and scoring.
+function gateText(row: { title: string; summary: string; source: string }): string {
+  const body = splitAttribution(row.summary, row.source).body;
+  return row.title === row.summary ? body : `${row.title}\n${body}`;
+}
+
+// reviewModel stamped on rows the model published during an outage.
+export const GATE_STUDENT_MODEL_ID = `${GATE_STUDENT_FAMILY}:${GATE_STUDENT_VARIANT}`;
 
 export async function loadGateExamples(): Promise<GateExample[]> {
   const db = getDb();
@@ -332,12 +379,14 @@ export async function loadGateExamples(): Promise<GateExample[]> {
         inArray(events.reviewStatus, ["approved", "rejected"]),
         isNotNull(events.reviewReasoning),
         notLike(events.reviewReasoning, "Withheld:%"),
+        // Its own outage decisions are not labels: learning from them would
+        // only teach it to agree with itself.
+        or(isNull(events.reviewModel), notLike(events.reviewModel, `${GATE_STUDENT_FAMILY}%`)),
       ),
     );
   return rows.map((r) => {
-    const body = splitAttribution(r.summary, r.source).body;
     return {
-      text: r.title === r.summary ? body : `${r.title}\n${body}`,
+      text: gateText(r),
       source: r.source,
       category: r.category,
       label: r.reviewStatus === "approved" ? 1 : 0,
@@ -361,4 +410,73 @@ export async function trainAndRecordGateStudent(): Promise<GateStudentEvaluation
     notes: evaluation.notes,
   });
   return evaluation;
+}
+
+export const FALLBACK_MIN_AGE_MINUTES = 30;
+export const FALLBACK_THRESHOLD = 0.95;
+export const FALLBACK_MIN_PRECISION = 0.95;
+export const FALLBACK_MIN_PUBLISH_CALLS = 15;
+const FALLBACK_BATCH = 300;
+
+export interface StudentFallbackResult {
+  considered: number;
+  published: number;
+  // Why nothing was published although items were waiting, if so.
+  skipped: string | null;
+}
+
+// See the header comment. Runs at the end of every review round; a no-op
+// unless GDELT items have been waiting FALLBACK_MIN_AGE_MINUTES.
+export async function publishConfidentPendingGdelt(
+  now = Date.now(),
+  loadExamples: () => Promise<GateExample[]> = loadGateExamples,
+): Promise<StudentFallbackResult> {
+  const db = getDb();
+  const waiting = await db
+    .select({ id: events.id, title: events.title, summary: events.summary, source: events.source, category: events.category })
+    .from(events)
+    .where(
+      and(
+        eq(events.source, "gdelt"),
+        eq(events.reviewStatus, "pending"),
+        lt(events.createdAt, new Date(now - FALLBACK_MIN_AGE_MINUTES * 60_000)),
+      ),
+    )
+    .orderBy(events.id)
+    .limit(FALLBACK_BATCH);
+  if (waiting.length === 0) return { considered: 0, published: 0, skipped: null };
+
+  const { evaluation, model } = fitGateStudent(await loadExamples());
+  const key = `${FALLBACK_THRESHOLD}`;
+  const precision = evaluation.metrics[`publishPrecision@${key}`];
+  const calls = evaluation.metrics[`publishN@${key}`];
+  if (!model || !evaluation.trained) {
+    return { considered: waiting.length, published: 0, skipped: evaluation.notes };
+  }
+  if (typeof precision !== "number" || typeof calls !== "number" || calls < FALLBACK_MIN_PUBLISH_CALLS || precision < FALLBACK_MIN_PRECISION) {
+    return {
+      considered: waiting.length,
+      published: 0,
+      skipped: `not enough evidence yet: publish precision ${precision ?? "n/a"} on ${calls ?? 0} held-out calls at ${key} (needs ${FALLBACK_MIN_PRECISION} on ${FALLBACK_MIN_PUBLISH_CALLS}+)`,
+    };
+  }
+
+  let published = 0;
+  for (const row of waiting) {
+    const p = predictGateStudent(model, vectorize(gateFeatureNames({ text: gateText(row), source: row.source, category: row.category })));
+    if (p < FALLBACK_THRESHOLD) continue;
+    const updated = await db
+      .update(events)
+      .set({
+        reviewStatus: "approved",
+        reviewModel: GATE_STUDENT_MODEL_ID,
+        reviewReasoning:
+          `Published by the local gate model while Gemini was unavailable: ${(p * 100).toFixed(1)}% sure the review gate would publish it ` +
+          `(held-out: ${(precision * 100).toFixed(1)}% of its ${calls} calls this confident were published by the gate). Gemini re-checks it when available.`,
+      })
+      .where(and(eq(events.id, row.id), eq(events.reviewStatus, "pending")))
+      .returning({ id: events.id });
+    published += updated.length;
+  }
+  return { considered: waiting.length, published, skipped: null };
 }

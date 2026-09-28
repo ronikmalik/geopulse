@@ -22,6 +22,7 @@ import { GET as getAnomalies } from "../src/app/api/anomalies/route";
 import { GET as getHealth } from "../src/app/api/admin/health/route";
 import { GET as getModels } from "../src/app/api/admin/ai-models/route";
 import { applyTsunamiBulletins } from "../src/lib/tsunamiEnrichment";
+import { publishConfidentPendingGdelt, loadGateExamples, GATE_STUDENT_MODEL_ID } from "../src/lib/gateStudent";
 import type { TsunamiBulletin } from "../src/lib/sources/tsunami";
 
 // 2026-09-28: run production queries in memory; no provider or database traffic can escape.
@@ -358,4 +359,68 @@ test("NOAA tsunami bulletins annotate the matching quake in events and feed_arch
   // Old bulletins are ignored outright.
   const stale = { ...bulletin, issuedAt: new Date(Date.now() - 3 * 86_400_000) };
   assert.deepEqual(await applyTsunamiBulletins(async () => [stale]), { bulletins: 0, matched: 0, updated: 0 });
+});
+
+test("during a Gemini outage the gate model publishes only confident, old GDELT items, and Gemini re-checks them", async (t) => {
+  const { pg } = await fixture(t);
+  // 300 labelled gate decisions: reports of strikes published, statements rejected.
+  const rows: string[] = [];
+  for (let i = 0; i < 300; i++) {
+    const publish = i % 2 === 0;
+    const text = publish ? `Missile strike kills ${(i % 9) + 2} people in Kharkiv overnight` : `Minister condemns remarks and warns rivals over talks ${i}`;
+    rows.push(`('gdelt','https://example.invalid/l${i}','${text}','${text}','russia-ukraine','Ukraine','UA',49,32,3,now(),
+      now() - interval '${300 - i} minutes','${publish ? "approved" : "rejected"}','fixture verdict','gemini-3.5-flash-lite')`);
+  }
+  await pg.exec(`insert into events(source,url,title,summary,category,location,country,lat,lon,severity,published_at,created_at,review_status,review_reasoning,review_model)
+    values ${rows.join(",")}`);
+  const waiting = (id: number, text: string, minutes: number) =>
+    pg.exec(`insert into events(id,source,url,title,summary,category,location,country,lat,lon,severity,published_at,created_at,review_status)
+      values(${id},'gdelt','https://example.invalid/w${id}','${text}','${text}','russia-ukraine','Ukraine','UA',49,32,3,now(),now() - interval '${minutes} minutes','pending')`);
+  await waiting(90001, "Missile strike kills 5 people in Kharkiv overnight", 45);
+  await waiting(90002, "Minister condemns remarks and warns rivals over talks", 45);
+  await waiting(90003, "Missile strike kills 7 people in Kharkiv overnight", 5);
+
+  const fallback = await publishConfidentPendingGdelt();
+  assert.equal(fallback.skipped, null);
+  assert.equal(fallback.considered, 2);
+  assert.equal(fallback.published, 1);
+  const status = async (id: number) =>
+    (await pg.query<{ review_status: string; review_model: string | null }>(`select review_status, review_model from events where id = ${id}`)).rows[0];
+  assert.deepEqual(await status(90001), { review_status: "approved", review_model: GATE_STUDENT_MODEL_ID });
+  assert.equal((await status(90002)).review_status, "pending");
+  assert.equal((await status(90003)).review_status, "pending", "younger than the fallback age");
+  // Its own decision never becomes a training label.
+  assert.equal((await loadGateExamples()).length, 300);
+
+  // Gemini is back: it reviews the pending items and re-checks the model's.
+  process.env.GEMINI_API_KEY = "test-only";
+  t.mock.method(globalThis, "fetch", async () => gemini([
+    { id: 90001, validInclusion: false, country: "UA", severity: 3, reasoning: "Duplicate of an earlier report" },
+    { id: 90002, validInclusion: false, country: "UA", severity: 2, reasoning: "Statement, not an event" },
+    { id: 90003, validInclusion: true, country: "UA", severity: 3, reasoning: "" },
+  ]));
+  const review = await reviewPendingEvents();
+  assert.equal(review.rejected, 2);
+  assert.equal(review.approved, 1);
+  assert.equal((await status(90001)).review_status, "rejected", "the gate can withdraw the model's decision");
+  assert.equal((await status(90003)).review_model, "gemini-3.5-flash-lite");
+});
+
+test("the gate model stays off during an outage when its publish calls are not reliable enough", async (t) => {
+  const { pg } = await fixture(t);
+  // Labels unrelated to the text: no model can earn the publish-precision bar.
+  const rows: string[] = [];
+  for (let i = 0; i < 300; i++) {
+    const text = `Missile strike kills ${(i % 9) + 2} people in Kharkiv overnight`;
+    rows.push(`('gdelt','https://example.invalid/n${i}','${text}','${text}','russia-ukraine','Ukraine','UA',49,32,3,now(),
+      now() - interval '${300 - i} minutes','${(i * 7919) % 3 === 0 ? "approved" : "rejected"}','fixture verdict','gemini-3.5-flash-lite')`);
+  }
+  await pg.exec(`insert into events(source,url,title,summary,category,location,country,lat,lon,severity,published_at,created_at,review_status,review_reasoning,review_model)
+    values ${rows.join(",")}`);
+  await pg.exec(`insert into events(id,source,url,title,summary,category,location,country,lat,lon,severity,published_at,created_at,review_status)
+    values(90010,'gdelt','https://example.invalid/w10','Missile strike kills 5 people in Kharkiv overnight','x','russia-ukraine','Ukraine','UA',49,32,3,now(),now() - interval '45 minutes','pending')`);
+  const result = await publishConfidentPendingGdelt();
+  assert.equal(result.published, 0);
+  assert.match(result.skipped ?? "", /not enough evidence yet/);
+  assert.equal((await pg.query<{ s: string }>("select review_status as s from events where id = 90010")).rows[0].s, "pending");
 });

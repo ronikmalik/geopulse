@@ -23,6 +23,7 @@ import { isPressTvInScope } from "./sources/telegram";
 import { callGeminiJson, callGeminiJsonWithModel } from "./geminiAuditClient";
 import { runStoryDedupPass, type DedupCandidate } from "./storyDedup";
 import { promoteDuplicateAfterRejection } from "./eventDedup";
+import { GATE_STUDENT_MODEL_ID, publishConfidentPendingGdelt, type StudentFallbackResult } from "./gateStudent";
 import { validKeptAssessments, validDroppedFindings, type KeptAssessment } from "./auditValidation";
 
 // Gemini pass over classification_archive, auditing the keyword
@@ -1668,6 +1669,12 @@ const PENDING_REVIEW_DEADLINE_MS = 15_000;
 // reversal of the general policy.
 const PENDING_REVIEW_MAX_AGE_MINUTES = 30;
 
+// Rows the gate still owes a verdict: pending ones, and ones the local
+// gate model published during a Gemini outage (gateStudent.ts), which the
+// gate re-checks and may withdraw. Pending rows go first: they are the
+// ones nobody can see yet.
+const AWAITING_GATE = sql`(${events.reviewStatus} = 'pending' or (${events.reviewStatus} = 'approved' and ${events.reviewModel} = ${GATE_STUDENT_MODEL_ID}))`;
+
 async function getPendingEventCandidates(limit: number): Promise<PendingEventCandidate[]> {
   const db = getDb();
   const rows = await db
@@ -1683,8 +1690,8 @@ async function getPendingEventCandidates(limit: number): Promise<PendingEventCan
       category: events.category,
     })
     .from(events)
-    .where(and(eq(events.reviewStatus, "pending"), isNotNull(events.country)))
-    .orderBy(events.id) // oldest first — fairness, same as drainPendingTelegramTranslations
+    .where(and(AWAITING_GATE, isNotNull(events.country)))
+    .orderBy(sql`(${events.reviewStatus} = 'pending') desc`, events.id) // oldest first — fairness, same as drainPendingTelegramTranslations
     .limit(limit);
 
   return rows.filter((r): r is PendingEventCandidate => r.country !== null);
@@ -1714,7 +1721,7 @@ async function applyPendingAssessment(
 
   if (a.validInclusion === false) {
     const updated = await db.update(events).set({ reviewStatus: "rejected", reviewReasoning, reviewModel })
-      .where(and(eq(events.id, item.id), eq(events.reviewStatus, "pending")))
+      .where(and(eq(events.id, item.id), AWAITING_GATE))
       .returning({ id: events.id });
     if (updated.length === 0) return { status: "skipped", finalCountry: null };
     await promoteDuplicateAfterRejection(item.id);
@@ -1742,7 +1749,7 @@ async function applyPendingAssessment(
           // country_mismatch branch above.
           correlationGroupId: correlationGroupId(assessedCountry, item.category as Category, item.publishedAt),
         })
-        .where(and(eq(events.id, item.id), eq(events.reviewStatus, "pending")))
+        .where(and(eq(events.id, item.id), AWAITING_GATE))
         .returning({ id: events.id });
       if (updated.length === 0) return { status: "skipped", finalCountry: null };
       return { status: "approved", finalCountry: assessedCountry };
@@ -1750,7 +1757,7 @@ async function applyPendingAssessment(
   }
 
   const updated = await db.update(events).set({ reviewStatus: "approved", reviewReasoning, reviewModel, severity })
-    .where(and(eq(events.id, item.id), eq(events.reviewStatus, "pending")))
+    .where(and(eq(events.id, item.id), AWAITING_GATE))
     .returning({ id: events.id });
   if (updated.length === 0) return { status: "skipped", finalCountry: null };
   return { status: "approved", finalCountry: item.country };
@@ -1762,6 +1769,8 @@ export interface PendingReviewResult {
   // Withheld after MAX_REVIEW_ATTEMPTS rounds with no usable verdict.
   withheld: number;
   autoPromoted: number;
+  // GDELT items the local gate model published during a Gemini outage.
+  studentFallback?: StudentFallbackResult | null;
   skipped: boolean;
 }
 
@@ -1786,7 +1795,7 @@ async function recordUnusableVerdicts(ids: number[]): Promise<number> {
   const bumped = await db
     .update(events)
     .set({ reviewAttempts: sql`${events.reviewAttempts} + 1` })
-    .where(and(inArray(events.id, ids), eq(events.reviewStatus, "pending")))
+    .where(and(inArray(events.id, ids), AWAITING_GATE))
     .returning({ id: events.id, attempts: events.reviewAttempts });
   const exhausted = bumped.filter((r) => r.attempts >= MAX_REVIEW_ATTEMPTS).map((r) => r.id);
   if (exhausted.length === 0) return 0;
@@ -1796,7 +1805,7 @@ async function recordUnusableVerdicts(ids: number[]): Promise<number> {
       reviewStatus: "rejected",
       reviewReasoning: `Withheld: the review gate returned no usable verdict in ${MAX_REVIEW_ATTEMPTS} attempts, so the item was never verified.`,
     })
-    .where(and(inArray(events.id, exhausted), eq(events.reviewStatus, "pending")))
+    .where(and(inArray(events.id, exhausted), AWAITING_GATE))
     .returning({ id: events.id });
   console.warn(`review gate: withheld ${withheld.length} item(s) after ${MAX_REVIEW_ATTEMPTS} unusable verdicts: ${withheld.map((r) => r.id).join(", ")}`);
   for (const row of withheld) await promoteDuplicateAfterRejection(row.id);
@@ -1921,6 +1930,13 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
   // explicit "bigger delay is ok" priority. getPendingEventCandidates
   // already orders oldest-first, so a backlog drains in order the moment
   // Gemini capacity is available again rather than growing unbounded.
+  // GDELT items still waiting after FALLBACK_MIN_AGE_MINUTES: the local
+  // gate model may publish the ones it is confident about (gateStudent.ts).
+  const studentFallback = await publishConfidentPendingGdelt().catch((err) => {
+    console.error(`gate student fallback failed: ${err}`);
+    return null;
+  });
+
   let autoPromoted = 0;
   try {
     const db = getDb();
@@ -1936,7 +1952,7 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
     console.error(`pending-review auto-promote failed: ${err}`);
   }
 
-  return { approved, rejected, withheld, autoPromoted, skipped: !apiKey };
+  return { approved, rejected, withheld, autoPromoted, studentFallback, skipped: !apiKey };
 }
 
 export interface AuditFinding {

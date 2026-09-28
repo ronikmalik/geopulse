@@ -171,6 +171,13 @@ one non-generative translation API — all direct REST calls, no SDK:
   inclusion/severity/country, almost always within the same or next ~15min ingest
   cycle. A stale pending row (30+ min, e.g. Gemini unavailable) auto-promotes on the
   classifier's own original verdict rather than hiding real news indefinitely.
+  Except GDELT (owner decision 2026-09-10): it waits for the gate. Since 2026-09-28 a
+  GDELT row pending 30+ min may be published by the local gate model
+  (`src/lib/gateStudent.ts`, `publishConfidentPendingGdelt`) if it is 95%+ sure the gate
+  would publish it and, in that same run, 95%+ of its held-out 95%-confident publish
+  calls (15 or more) were items the gate did publish. Those rows carry reviewModel
+  `gate-student:hashed-ngram-logreg`, show a "Local model review" badge, are re-checked
+  by the gate when Gemini returns (it can withdraw them) and are never training labels.
 - **Post-hoc classifier audit** (`runClassifierAudit`/`runClassifierAuditSlice`, same
   file) — the same review, but re-run against items already live, on a rolling 30-day
   window. Flags `false_positive`/`false_negative`/`severity_mismatch`/

@@ -24,7 +24,7 @@ const FAMILY_BLURB: Record<string, string> = {
   "narrative-clusters":
     "Groups embedded articles into narratives for the novelty signal. Silhouette near 0 means the clusters are barely better than random; that number is reported as-is.",
   "gate-student":
-    "A word and word-pair model trained on the review gate's own past publish/reject decisions, retrained daily as decisions accumulate, and scored on the newest fifth it never saw. It makes no decisions and needs no API calls. coverage@t is the share of decisions it is at least t confident about; agreement@t is how often it then matches the gate. It reproduces the gate; it is not ground truth.",
+    "A word and word-pair model trained on the review gate's own past publish/reject decisions, retrained daily as decisions accumulate, and scored on the newest fifth it never saw. It needs no API calls. publishPrecision@t is, of the held-out items it was at least t sure the gate would publish, the share the gate did publish (publishN@t is how many). During a Gemini outage it may publish GDELT items it is 95% sure of, but only when publishPrecision@0.95 is at least 95% on 15 or more items; each is labelled on the feed and re-checked by Gemini afterwards. It reproduces the gate; it is not ground truth.",
 };
 
 function num(v: unknown, digits = 2): string {
