@@ -163,6 +163,7 @@ export async function fetchRecentPrimaries(
         eq(events.country, country),
         eq(events.category, category),
         isNull(events.primaryEventId),
+        sql`${events.reviewStatus} != 'rejected'`,
         gt(events.publishedAt, since),
         // A hidden pre-kill-switch row must never become the primary a
         // fresh, post-switch event attaches to — that would inherit its
@@ -171,6 +172,23 @@ export async function fetchRecentPrimaries(
       ),
     );
   return rows;
+}
+
+// 2026-09-28: move the surviving cluster in one statement after its primary is rejected.
+export async function promoteDuplicateAfterRejection(primaryId: number): Promise<void> {
+  await getDb().execute(sql`
+    with replacement as (
+      select id from ${events}
+      where primary_event_id = ${primaryId} and review_status != 'rejected'
+        and pre_kill_switch_at is null
+        and exists (select 1 from ${events} p where p.id = ${primaryId}
+          and p.primary_event_id is null and p.review_status = 'rejected')
+      order by published_at asc, id asc limit 1
+    )
+    update ${events} set primary_event_id = case
+      when id = (select id from replacement) then null else (select id from replacement) end
+    where primary_event_id = ${primaryId} and exists (select 1 from replacement)
+  `);
 }
 
 // Pure — takes a pre-fetched candidate pool rather than querying itself, so

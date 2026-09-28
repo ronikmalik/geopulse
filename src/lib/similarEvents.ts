@@ -71,7 +71,7 @@ export async function getSimilarEvents(eventId: number): Promise<SimilarEvent[]>
       publishedAt: events.publishedAt,
     })
     .from(events)
-    .where(eq(events.id, eventId))
+    .where(and(eq(events.id, eventId), eq(events.reviewStatus, "approved"), NOT_KILL_SWITCHED))
     .limit(1);
   if (eventRow.length === 0) return [];
   const event = eventRow[0];
@@ -112,6 +112,9 @@ export async function getSimilarEvents(eventId: number): Promise<SimilarEvent[]>
     .where(
       and(
         sql`${feedArchive.embedding} is not null and ${feedArchive.url} != ${event.url}`,
+        // 2026-09-28: retain aged-out stories, but never expose withheld live rows.
+        sql`not exists (select 1 from ${events} where ${events.url} = ${feedArchive.url}
+          and (${events.reviewStatus} != 'approved' or ${events.preKillSwitchAt} is not null))`,
         // Older structural rows may still carry an embedding from before
         // 2026-09-20; they'd rarely rank anyway, but keep the list to news.
         notInArray(feedArchive.source, [...STRUCTURAL_SOURCES]),

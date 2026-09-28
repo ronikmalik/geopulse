@@ -11,6 +11,7 @@ import { fetchIodaOutages } from "./sources/ioda";
 import { fetchFirmsThermalAnomalies } from "./sources/firms";
 import { fetchTelegramChannel, TELEGRAM_CHANNELS } from "./sources/telegram";
 import { removeAlreadyResolvedPending } from "./pendingTranslation";
+import { markPendingGdeltTitlesResolved } from "./pendingGdeltTitle";
 import type { DirectItem } from "./sources/direct";
 import {
   classifyByKeywords,
@@ -131,11 +132,8 @@ export async function insertDirectItems(
         correlationGroupId: country
           ? correlationGroupId(country, item.category, item.publishedAt)
           : null,
-        // No pre-publish review gate for this insert path — used by
-        // backfill.ts for structural sources (USGS/EONET), same "no
-        // real editorial judgment call" reasoning as the direct-source
-        // block in runIngest below.
-        reviewStatus: "approved" as const,
+        // 2026-09-28: Telegram needs editorial review; structural detections do not.
+        reviewStatus: item.source.startsWith("telegram:") ? "pending" as const : "approved" as const,
       };
     });
     const result = await db
@@ -406,6 +404,13 @@ export async function runIngest(
   // before the per-source classifier (lenient or strict) even runs.
   const all = dedupeByUrl([...gdelt.items, ...rss.items]);
   const candidates = all.filter((item) => isRecent(item) && isLikelyGeopolitical(item));
+  const candidateUrls = new Set(candidates.map((item) => item.url));
+  const filteredGdeltUrls = gdelt.items.filter((item) => !candidateUrls.has(item.url)).map((item) => item.url);
+  async function acknowledgeGdelt(): Promise<void> {
+    // 2026-09-28: failed inserts and unrecorded classifications stay queued for retry.
+    await markPendingGdeltTitlesResolved(gdelt.items.map((item) => item.url), filteredGdeltUrls)
+      .catch((err) => { errors.push(`gdelt acknowledge: ${err}`); });
+  }
   const direct = dedupeDirectByUrl([
     ...usgs.items,
     ...eonet.items,
@@ -416,6 +421,7 @@ export async function runIngest(
   ]);
 
   if (candidates.length === 0 && direct.length === 0) {
+    await acknowledgeGdelt();
     return {
       fetched: all.length + direct.length,
       candidates: 0,
@@ -513,8 +519,7 @@ export async function runIngest(
         // invisible to every public read path until
         // reviewPendingEvents (classifierAudit.ts) promotes it,
         // usually within this or the next ingest cycle. Applies to
-        // every classified source (RSS/GDELT/Telegram) — the direct-
-        // source block below skips this entirely.
+        // every classified source (RSS/GDELT/Telegram).
         reviewStatus: "pending" as const,
       };
     }
@@ -580,7 +585,7 @@ export async function runIngest(
     // a smaller total timeout budget.
     try {
       const retryResult = await withDeadline(
-        retryFailedClassificationsViaTranslation(failedItems, (item) => item.source === "gdelt"),
+        retryFailedClassificationsViaTranslation(failedItems, credibilityMap),
         4_000,
         "translationRetry",
       );
@@ -718,6 +723,8 @@ export async function runIngest(
     errors.push(`classify: ${err}`);
   }
 
+  await acknowledgeGdelt();
+
   if (freshDirect.length > 0) {
     try {
       const rows = freshDirect.map((item) => {
@@ -737,11 +744,8 @@ export async function runIngest(
           correlationGroupId: country
             ? correlationGroupId(country, item.category, item.publishedAt)
             : null,
-          // No pre-publish review gate for direct/structural sources
-          // (USGS/EONET/GDACS/IODA/FIRMS) — there's no editorial
-          // judgment call in "a magnitude-6 earthquake happened here"
-          // the way there is for classified RSS/GDELT/Telegram content.
-          reviewStatus: "approved" as const,
+          // 2026-09-28: Telegram needs editorial review; structural detections do not.
+          reviewStatus: item.source.startsWith("telegram:") ? "pending" as const : "approved" as const,
         };
       });
       const result = await db

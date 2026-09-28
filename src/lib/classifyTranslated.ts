@@ -1,4 +1,5 @@
-import { classifyGdeltItem, classifyByKeywords, type ClassifiedItem } from "./classify";
+import { classifyByKeywords, type ClassifiedItem } from "./classify";
+import type { CredibilityLookup } from "./sourceCredibility";
 import { resolveCountryFromText } from "./countryNames";
 import { translateBatch } from "./translate";
 import type { RawItem } from "./sources/gdelt";
@@ -40,7 +41,7 @@ const MAX_INPUT_CHARS = 500; // title+snippet are already short; caps a single p
 
 export async function retryFailedClassificationsViaTranslation(
   failedItems: RawItem[],
-  isGdelt: (item: RawItem) => boolean,
+  credibilityMap?: Map<string, CredibilityLookup>,
 ): Promise<TranslationRetryResult> {
   const candidates = failedItems.filter((item) => {
     const text = `${item.title} ${item.snippet}`;
@@ -68,7 +69,8 @@ export async function retryFailedClassificationsViaTranslation(
     if (!translatedTitle || !translatedSnippet) continue; // this one item's slice of the batch came back malformed — skip it, not the whole batch
 
     const translatedItem: RawItem = { ...candidates[i], title: translatedTitle, snippet: translatedSnippet };
-    const result = isGdelt(candidates[i]) ? classifyGdeltItem(translatedItem) : classifyByKeywords(translatedItem);
+    // 2026-09-28: translation changes the text, not its eligibility for publication.
+    const result = classifyByKeywords(translatedItem, credibilityMap);
     if (result) {
       recovered.push(result);
       recoveredItems.push(translatedItem);

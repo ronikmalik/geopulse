@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import { recordModelRun } from "@/lib/modelRegistry";
 import { classificationArchive, classifierAudit, textClassifierRuns } from "@/db/schema";
@@ -234,11 +234,3 @@ async function recordRun(r: TextClassifierRunResult): Promise<void> {
   });
 }
 
-export async function getLatestTextClassifierRun() {
-  const db = getDb();
-  const [maxRow] = await db.select({ trainedAt: sql<string>`max(${textClassifierRuns.trainedAt})` }).from(textClassifierRuns);
-  if (!maxRow?.trainedAt) return null;
-  const latestTrainedAt = new Date(maxRow.trainedAt);
-  const [row] = await db.select().from(textClassifierRuns).where(eq(textClassifierRuns.trainedAt, latestTrainedAt)).limit(1);
-  return row ?? null;
-}

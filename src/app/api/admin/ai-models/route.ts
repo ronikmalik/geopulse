@@ -17,22 +17,27 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "GEMINI_API_KEY not configured" }, { status: 400 });
   }
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
-  );
-  const data = await res.json();
-  if (!res.ok) {
-    return NextResponse.json({ error: data }, { status: res.status });
-  }
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
+      { signal: AbortSignal.timeout(10_000) },
+    );
+    const data = await res.json();
+    if (!res.ok) {
+      return NextResponse.json({ error: data }, { status: res.status });
+    }
 
-  interface ModelInfo {
-    name: string;
-    supportedGenerationMethods?: string[];
-  }
-  const models = ((data.models as ModelInfo[]) ?? []).map((m) => ({
-    name: m.name,
-    methods: m.supportedGenerationMethods,
-  }));
+    interface ModelInfo {
+      name: string;
+      supportedGenerationMethods?: string[];
+    }
+    const models = ((data.models as ModelInfo[]) ?? []).map((m) => ({
+      name: m.name,
+      methods: m.supportedGenerationMethods,
+    }));
 
-  return NextResponse.json({ models });
+    return NextResponse.json({ models });
+  } catch {
+    return NextResponse.json({ error: "Model discovery failed or timed out" }, { status: 502 });
+  }
 }

@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { events } from "@/db/schema";
 import { fetchRecentPrimaries, type PrimaryCandidate } from "./eventDedup";
@@ -165,7 +165,12 @@ export async function runStoryDedupPass(candidates: DedupCandidate[], apiKey: st
     const updated = await db
       .update(events)
       .set({ primaryEventId: v.duplicateOfId })
-      .where(and(eq(events.id, candidate.id), isNull(events.primaryEventId)))
+      .where(and(eq(events.id, candidate.id), isNull(events.primaryEventId),
+        // 2026-09-28: the target may have been rejected since the pool was read.
+        sql`exists (select 1 from ${events} p where p.id = ${v.duplicateOfId}
+          and p.review_status != 'rejected' and p.pre_kill_switch_at is null
+          and p.primary_event_id is null)`,
+      ))
       .returning({ id: events.id })
       .catch((err) => {
         console.error(`storyDedup update failed for event ${candidate.id}: ${err}`);

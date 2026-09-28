@@ -71,17 +71,6 @@ async function fetchDayBuckets(byCategory: boolean): Promise<DayBucketRow[]> {
     }));
 }
 
-export interface EventVolumeAnomaly {
-  country: string;
-  category: string | null;
-  todayCount: number;
-  baselineMean: number;
-  baselineStdDev: number;
-  sampleSize: number;
-  jump: number;
-  zScore: number;
-}
-
 // Many country×category cells are mostly zeros (e.g. humanitarian events
 // in a quiet country) — a 0→3 jump on a near-zero baseline blows up the
 // z-score the same way a MAD-based approach would (see anomalyBaseline.ts's
@@ -130,24 +119,6 @@ function toOutcomes(
   return outcomes;
 }
 
-function outcomesToAnomalies(outcomes: EventVolumeAnomalyOutcome[]): EventVolumeAnomaly[] {
-  const anomalies: EventVolumeAnomaly[] = [];
-  for (const { country, category, outcome } of outcomes) {
-    if (outcome.status !== "anomaly") continue;
-    anomalies.push({
-      country,
-      category,
-      todayCount: outcome.data.observedValue,
-      baselineMean: outcome.data.baselineMean,
-      baselineStdDev: outcome.data.baselineStdDev,
-      sampleSize: outcome.data.sampleSize,
-      jump: outcome.data.jump,
-      zScore: outcome.data.zScore,
-    });
-  }
-  return anomalies.sort((a, b) => b.zScore - a.zScore);
-}
-
 export async function getEventVolumeAnomalyOutcomes(): Promise<EventVolumeAnomalyOutcome[]> {
   const rows = await fetchDayBuckets(false);
   return toOutcomes(rows, (r) => r.country, {
@@ -165,10 +136,3 @@ export async function getEventVolumeByCategoryAnomalyOutcomes(): Promise<EventVo
   });
 }
 
-export async function getEventVolumeAnomalies(): Promise<EventVolumeAnomaly[]> {
-  return outcomesToAnomalies(await getEventVolumeAnomalyOutcomes());
-}
-
-export async function getEventVolumeByCategoryAnomalies(): Promise<EventVolumeAnomaly[]> {
-  return outcomesToAnomalies(await getEventVolumeByCategoryAnomalyOutcomes());
-}

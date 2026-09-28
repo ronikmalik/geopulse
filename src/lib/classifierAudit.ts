@@ -22,6 +22,7 @@ import { resolveCountryFromText } from "./countryNames";
 import { isPressTvInScope } from "./sources/telegram";
 import { callGeminiJson, callGeminiJsonWithModel } from "./geminiAuditClient";
 import { runStoryDedupPass, type DedupCandidate } from "./storyDedup";
+import { promoteDuplicateAfterRejection } from "./eventDedup";
 import { validKeptAssessments, validDroppedFindings, type KeptAssessment } from "./auditValidation";
 
 // Gemini pass over classification_archive, auditing the keyword
@@ -1716,6 +1717,7 @@ async function applyPendingAssessment(
       .where(and(eq(events.id, item.id), eq(events.reviewStatus, "pending")))
       .returning({ id: events.id });
     if (updated.length === 0) return { status: "skipped", finalCountry: null };
+    await promoteDuplicateAfterRejection(item.id);
     return { status: "rejected", finalCountry: null };
   }
 
@@ -1797,6 +1799,7 @@ async function recordUnusableVerdicts(ids: number[]): Promise<number> {
     .where(and(inArray(events.id, exhausted), eq(events.reviewStatus, "pending")))
     .returning({ id: events.id });
   console.warn(`review gate: withheld ${withheld.length} item(s) after ${MAX_REVIEW_ATTEMPTS} unusable verdicts: ${withheld.map((r) => r.id).join(", ")}`);
+  for (const row of withheld) await promoteDuplicateAfterRejection(row.id);
   return withheld.length;
 }
 
@@ -2060,6 +2063,7 @@ async function applyFinding(
     if (result.length === 0) {
       return { applied: false, note: "not live any more (already rejected, or aged out of the 30-day window)" };
     }
+    await promoteDuplicateAfterRejection(target[0].id);
     // Mirror of the false_negative path's `kept: true` update below — the
     // archive's label now reflects the corrected decision, so the shadow
     // k-NN classifier trains on the correction rather than the mistake.

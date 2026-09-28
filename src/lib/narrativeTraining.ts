@@ -1,4 +1,4 @@
-import { and, gte, isNotNull, eq, sql, notInArray } from "drizzle-orm";
+import { and, gte, isNotNull, notInArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { recordModelRun } from "@/lib/modelRegistry";
 import { feedArchive, narrativeClusters, narrativeNoveltyFindings } from "@/db/schema";
@@ -178,24 +178,3 @@ export async function trainNarrativeClusters(): Promise<NarrativeTrainingResult>
   };
 }
 
-export async function getLatestNarrativeTrainingSummary(): Promise<{
-  trainedAt: string;
-  clusterCount: number;
-} | null> {
-  const db = getDb();
-  // Same "sql<T> is a type hint, not a runtime conversion" fix as
-  // narrativeNoveltyScoring.ts's identical query — the driver returns a
-  // plain string here, not a real Date, so it must be wrapped before use
-  // in a later Drizzle eq() against a real timestamp column.
-  const [maxRow] = await db
-    .select({ trainedAt: sql<string>`max(${narrativeClusters.trainedAt})` })
-    .from(narrativeClusters);
-  if (!maxRow?.trainedAt) return null;
-  const latestTrainedAt = new Date(maxRow.trainedAt);
-
-  const matching = await db
-    .select({ id: narrativeClusters.id })
-    .from(narrativeClusters)
-    .where(eq(narrativeClusters.trainedAt, latestTrainedAt));
-  return { trainedAt: latestTrainedAt.toISOString(), clusterCount: matching.length };
-}

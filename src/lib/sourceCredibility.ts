@@ -1,4 +1,3 @@
-import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { sourceCredibility } from "@/db/schema";
 
@@ -193,8 +192,3 @@ export async function loadCredibilityMap(): Promise<Map<string, CredibilityLooku
   return map;
 }
 
-export async function getCredibilityCount(): Promise<number> {
-  const db = getDb();
-  const [row] = await db.select({ count: sql<number>`count(*)` }).from(sourceCredibility);
-  return Number(row?.count ?? 0);
-}

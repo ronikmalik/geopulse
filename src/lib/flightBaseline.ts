@@ -7,6 +7,9 @@ import { detectAnomaly, DEFAULT_BASELINE_CONFIG, type AnomalyOutcome } from "@/l
 
 export type AircraftKind = "military" | "commercial";
 
+const REGULAR_WINDOW_DAYS = 14;
+const REGULAR_MIN_DAYS = 7;
+
 // Snapshots today's currently-tracked aircraft, bucketed by reverse-
 // geocoded country, into aircraft_count_history — the first step toward
 // the "surge above baseline" detection described in docs/OSINT_SOURCES.md.
@@ -27,7 +30,33 @@ async function snapshotAircraft(
     countsByCountry.set(country, (countsByCountry.get(country) ?? 0) + 1);
   }
 
-  if (countsByCountry.size === 0) return { inserted: 0, countriesSeen: 0 };
+  const countriesSeen = countsByCountry.size;
+  // Nothing at all came back: far likelier an upstream glitch than every
+  // country going dark at once. Record nothing, as before.
+  if (aircraft.length === 0) return { inserted: 0, countriesSeen };
+
+  const db = getDb();
+  // A country that is normally present but absent from a complete
+  // collection is recorded as 0 (2026-09-28). Without the row, a total
+  // drop (an airspace closure) was never detected: the detector saw
+  // yesterday's count go stale instead of today's zero. "Normally present"
+  // means seen on at least REGULAR_MIN_DAYS of the last REGULAR_WINDOW_DAYS:
+  // zero-filling every country ever seen would bury rarely-seen ones in
+  // zeros, and then two aircraft would read as a surge.
+  const regular = await db
+    .select({ country: aircraftCountHistory.country })
+    .from(aircraftCountHistory)
+    .where(and(
+      eq(aircraftCountHistory.kind, kind),
+      sql`${aircraftCountHistory.snapshotAt} > now() - make_interval(days => ${REGULAR_WINDOW_DAYS})`,
+      sql`${aircraftCountHistory.count} > 0`,
+    ))
+    .groupBy(aircraftCountHistory.country)
+    .having(sql`count(distinct date_trunc('day', ${aircraftCountHistory.snapshotAt})) >= ${REGULAR_MIN_DAYS}`);
+  for (const { country } of regular) {
+    if (!countsByCountry.has(country)) countsByCountry.set(country, 0);
+  }
+  if (countsByCountry.size === 0) return { inserted: 0, countriesSeen };
 
   const rows = Array.from(countsByCountry.entries()).map(([country, count]) => ({
     country,
@@ -35,13 +64,12 @@ async function snapshotAircraft(
     kind,
   }));
 
-  const db = getDb();
   const result = await db
     .insert(aircraftCountHistory)
     .values(rows)
     .returning({ id: aircraftCountHistory.id });
 
-  return { inserted: result.length, countriesSeen: countsByCountry.size };
+  return { inserted: result.length, countriesSeen };
 }
 
 export async function snapshotAircraftCounts(): Promise<{ inserted: number; countriesSeen: number }> {

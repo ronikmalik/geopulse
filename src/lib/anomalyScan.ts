@@ -1,5 +1,7 @@
 import { getDb } from "@/db";
-import { anomalyFindings, type NewAnomalyFindingRow } from "@/db/schema";
+import { anomalyFindings, sourceHealth, type NewAnomalyFindingRow } from "@/db/schema";
+import { sql } from "drizzle-orm";
+import { ANOMALY_SCAN_SOURCE } from "./sourceHealth";
 import { getAircraftAnomalyOutcomes } from "@/lib/flightBaseline";
 import { getGpsJammingAnomalyOutcomes } from "@/lib/gpsJammingHistory";
 import {
@@ -26,16 +28,16 @@ import type { AnomalyOutcome } from "@/lib/anomalyBaseline";
 //
 // One shared `detectedAt` timestamp for every row this run inserts — see
 // the doc comment on anomalyFindings in src/db/schema.ts for why "current
-// findings" needs to be read as MAX(detectedAt), not a time window: this
-// table has no idempotency guard (a re-run just inserts again, matching
-// every other snapshot table's existing posture), and a window would let
-// two runs' findings overlap with no way to prefer the newer one.
+// findings" needs to be read as the latest generation, not a time window:
+// this table has no idempotency guard (a re-run just inserts again,
+// matching every other snapshot table's existing posture), and a window
+// would let two runs' findings overlap with no way to prefer the newer one.
 //
-// No transactions: this codebase's Neon driver (neon-http) has none
-// anywhere (confirmed via full-repo grep before this was written) — every
-// existing write path here does sequential single-table inserts,
-// accepting partial-failure risk rather than atomicity. This follows that
-// same convention rather than introducing a new pattern.
+// A scan that finds nothing inserts no rows, so since 2026-09-28 each
+// fully successful scan also stamps source_health "anomaly-scan"; readers
+// take the later of that stamp and max(detectedAt) as the current
+// generation (latestAnomalyScanSql). Before, a clean scan left the
+// previous day's findings on screen for up to a week.
 export interface SignalTally {
   anomalies: number;
   insufficientBaseline: number;
@@ -192,11 +194,41 @@ export async function runAnomalyScan(): Promise<AnomalyScanResult> {
   }
 
   let findingsInserted = 0;
-  if (rows.length > 0) {
+  // Findings from the signals that did run are always kept: one signal's
+  // upstream failing must not discard another signal's real anomaly. The
+  // "scan completed" stamp, which is what lets a clean scan clear old
+  // findings, is written only when every signal ran; a partial scan cannot
+  // say the others have cleared.
+  const complete = errors.length === 0;
+  if (rows.length > 0 || complete) {
     try {
       const db = getDb();
-      const result = await db.insert(anomalyFindings).values(rows).returning({ id: anomalyFindings.id });
-      findingsInserted = result.length;
+      const marker = db.insert(sourceHealth).values({
+        source: ANOMALY_SCAN_SOURCE,
+        lastAttemptAt: detectedAt,
+        lastSuccessAt: detectedAt,
+        lastItemCount: rows.length,
+        lastLatencyMs: Date.now() - detectedAt.getTime(),
+      }).onConflictDoUpdate({
+        target: sourceHealth.source,
+        set: {
+          lastAttemptAt: detectedAt,
+          lastSuccessAt: detectedAt,
+          lastItemCount: rows.length,
+          lastLatencyMs: Date.now() - detectedAt.getTime(),
+        },
+        setWhere: sql`${sourceHealth.lastSuccessAt} is null or ${sourceHealth.lastSuccessAt} < ${detectedAt}`,
+      });
+      if (rows.length > 0 && complete) {
+        // One batch (a single transaction on neon-http), so the stamp can
+        // never point at a generation whose findings failed to insert.
+        await db.batch([db.insert(anomalyFindings).values(rows), marker]);
+      } else if (rows.length > 0) {
+        await db.insert(anomalyFindings).values(rows);
+      } else {
+        await marker;
+      }
+      findingsInserted = rows.length;
     } catch (err) {
       errors.push(`insert: ${err}`);
     }

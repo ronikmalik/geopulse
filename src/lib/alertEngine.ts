@@ -4,6 +4,7 @@ import { and, desc, eq, gte, sql, inArray } from "drizzle-orm";
 import { getCountryThreatSummaries, getCountryRiskEvents } from "@/lib/risk";
 import { type Category } from "@/lib/categories";
 import { CATEGORY_PILLAR } from "@/lib/pillars";
+import { latestAnomalyScanSql } from "./sourceHealth";
 import {
   assessAlert,
   shouldSuppress,
@@ -92,7 +93,7 @@ async function gatherInputs(): Promise<CountryInputs[]> {
   // Anomaly signals per country, from the latest scan generation only —
   // the same "MAX(detectedAt)" reading /api/anomalies uses.
   const [latestScan] = await db
-    .select({ detectedAt: sql<string | null>`max(${anomalyFindings.detectedAt})` })
+    .select({ detectedAt: latestAnomalyScanSql })
     .from(anomalyFindings);
   const anomalyByCountry = new Map<string, Set<string>>();
   if (latestScan?.detectedAt) {
@@ -112,6 +113,7 @@ async function gatherInputs(): Promise<CountryInputs[]> {
   const driverRows = await db
     .select({
       id: events.id,
+      primaryEventId: events.primaryEventId,
       country: events.country,
       title: events.title,
       url: events.url,
@@ -125,7 +127,6 @@ async function gatherInputs(): Promise<CountryInputs[]> {
       and(
         inArray(events.country, countries),
         eq(events.reviewStatus, "approved"),
-        sql`${events.primaryEventId} is null`,
         sql`${events.preKillSwitchAt} is null`,
         gte(events.publishedAt, since),
       ),
@@ -141,9 +142,14 @@ async function gatherInputs(): Promise<CountryInputs[]> {
   }
 
   return summaries.map((s) => {
-    const drivers = driversByCountry.get(s.country) ?? [];
+    const countryRows = driversByCountry.get(s.country) ?? [];
+    const drivers = countryRows.filter((d) => d.primaryEventId === null);
+    const primaryIds = new Set(drivers.map((d) => d.id));
     const previous = prior.get(s.country);
-    const families = new Set(drivers.map((d) => sourceFamily(d.source)));
+    // 2026-09-28: approved duplicates corroborate visible drivers without adding evidence or severity.
+    const families = new Set(countryRows
+      .filter((d) => d.primaryEventId === null || primaryIds.has(d.primaryEventId))
+      .map((d) => sourceFamily(d.source)));
     const pillars = new Set(
       drivers.map((d) => CATEGORY_PILLAR[d.category as Category]).filter(Boolean),
     );
@@ -254,12 +260,6 @@ export async function runAlertEvaluation(): Promise<AlertEvaluationResult> {
       priorSent.length,
     );
 
-    if (suppression.suppressed) suppressed++;
-    else {
-      fired++;
-      byTier[assessment.tier] = (byTier[assessment.tier] ?? 0) + 1;
-    }
-
     toInsert.push({
       tier: assessment.tier,
       country: input.country,
@@ -280,11 +280,21 @@ export async function runAlertEvaluation(): Promise<AlertEvaluationResult> {
   }
 
   const CHUNK = 200;
+  const failedCountries = new Set<string>();
   for (let i = 0; i < toInsert.length; i += CHUNK) {
+    const batch = toInsert.slice(i, i + CHUNK);
     try {
-      await db.insert(alerts).values(toInsert.slice(i, i + CHUNK));
+      await db.insert(alerts).values(batch);
+      for (const alert of batch) {
+        if (alert.suppressedReason) suppressed++;
+        else {
+          fired++;
+          byTier[alert.tier] = (byTier[alert.tier] ?? 0) + 1;
+        }
+      }
     } catch (err) {
       errors.push(`insert: ${err}`);
+      for (const alert of batch) failedCountries.add(alert.country);
     }
   }
 
@@ -292,8 +302,10 @@ export async function runAlertEvaluation(): Promise<AlertEvaluationResult> {
   // EVERY country evaluated, not just the ones that alerted — otherwise a
   // country that drifted 1 to 2 quietly would, on some later run, appear
   // to have jumped from 1 in one step.
-  for (let i = 0; i < inputs.length; i += CHUNK) {
-    const batch = inputs.slice(i, i + CHUNK).map((s) => ({
+  // 2026-09-28: failed alerts must remain eligible for the next evaluation.
+  const stateInputs = inputs.filter((s) => !failedCountries.has(s.country));
+  for (let i = 0; i < stateInputs.length; i += CHUNK) {
+    const batch = stateInputs.slice(i, i + CHUNK).map((s) => ({
       country: s.country,
       level: s.level,
       momentum: s.momentum,
@@ -393,12 +405,6 @@ export async function getRecentAlerts(limit = 50): Promise<AlertView[]> {
       const byTier = tierRank(b.tier as AlertTier) - tierRank(a.tier as AlertTier);
       return byTier !== 0 ? byTier : b.firedAt.localeCompare(a.firedAt);
     });
-}
-
-// Kept for the country panel: the alerts behind one country, newest first.
-export async function getCountryAlerts(country: string, limit = 10): Promise<AlertView[]> {
-  const all = await getRecentAlerts(200);
-  return all.filter((a) => a.country === country.toUpperCase()).slice(0, limit);
 }
 
 export { getCountryRiskEvents };

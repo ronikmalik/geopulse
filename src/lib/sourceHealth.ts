@@ -1,6 +1,13 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { sourceHealth, type SourceHealthRow } from "@/db/schema";
+import { anomalyFindings, sourceHealth, type SourceHealthRow } from "@/db/schema";
+
+// 2026-09-28: a successful empty scan is a generation too; retain pre-marker compatibility.
+export const ANOMALY_SCAN_SOURCE = "anomaly-scan";
+export const latestAnomalyScanSql = sql<string | null>`greatest(
+  max(${anomalyFindings.detectedAt}),
+  (select ${sourceHealth.lastSuccessAt} from ${sourceHealth} where ${sourceHealth.source} = ${ANOMALY_SCAN_SOURCE})
+)`;
 
 export interface TrackedFetch<T> {
   source: string;

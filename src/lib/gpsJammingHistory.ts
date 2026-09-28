@@ -34,16 +34,6 @@ export async function snapshotGpsJamming(): Promise<{ inserted: number; countrie
   return { inserted: result.length, countriesSeen: rows.length };
 }
 
-export interface GpsJammingAnomaly {
-  country: string;
-  todayBadCellCount: number;
-  baselineMean: number;
-  baselineStdDev: number;
-  sampleSize: number;
-  jump: number;
-  zScore: number;
-}
-
 const ANOMALY_LOOKBACK_DAYS = 30;
 
 export interface GpsJammingAnomalyOutcome {
@@ -85,20 +75,3 @@ export async function getGpsJammingAnomalyOutcomes(): Promise<GpsJammingAnomalyO
   return outcomes;
 }
 
-export async function getGpsJammingAnomalies(): Promise<GpsJammingAnomaly[]> {
-  const outcomes = await getGpsJammingAnomalyOutcomes();
-  const anomalies: GpsJammingAnomaly[] = [];
-  for (const { country, outcome } of outcomes) {
-    if (outcome.status !== "anomaly") continue;
-    anomalies.push({
-      country,
-      todayBadCellCount: outcome.data.observedValue,
-      baselineMean: outcome.data.baselineMean,
-      baselineStdDev: outcome.data.baselineStdDev,
-      sampleSize: outcome.data.sampleSize,
-      jump: outcome.data.jump,
-      zScore: outcome.data.zScore,
-    });
-  }
-  return anomalies.sort((a, b) => b.zScore - a.zScore);
-}

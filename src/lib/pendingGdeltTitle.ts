@@ -1,6 +1,6 @@
-import { desc, inArray, isNull, lt } from "drizzle-orm";
+import { and, desc, inArray, isNull, lt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { pendingGdeltTitle, type NewPendingGdeltTitleRow } from "@/db/schema";
+import { events, classificationArchive, pendingGdeltTitle, type NewPendingGdeltTitleRow } from "@/db/schema";
 
 // Same "don't hold onto it forever" reasoning as PENDING_TRANSLATION_MAX_AGE_MS
 // in pendingTranslation.ts — a GDELT candidate whose real title still
@@ -70,13 +70,18 @@ export async function getPendingGdeltTitleBatch(limit: number): Promise<PendingG
 // Marked, not deleted (2026-09-23): a deleted URL would be queued again
 // the next time the overlapping discovery window re-reads its file.
 // expireStalePendingGdeltTitles still removes it after 24 hours.
-export async function markPendingGdeltTitlesResolved(urls: string[]): Promise<void> {
+export async function markPendingGdeltTitlesResolved(urls: string[], filteredUrls: string[] = []): Promise<void> {
   if (urls.length === 0) return;
   const db = getDb();
   await db
     .update(pendingGdeltTitle)
     .set({ resolvedAt: new Date() })
-    .where(inArray(pendingGdeltTitle.url, urls));
+    .where(and(inArray(pendingGdeltTitle.url, urls), sql`(
+      ${filteredUrls.length > 0 ? inArray(pendingGdeltTitle.url, filteredUrls) : sql`false`}
+      or exists (select 1 from ${events} where ${events.url} = ${pendingGdeltTitle.url})
+      or exists (select 1 from ${classificationArchive}
+        where ${classificationArchive.url} = ${pendingGdeltTitle.url} and ${classificationArchive.kept} = false)
+    )`));
 }
 
 export async function expireStalePendingGdeltTitles(): Promise<void> {

@@ -1,6 +1,4 @@
-import { generateObject } from "ai";
-import { z } from "zod";
-import { NEWS_CATEGORIES, type NewsCategory } from "./categories";
+import type { NewsCategory } from "./categories";
 import type { RawItem } from "./sources/gdelt";
 import { resolveCountryFromText } from "./countryNames";
 import { COUNTRY_CENTROIDS } from "./countryCentroids";
@@ -10,7 +8,7 @@ import { normalizeDomain, isLowCredibility, lookupCredibility, type CredibilityL
 // LLM classification only ever assigns news-query-driven categories (plus
 // "other") — the feed-driven categories (earthquake, natural-disaster) are
 // pre-classified by their own source modules and never routed through here.
-const CLASSIFIABLE_CATEGORIES = [...NEWS_CATEGORIES, "other"] as const;
+type ClassifiableCategory = NewsCategory | "other";
 
 // Deliberately broad — this is just the topical net (does the article touch
 // international security/politics/instability at all?), not a judgment
@@ -87,83 +85,28 @@ export function isLikelyGeopolitical(item: RawItem): boolean {
   return KEYWORDS.test(item.title) || KEYWORDS.test(item.snippet);
 }
 
-const classifiedItemSchema = z.object({
-  id: z.number(),
-  relevant: z
-    .boolean()
-    .describe(
-      "true only if this is a real, specific geopolitical/military/conflict event or development (not opinion, sports, culture, or unrelated news)",
-    ),
-  summary: z
-    .string()
-    .describe("One tight sentence, under 200 characters, plain factual tone"),
-  category: z.enum(CLASSIFIABLE_CATEGORIES),
-  location: z
-    .string()
-    .describe("Primary place name the event is centered on, e.g. 'Tehran, Iran'"),
-  country: z
-    .string()
-    .length(2)
-    .describe(
-      "ISO 3166-1 alpha-2 code of the country the event is centered in, e.g. 'IR' for Iran, uppercase",
-    ),
-  lat: z.number(),
-  lon: z.number(),
-  severity: z
-    .number()
-    .int()
-    .min(1)
-    .max(5)
-    .describe(
-      "1=minor/diplomatic statement, 3=notable escalation, 5=major military action or strike with casualties",
-    ),
-});
-
-export type ClassifiedItem = z.infer<typeof classifiedItemSchema>;
-
-const batchSchema = z.object({
-  items: z.array(classifiedItemSchema),
-});
-
-export async function classifyBatch(
-  items: RawItem[],
-): Promise<Map<number, ClassifiedItem>> {
-  if (items.length === 0) return new Map();
-
-  const prompt = items
-    .map(
-      (item, i) =>
-        `[${i}] TITLE: ${item.title}\nCONTEXT: ${item.snippet}\nSOURCE: ${item.source}`,
-    )
-    .join("\n\n");
-
-  const { object } = await generateObject({
-    model: "openai/gpt-4o-mini",
-    schema: batchSchema,
-    system:
-      "You are a geopolitical intelligence analyst triaging a live news feed for a situation-awareness map. " +
-      "For each numbered item, decide if it is a genuine, specific geopolitical/conflict event, then extract a factual one-line summary, " +
-      "the category, the primary location and its ISO 3166-1 alpha-2 country code, approximate real-world latitude/longitude, and a 1-5 severity score. " +
-      "Reject opinion pieces, retrospectives, sports, and anything not tied to a concrete event.",
-    prompt,
-  });
-
-  const map = new Map<number, ClassifiedItem>();
-  for (const item of object.items) {
-    map.set(item.id, item);
-  }
-  return map;
+// The shape every classifier path returns. Was a zod schema for the old
+// LLM batch classifier (classifyBatch, removed 2026-09-28 as unused); only
+// the type was still read, so it is a plain interface now.
+export interface ClassifiedItem {
+  id: number;
+  // true only if this is a real, specific geopolitical/military/conflict
+  // event or development (not opinion, sports, culture, or unrelated news)
+  relevant: boolean;
+  // One tight sentence, under 200 characters, plain factual tone
+  summary: string;
+  category: ClassifiableCategory;
+  // Primary place name the event is centered on, e.g. "Tehran, Iran"
+  location: string;
+  // ISO 3166-1 alpha-2 code of the country the event is centered in, uppercase
+  country: string;
+  lat: number;
+  lon: number;
+  // 1=minor/diplomatic statement, 3=notable escalation, 5=major military
+  // action or strike with casualties
+  severity: number;
 }
 
-// Free, no-API-key fallback classifier. classifyBatch (above) needs a
-// Vercel AI Gateway account with a payment method on file even to use free
-// credits — not something to assume the deployer wants — so this is the
-// default path: no LLM, no summary generation, but it doesn't depend on
-// anything beyond the category keyword patterns already used to build the
-// GDELT queries in categories.ts. Trade-off: the "summary" is just the raw
-// title, and location resolution is best-effort text matching rather than
-// an LLM's judgment, but it costs nothing and has no external dependency
-// beyond the news source itself.
 // 2026-09-04: found via the event-dedup work — the same real event (a
 // Russian drone strike on Ukraine's SBU HQ) split across BOTH "other" and
 // "russia-ukraine" because \brussia\b requires the exact word "Russia" and

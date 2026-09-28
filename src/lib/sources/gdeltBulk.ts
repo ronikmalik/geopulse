@@ -6,7 +6,6 @@ import { fetchRealArticleTitle } from "../articleTitleFetch";
 import {
   enqueuePendingGdeltTitles,
   getPendingGdeltTitleBatch,
-  markPendingGdeltTitlesResolved,
   expireStalePendingGdeltTitles,
 } from "../pendingGdeltTitle";
 
@@ -316,7 +315,6 @@ export async function drainPendingGdeltTitles(): Promise<RawItem[]> {
   if (pending.length === 0) return [];
 
   const items: RawItem[] = [];
-  const resolvedUrls: string[] = [];
 
   for (let start = 0; start < pending.length; start += DRAIN_CONCURRENCY) {
     const chunk = pending.slice(start, start + DRAIN_CONCURRENCY);
@@ -336,7 +334,6 @@ export async function drainPendingGdeltTitles(): Promise<RawItem[]> {
     const results = chunk.map((row, i) => ({ row, article: articles[i] }));
     for (const { row, article } of results) {
       if (!article) continue; // leave queued for retry next cycle
-      resolvedUrls.push(row.url);
       items.push({
         source: "gdelt",
         url: row.url,
@@ -348,9 +345,6 @@ export async function drainPendingGdeltTitles(): Promise<RawItem[]> {
     }
   }
 
-  await markPendingGdeltTitlesResolved(resolvedUrls).catch((err) =>
-    console.error(`markPendingGdeltTitlesResolved failed: ${err}`),
-  );
-
+  // 2026-09-28: ingestion acknowledges only after a durable decision or insert.
   return items;
 }

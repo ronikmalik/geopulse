@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { anomalyFindings } from "@/db/schema";
 import { cachedJson } from "@/lib/apiParams";
+import { latestAnomalyScanSql } from "@/lib/sourceHealth";
 
 export interface AnomalyFindingResponse {
   signalType: string;
@@ -40,7 +41,7 @@ export async function GET() {
   try {
     const db = getDb();
     const [latest] = await db
-      .select({ detectedAt: sql<string | null>`max(${anomalyFindings.detectedAt})` })
+      .select({ detectedAt: latestAnomalyScanSql })
       .from(anomalyFindings);
 
     if (!latest?.detectedAt) {

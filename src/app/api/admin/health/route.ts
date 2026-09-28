@@ -1,22 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSourceHealth } from "@/lib/sourceHealth";
+import { ANOMALY_SCAN_SOURCE, getSourceHealth } from "@/lib/sourceHealth";
 import { isCronAuthorized } from "@/lib/cronAuth";
 
-// A source counts as "stale" once its last successful fetch is more than
-// this far behind its last attempt — i.e. attempts are still happening
-// (ingestion is running) but this particular source hasn't returned data
-// in a while. Set well above the self-triggered ~10-minute ingest cadence
-// (see .github/workflows/ingest.yml) so ordinary gaps between site visits
-// don't read as an outage.
-const STALE_AFTER_MS = 60 * 60_000;
+// A source is "stale" once its last success is this far in the past —
+// measured against now, not only against its last attempt (2026-09-28):
+// comparing the two alone reported "ok" forever once scheduling stopped,
+// since both timestamps then stop moving together. Ingest runs every 15-30
+// minutes and GitHub-scheduled runs are often late, so two hours is four
+// or more missed runs, not ordinary jitter. The anomaly scan is daily.
+const STALE_AFTER_MS = 2 * 60 * 60_000;
+const ANOMALY_SCAN_STALE_AFTER_MS = 48 * 60 * 60_000;
 
 function statusFor(row: {
+  source: string;
   lastAttemptAt: Date;
   lastSuccessAt: Date | null;
 }): "ok" | "stale" | "never_succeeded" {
   if (!row.lastSuccessAt) return "never_succeeded";
-  const gapMs = row.lastAttemptAt.getTime() - row.lastSuccessAt.getTime();
-  return gapMs > STALE_AFTER_MS ? "stale" : "ok";
+  const threshold = row.source === ANOMALY_SCAN_SOURCE ? ANOMALY_SCAN_STALE_AFTER_MS : STALE_AFTER_MS;
+  const gapMs = Math.max(Date.now(), row.lastAttemptAt.getTime()) - row.lastSuccessAt.getTime();
+  return gapMs > threshold ? "stale" : "ok";
 }
 
 // Gated since 2026-09-19: lastError strings can carry upstream URLs,
