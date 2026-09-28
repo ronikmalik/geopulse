@@ -24,6 +24,9 @@ import {
   portCongestionToPoints,
   airQualityToPoints,
   cisaKevToPoints,
+  majorPortsToPoints,
+  internetOutagesToPoints,
+  internetCensorshipToPoints,
 } from "@/lib/mapPoints";
 import { CATEGORIES, type Category } from "@/lib/categories";
 import { DATA_LAYER_POLL_MS, type DataLayerId } from "@/lib/dataLayers";
@@ -48,6 +51,9 @@ import type {
   TradeBalanceResponse,
   CommodityResponse,
   SanctionsResponse,
+  MajorPortsResponse,
+  InternetOutagesResponse,
+  InternetCensorshipResponse,
 } from "@/lib/dataLayerTypes";
 import type { GeoEvent } from "@/lib/types";
 import { countryName } from "@/lib/format";
@@ -303,6 +309,21 @@ export default function Home() {
     DATA_LAYER_POLL_MS.sanctions,
     activeDataLayers.has("sanctions"),
   );
+  const majorPortsLayer = useLiveLayer<MajorPortsResponse>(
+    "/api/layers/major-ports",
+    DATA_LAYER_POLL_MS["major-ports"],
+    activeDataLayers.has("major-ports"),
+  );
+  const internetOutagesLayer = useLiveLayer<InternetOutagesResponse>(
+    "/api/layers/internet-outages",
+    DATA_LAYER_POLL_MS["internet-outages"],
+    activeDataLayers.has("internet-outages"),
+  );
+  const internetCensorshipLayer = useLiveLayer<InternetCensorshipResponse>(
+    "/api/layers/internet-censorship",
+    DATA_LAYER_POLL_MS["internet-censorship"],
+    activeDataLayers.has("internet-censorship"),
+  );
 
   // Escape clears the current selection (event and country), which also
   // lets the globe resume its idle rotation.
@@ -376,6 +397,15 @@ export default function Home() {
     if (activeDataLayers.has("cyber") && cyberLayer.data) {
       points.push(...cisaKevToPoints(cyberLayer.data.vulnerabilities));
     }
+    if (activeDataLayers.has("major-ports") && majorPortsLayer.data) {
+      points.push(...majorPortsToPoints(majorPortsLayer.data.ports));
+    }
+    if (activeDataLayers.has("internet-outages") && internetOutagesLayer.data) {
+      points.push(...internetOutagesToPoints(internetOutagesLayer.data.outages));
+    }
+    if (activeDataLayers.has("internet-censorship") && internetCensorshipLayer.data) {
+      points.push(...internetCensorshipToPoints(internetCensorshipLayer.data.countries));
+    }
     return points;
   }, [
     activeDataLayers,
@@ -391,6 +421,9 @@ export default function Home() {
     portCongestionLayer.data,
     airQualityLayer.data,
     cyberLayer.data,
+    majorPortsLayer.data,
+    internetOutagesLayer.data,
+    internetCensorshipLayer.data,
   ]);
 
   const dashboardProps = {
@@ -436,6 +469,11 @@ export default function Home() {
     portCongestion: portCongestionLayer.data,
     tradeBalance: tradeBalanceLayer.data,
     sanctions: sanctionsLayer.data,
+    majorPorts: majorPortsLayer.data,
+    internetOutages: internetOutagesLayer.data,
+    internetOutagesError: internetOutagesLayer.error,
+    internetCensorship: internetCensorshipLayer.data,
+    internetCensorshipError: internetCensorshipLayer.error,
     forex: forexLayer.data,
     cftc: cftcLayer.data,
     commodities: commoditiesLayer.data,

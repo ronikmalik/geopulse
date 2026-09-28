@@ -5,6 +5,7 @@ import type { RawItem } from "./sources/gdelt";
 import { discoverGdeltCandidates, drainPendingGdeltTitles } from "./sources/gdeltBulk";
 import { fetchAllRssFeeds } from "./sources/rss";
 import { fetchUsgsEarthquakes } from "./sources/usgs";
+import { applyTsunamiBulletins, type TsunamiEnrichmentResult } from "./tsunamiEnrichment";
 import { fetchNasaEonet } from "./sources/eonet";
 import { fetchGdacsAlerts } from "./sources/gdacs";
 import { fetchIodaOutages } from "./sources/ioda";
@@ -88,6 +89,7 @@ export interface IngestResult {
     gdeltTitlesResolved: number;
     embeddedFeed: number | null;
     embeddedArchive: number | null;
+    tsunami?: TsunamiEnrichmentResult | null;
   };
 }
 
@@ -851,6 +853,18 @@ export async function runIngest(
     }
   }
 
+  // NOAA tsunami bulletins onto the matching USGS quakes (2026-09-28) —
+  // after this cycle's inserts, so a quake and its bulletin can land in
+  // the same cycle. Two small feed requests, no API budget involved.
+  let tsunami: TsunamiEnrichmentResult | null = null;
+  async function runTsunamiEnrichment(): Promise<void> {
+    try {
+      tsunami = await withDeadline(applyTsunamiBulletins(), 20_000, "tsunamiBulletins");
+    } catch (err) {
+      errors.push(`tsunamiBulletins: ${err}`);
+    }
+  }
+
   if (!priorityGdelt) {
     const [, , noveltyResult] = await Promise.allSettled([
       runEmbeddingBackfillChain(),
@@ -861,6 +875,7 @@ export async function runIngest(
       // rate-limit reason to run sequentially after anything else; races
       // alongside them in the same allSettled instead.
       withDeadline(scoreNewNarrativeItems(), 5_000, "narrativeNoveltyScoring"),
+      runTsunamiEnrichment(),
     ]);
     if (noveltyResult.status === "rejected") errors.push(`narrativeNoveltyScoring: ${noveltyResult.reason}`);
   }
@@ -874,6 +889,7 @@ export async function runIngest(
       gdeltTitlesResolved: gdelt.items.length,
       embeddedFeed,
       embeddedArchive,
+      tsunami,
     },
   };
 }

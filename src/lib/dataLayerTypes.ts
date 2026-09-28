@@ -132,3 +132,46 @@ export interface SanctionsDelta {
 export interface SanctionsResponse {
   deltas: SanctionsDelta[];
 }
+
+// Mirrors src/lib/ports.ts (MajorPort).
+export interface MajorPortsResponse {
+  source: string;
+  ports: { name: string; country: string; size: "L" | "M"; lat: number; lon: number; unlocode: string | null }[];
+}
+
+// Mirrors src/lib/sources/cloudflareRadar.ts (RadarOutage).
+export interface InternetOutage {
+  id: string;
+  startDate: string;
+  endDate: string | null;
+  countries: { code: string; name: string }[];
+  cause: string | null;
+  type: string | null;
+  scope: string | null;
+  description: string | null;
+  linkedUrl: string | null;
+}
+
+export interface InternetOutagesResponse {
+  outages: InternetOutage[];
+  attribution?: string;
+  error?: string;
+}
+
+// Mirrors src/lib/sources/ooni.ts (OoniSummary).
+export interface CensorshipCountry {
+  country: string;
+  measurements: number;
+  confirmedRate: number;
+  anomalyRate: number;
+  confirmedRatePrev: number | null;
+  anomalyRatePrev: number | null;
+}
+
+export interface InternetCensorshipResponse {
+  since?: string;
+  until?: string;
+  countries: CensorshipCountry[];
+  attribution?: string;
+  error?: string;
+}

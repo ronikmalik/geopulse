@@ -31,6 +31,7 @@
 // to," not a confirmed national attribution.
 import { cellToLatLng } from "h3-js";
 import { COUNTRY_CENTROIDS } from "../countryCentroids";
+import { haversineKm } from "../geo";
 
 const MANIFEST_URL = "https://gpsjam.org/data/manifest.csv";
 const DETAIL_URL_BASE = "https://gpsjam.org/data";
@@ -39,18 +40,6 @@ const REQUEST_TIMEOUT_MS = 15_000;
 // Cells further than this from every known capital are dropped rather
 // than attributed to a nearest-but-still-far country — see file header.
 const MAX_ATTRIBUTION_KM = 800;
-const EARTH_RADIUS_KM = 6371;
-
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2;
-  return EARTH_RADIUS_KM * 2 * Math.asin(Math.sqrt(a));
-}
 
 function nearestCountry(
   lat: number,

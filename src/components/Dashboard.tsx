@@ -33,6 +33,9 @@ import type {
   TradeBalanceResponse,
   CommodityResponse,
   SanctionsResponse,
+  MajorPortsResponse,
+  InternetOutagesResponse,
+  InternetCensorshipResponse,
 } from "@/lib/dataLayerTypes";
 import { countryName } from "@/lib/format";
 
@@ -76,6 +79,11 @@ interface DashboardProps {
   portCongestion: PortCongestionResponse | null;
   tradeBalance: TradeBalanceResponse | null;
   sanctions: SanctionsResponse | null;
+  majorPorts: MajorPortsResponse | null;
+  internetOutages: InternetOutagesResponse | null;
+  internetOutagesError: string | null;
+  internetCensorship: InternetCensorshipResponse | null;
+  internetCensorshipError: string | null;
 
   forex: ForexResponse | null;
   cftc: CftcResponse | null;
@@ -206,6 +214,11 @@ export default function Dashboard(props: DashboardProps) {
             portCongestion={props.portCongestion}
             tradeBalance={props.tradeBalance}
             sanctions={props.sanctions}
+            majorPorts={props.majorPorts}
+            internetOutages={props.internetOutages}
+            internetOutagesError={props.internetOutagesError}
+            internetCensorship={props.internetCensorship}
+            internetCensorshipError={props.internetCensorshipError}
           />
         )}
         {activeTab === "forex" && (

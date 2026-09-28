@@ -31,7 +31,11 @@ import type {
   PortCongestionResponse,
   TradeBalanceResponse,
   SanctionsResponse,
+  MajorPortsResponse,
+  InternetOutagesResponse,
+  InternetCensorshipResponse,
 } from "@/lib/dataLayerTypes";
+import { countryName, timeAgo } from "@/lib/format";
 
 interface LayersDashboardProps {
   active: Set<Category>;
@@ -56,6 +60,21 @@ interface LayersDashboardProps {
   portCongestion: PortCongestionResponse | null;
   tradeBalance: TradeBalanceResponse | null;
   sanctions: SanctionsResponse | null;
+  majorPorts: MajorPortsResponse | null;
+  internetOutages: InternetOutagesResponse | null;
+  internetOutagesError: string | null;
+  internetCensorship: InternetCensorshipResponse | null;
+  internetCensorshipError: string | null;
+}
+
+const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
+
+// Week-on-week change in percentage points, shown only when it is large
+// enough to mean something rather than measurement noise.
+function change(now: number, prev: number | null): string {
+  if (prev === null) return "";
+  const pts = (now - prev) * 100;
+  return Math.abs(pts) >= 1 ? ` (${pts > 0 ? "+" : ""}${pts.toFixed(1)} pts wk/wk)` : "";
 }
 
 const LAYER_DESCRIPTIONS: Partial<Record<Category, string>> = {
@@ -108,6 +127,11 @@ export default function LayersDashboard({
   portCongestion,
   tradeBalance,
   sanctions,
+  majorPorts,
+  internetOutages,
+  internetOutagesError,
+  internetCensorship,
+  internetCensorshipError,
 }: LayersDashboardProps) {
   function renderPreview(id: DataLayerId) {
     if (id === "flights" && flights) {
@@ -328,6 +352,63 @@ export default function LayersDashboard({
               ))}
             </div>
           ))}
+        </div>
+      );
+    }
+    if (id === "major-ports" && majorPorts) {
+      const large = majorPorts.ports.filter((p) => p.size === "L").length;
+      return (
+        <span className="mt-1 block text-[11px] text-neutral-500">
+          {majorPorts.ports.length} ports plotted ({large} large). {majorPorts.source}.
+        </span>
+      );
+    }
+    if (id === "internet-outages" && (internetOutages || internetOutagesError)) {
+      if (internetOutagesError || !internetOutages) {
+        return <span className="mt-1 block text-[11px] text-amber-500">Unavailable: {internetOutagesError}</span>;
+      }
+      if (internetOutages.outages.length === 0) {
+        return <span className="mt-1 block text-[11px] text-neutral-500">No confirmed outages in the last 14 days.</span>;
+      }
+      return (
+        <div className="mt-1.5 space-y-1 text-[11px] text-neutral-500">
+          {internetOutages.outages.slice(0, 6).map((o) => (
+            <div key={o.id}>
+              <div className="flex justify-between gap-2">
+                <span className="truncate text-neutral-400">{o.countries.map((c) => c.name).join(", ")}</span>
+                <span className={`shrink-0 ${o.endDate ? "" : "text-orange-400"}`}>
+                  {o.endDate ? timeAgo(o.endDate) : "ongoing"}
+                </span>
+              </div>
+              <div className="truncate">
+                {o.cause ?? "Cause not stated"}
+                {o.type ? ` - ${o.type}` : ""}
+              </div>
+            </div>
+          ))}
+          <div className="text-neutral-600">{internetOutages.attribution}</div>
+        </div>
+      );
+    }
+    if (id === "internet-censorship" && (internetCensorship || internetCensorshipError)) {
+      if (internetCensorshipError || !internetCensorship) {
+        return <span className="mt-1 block text-[11px] text-amber-500">Unavailable: {internetCensorshipError}</span>;
+      }
+      return (
+        <div className="mt-1.5 space-y-1 text-[11px] text-neutral-500">
+          <div className="text-neutral-600">
+            Confirmed block pages / possible interference, {internetCensorship.since} to {internetCensorship.until}:
+          </div>
+          {internetCensorship.countries.slice(0, 8).map((c) => (
+            <div key={c.country} className="flex justify-between gap-2">
+              <span className="truncate text-neutral-400">{countryName(c.country)}</span>
+              <span className="shrink-0">
+                {pct(c.confirmedRate)}
+                {change(c.confirmedRate, c.confirmedRatePrev)} / {pct(c.anomalyRate)}
+              </span>
+            </div>
+          ))}
+          <div className="text-neutral-600">{internetCensorship.attribution}</div>
         </div>
       );
     }

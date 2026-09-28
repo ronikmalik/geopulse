@@ -149,6 +149,30 @@ function RelatedEvents({ eventId }: { eventId: number }) {
   );
 }
 
+// The nearest major seaport, for events placed precisely enough to say
+// (src/lib/ports.ts). The port table is loaded only when a card is opened.
+function NearPort({ event }: { event: GeoEvent }) {
+  const [near, setNear] = useState<{ name: string; country: string; size: "L" | "M"; km: number } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    import("@/lib/ports")
+      .then(({ nearestMajorPort }) => {
+        const hit = nearestMajorPort(event);
+        if (!cancelled && hit) setNear({ ...hit.port, km: hit.km });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [event]);
+  if (!near) return null;
+  return (
+    <p className="mt-1.5 font-mono text-[10px] text-neutral-400" title="NGA World Port Index">
+      {Math.max(1, Math.round(near.km))} km from {near.name} ({near.size === "L" ? "large" : "medium"} seaport)
+    </p>
+  );
+}
+
 export default function FeedPanel({
   events,
   loading,
@@ -265,6 +289,7 @@ export default function FeedPanel({
                     View original →
                   </a>
                 </div>
+                <NearPort event={event} />
                 {sourceCount > 0 && <AdditionalSources eventId={event.id} />}
                 <RelatedEvents eventId={event.id} />
               </div>

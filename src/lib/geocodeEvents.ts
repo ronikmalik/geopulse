@@ -1,3 +1,4 @@
+import { haversineKm } from "./geo";
 import { generateContent } from "./geminiGenerate";
 import { geminiAnswerText } from "./geminiResponse";
 import { COUNTRY_CENTROIDS } from "./countryCentroids";
@@ -65,15 +66,6 @@ interface RawGeocodeItem {
 // story is about (e.g. drifting to a same-named place on a different
 // continent). Doesn't need to be precise, just needs to reject "obviously
 // not this country" answers.
-function haversineKm(aLat: number, aLon: number, bLat: number, bLon: number): number {
-  const R = 6371;
-  const dLat = ((bLat - aLat) * Math.PI) / 180;
-  const dLon = ((bLon - aLon) * Math.PI) / 180;
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((aLat * Math.PI) / 180) * Math.cos((bLat * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(s));
-}
 // Generous enough to cover the largest countries (Russia spans ~9000km
 // east-west) without needing real border polygons — this is a
 // hallucination guard, not a precision check.

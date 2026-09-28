@@ -21,6 +21,8 @@ import { markPendingGdeltTitlesResolved } from "../src/lib/pendingGdeltTitle";
 import { GET as getAnomalies } from "../src/app/api/anomalies/route";
 import { GET as getHealth } from "../src/app/api/admin/health/route";
 import { GET as getModels } from "../src/app/api/admin/ai-models/route";
+import { applyTsunamiBulletins } from "../src/lib/tsunamiEnrichment";
+import type { TsunamiBulletin } from "../src/lib/sources/tsunami";
 
 // 2026-09-28: run production queries in memory; no provider or database traffic can escape.
 async function fixture(t: TestContext) {
@@ -326,4 +328,34 @@ test("aircraft snapshots record a regular country's complete drop, but not glitc
   t.mock.method(globalThis, "fetch", async () => { throw new Error("offline"); });
   await assert.rejects(snapshotAircraftCounts());
   assert.equal((await pg.query<{ n: number }>("select count(*)::int as n from aircraft_count_history")).rows[0].n, before);
+});
+
+test("NOAA tsunami bulletins annotate the matching quake in events and feed_archive, idempotently", async (t) => {
+  const { pg, event } = await fixture(t);
+  const issuedAt = new Date(Date.now() - 30 * 60_000);
+  const base = "Magnitude 5.4 earthquake 231 km WSW of Port McNeill, Canada.";
+  await event(1, {
+    source: "usgs", url: "https://example.invalid/q1", title: "M 5.4", summary: base, category: "earthquake",
+    country: "CA", lat: 50.4, lon: -129.2, severity: 2, publishedAt: new Date(issuedAt.getTime() - 15 * 60_000),
+  });
+  await event(2, {
+    source: "usgs", url: "https://example.invalid/q2", title: "M 4.8", summary: "Magnitude 4.8 earthquake far away.",
+    category: "earthquake", country: "JP", lat: 35, lon: 140, severity: 1, publishedAt: new Date(issuedAt.getTime() - 10 * 60_000),
+  });
+  await pg.exec(`insert into feed_archive(source,url,title,summary,category,lat,lon,severity,published_at)
+    values('usgs','https://example.invalid/q1','M 5.4','${base}','earthquake',50.4,-129.2,2,now())`);
+  const bulletin: TsunamiBulletin = {
+    center: "NTWC", category: "Information", issuedAt, lat: 50.327, lon: -129.358, magnitude: 5,
+    region: "95 miles W of Port Alice, British Columbia", note: "* There is NO tsunami danger from this earthquake.",
+  };
+  assert.deepEqual(await applyTsunamiBulletins(async () => [bulletin]), { bulletins: 1, matched: 1, updated: 1 });
+  assert.deepEqual(await applyTsunamiBulletins(async () => [bulletin]), { bulletins: 1, matched: 1, updated: 0 });
+  const rows = (await pg.query<{ id: number; summary: string }>("select id, summary from events order by id")).rows;
+  assert.equal(rows[0].summary, `${base} Tsunami status (NOAA NTWC): information bulletin - "There is NO tsunami danger from this earthquake."`);
+  assert.equal(rows[1].summary, "Magnitude 4.8 earthquake far away.");
+  const archived = (await pg.query<{ summary: string }>("select summary from feed_archive")).rows[0].summary;
+  assert.equal(archived, rows[0].summary);
+  // Old bulletins are ignored outright.
+  const stale = { ...bulletin, issuedAt: new Date(Date.now() - 3 * 86_400_000) };
+  assert.deepEqual(await applyTsunamiBulletins(async () => [stale]), { bulletins: 0, matched: 0, updated: 0 });
 });

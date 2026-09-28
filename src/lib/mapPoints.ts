@@ -12,6 +12,7 @@ import type { AirQualityReading } from "@/lib/sources/openMeteoAirQuality";
 import type { KevEntry } from "@/lib/sources/cisakev";
 import { COUNTRY_CENTROIDS } from "@/lib/countryCentroids";
 import { ALPHA2_TO_ALPHA3 } from "@/lib/iso3";
+import type { MajorPortsResponse, InternetOutage, CensorshipCountry } from "@/lib/dataLayerTypes";
 
 // A point rendered on the globe that isn't a geopolitical GeoEvent — the
 // `kind` discriminant is how Globe.tsx tells these apart from events sharing
@@ -30,7 +31,10 @@ export interface ExtraMapPoint {
     | "trade-balance"
     | "port-congestion"
     | "air-quality"
-    | "cyber";
+    | "cyber"
+    | "major-port"
+    | "internet-outage"
+    | "internet-censorship";
   id: string;
   lat: number;
   lon: number;
@@ -371,6 +375,73 @@ export function cisaKevToPoints(vulnerabilities: KevEntry[]): ExtraMapPoint[] {
         label: html`<b>${COUNTRY_CENTROIDS[iso2]?.name ?? iso2}-based vendors</b><br/>${agg.count} actively exploited vulnerabilities (CISA KEV)${
           agg.ransomwareCount > 0 ? `, ${agg.ransomwareCount} tied to ransomware` : ""
         }<br/>${vendorList}`,
+      };
+    })
+    .filter((p): p is ExtraMapPoint => p !== null);
+}
+
+const PORT_COLOR = "#94a3b8"; // slate - quiet reference layer
+
+export function majorPortsToPoints(ports: MajorPortsResponse["ports"]): ExtraMapPoint[] {
+  return ports.map((p) => ({
+    kind: "major-port" as const,
+    id: `port-${p.country}-${p.name}`,
+    lat: p.lat,
+    lon: p.lon,
+    color: PORT_COLOR,
+    radius: p.size === "L" ? 0.2 : 0.13,
+    label: html`<b>${p.name}</b> (${p.country})<br/>${p.size === "L" ? "Large" : "Medium"} seaport - NGA World Port Index`,
+  }));
+}
+
+const OUTAGE_ONGOING_COLOR = "#fb923c"; // orange
+const OUTAGE_ENDED_COLOR = "#fdba74"; // pale orange
+
+// One point per affected country, at its capital (these are country- or
+// region-level outages, not a precise location).
+export function internetOutagesToPoints(outages: InternetOutage[]): ExtraMapPoint[] {
+  const points: ExtraMapPoint[] = [];
+  for (const o of outages) {
+    for (const c of o.countries) {
+      const at = centroidFor(c.code);
+      if (!at) continue;
+      const when = o.endDate
+        ? `${o.startDate.slice(0, 10)} to ${o.endDate.slice(0, 10)}`
+        : `since ${o.startDate.slice(0, 16).replace("T", " ")} UTC, ongoing`;
+      points.push({
+        kind: "internet-outage",
+        id: `outage-${o.id}-${c.code}`,
+        lat: at.lat,
+        lon: at.lon,
+        color: o.endDate ? OUTAGE_ENDED_COLOR : OUTAGE_ONGOING_COLOR,
+        radius: o.endDate ? 0.22 : 0.34,
+        label: html`<b>${c.name}</b><br/>Internet outage (${o.type ?? "outage"}): ${o.cause ?? "cause not stated"}<br/>${when}<br/>Source: Cloudflare Radar, CC BY-NC 4.0`,
+      });
+    }
+  }
+  return points;
+}
+
+const CENSORSHIP_COLOR = "#a855f7"; // purple
+
+// Plotted where blocking is visible at all: a confirmed block page on at
+// least 0.5% of tests, or possible interference on at least 10%. Radius
+// follows the confirmed share; the label always shows both numbers.
+export function internetCensorshipToPoints(countries: CensorshipCountry[]): ExtraMapPoint[] {
+  const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
+  return countries
+    .filter((c) => c.confirmedRate >= 0.005 || c.anomalyRate >= 0.1)
+    .map((c): ExtraMapPoint | null => {
+      const at = centroidFor(c.country);
+      if (!at) return null;
+      return {
+        kind: "internet-censorship",
+        id: `ooni-${c.country}`,
+        lat: at.lat,
+        lon: at.lon,
+        color: CENSORSHIP_COLOR,
+        radius: scaleRadius(c.confirmedRate, 0.3, 0.16, 0.45),
+        label: html`<b>${c.country}</b> - website blocking, last 7 days<br/>Confirmed block pages: ${pct(c.confirmedRate)} of ${c.measurements.toLocaleString()} tests<br/>Possible interference: ${pct(c.anomalyRate)}<br/>Source: OONI, CC BY-NC-SA 4.0`,
       };
     })
     .filter((p): p is ExtraMapPoint => p !== null);

@@ -26,8 +26,11 @@ export const DATA_LAYERS = [
   "food-price-index",
   "air-quality",
   "port-congestion",
+  "major-ports",
   "trade-balance",
   "sanctions",
+  "internet-outages",
+  "internet-censorship",
 ] as const;
 
 export type DataLayerId = (typeof DATA_LAYERS)[number];
@@ -48,7 +51,10 @@ export const MAPPED_DATA_LAYERS: ReadonlySet<DataLayerId> = new Set<DataLayerId>
   "energy-mix",
   "air-quality",
   "port-congestion",
+  "major-ports",
   "trade-balance",
+  "internet-outages",
+  "internet-censorship",
 ]);
 
 export const DATA_LAYER_LABELS: Record<DataLayerId, string> = {
@@ -68,7 +74,10 @@ export const DATA_LAYER_LABELS: Record<DataLayerId, string> = {
   "air-quality": "Air Quality (PM2.5)",
   sanctions: "Sanctions Designations",
   "port-congestion": "Maritime Chokepoint Traffic",
+  "major-ports": "Major Seaports",
   "trade-balance": "Trade Partner Exposure",
+  "internet-outages": "Internet Outages (Cloudflare)",
+  "internet-censorship": "Website Blocking (OONI)",
 };
 
 export const DATA_LAYER_DESCRIPTIONS: Record<DataLayerId, string> = {
@@ -97,6 +106,12 @@ export const DATA_LAYER_DESCRIPTIONS: Record<DataLayerId, string> = {
     "FAO - global monthly Food Price Index. Food price spikes are a well-established driver of political instability (see the 2007-08 and 2010-11 spikes preceding the Arab Spring).",
   "air-quality":
     "Open-Meteo - model-estimated PM2.5 at the same 12 monitored capitals as Weather. Environmental context only, not fed into the risk model.",
+  "major-ports":
+    "NGA World Port Index - the 417 large and medium seaports worldwide (US government data, public domain). Supply-chain context; an expanded feed card also names any major port within 50 km of the event.",
+  "internet-outages":
+    "Cloudflare Radar - internet outages Cloudflare has confirmed over the last 14 days, with their cause (government-directed, power outage, cable cut...) and scope. Data CC BY-NC 4.0, radar.cloudflare.com.",
+  "internet-censorship":
+    "OONI - per country, the share of website tests in the last 7 days that hit a confirmed block page, and the share flagged as possible interference. Counts blocking of any kind, including gambling and piracy lists. Data CC BY-NC-SA 4.0, ooni.org; these derived rates are shared under the same licence.",
   "port-congestion":
     "IMF PortWatch - daily vessel transits through the world's 28 major maritime chokepoints, Infrastructure & Connectivity / Supply Chain context.",
   "trade-balance":
@@ -128,6 +143,11 @@ export const DATA_LAYER_POLL_MS: Record<DataLayerId, number> = {
   "air-quality": 30 * 60_000,
   "port-congestion": 6 * 60 * 60_000,
   "trade-balance": 24 * 60 * 60_000,
+  // Static snapshot built into the deployment; one fetch per session.
+  "major-ports": 24 * 60 * 60_000,
+  // Matched to each route's cache (see the route files).
+  "internet-outages": 15 * 60_000,
+  "internet-censorship": 60 * 60_000,
   // Written weekly by the sync-sanctions job; the route only reads stored
   // rows, so polling faster than this refreshes nothing.
   sanctions: 60 * 60_000,
