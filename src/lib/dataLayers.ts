@@ -1,8 +1,8 @@
 // Selectable "live data" layers - distinct from the event Category system
 // (src/lib/categories.ts). These aren't geopolitical events stored in
 // Postgres; they're live external data fetched on demand through
-// src/app/api/layers/*/route.ts and rendered either as points on the globe
-// or as an inline ticker in the Data Layers dashboard.
+// src/app/api/layers/*/route.ts and rendered as points on the globe
+// and/or as an inline preview in the Layers panel.
 //
 // Every layer here is chosen because it feeds one of the eight risk
 // pillars or adds structural country context (see src/lib/pillars.ts) -
@@ -10,12 +10,10 @@
 // dashboard. Crypto markets, trending GitHub repos, and generic satellite
 // tracking were removed for exactly that reason: none of them fed a
 // pillar or told an analyst anything about risk.
-export const GLOBE_DATA_LAYERS = [
+export const DATA_LAYERS = [
   "flights",
   "commercial-flights",
   "weather",
-] as const;
-export const TICKER_DATA_LAYERS = [
   "gdp",
   "population",
   "cyber",
@@ -32,15 +30,26 @@ export const TICKER_DATA_LAYERS = [
   "sanctions",
 ] as const;
 
-export const DATA_LAYERS = [...GLOBE_DATA_LAYERS, ...TICKER_DATA_LAYERS] as const;
-
-export type GlobeDataLayerId = (typeof GLOBE_DATA_LAYERS)[number];
-export type TickerDataLayerId = (typeof TICKER_DATA_LAYERS)[number];
 export type DataLayerId = (typeof DATA_LAYERS)[number];
 
-export function isGlobeDataLayer(id: DataLayerId): id is GlobeDataLayerId {
-  return (GLOBE_DATA_LAYERS as readonly string[]).includes(id);
-}
+// Layers that plot points on the globe when switched on (see page.tsx's
+// extraPoints); the rest show only their preview in the Layers panel.
+// Replaces the old GLOBE_/TICKER_ split (2026-09-28), which had drifted:
+// nine "ticker" layers had long since gained map points.
+export const MAPPED_DATA_LAYERS: ReadonlySet<DataLayerId> = new Set<DataLayerId>([
+  "flights",
+  "commercial-flights",
+  "weather",
+  "cyber",
+  "gps-jamming",
+  "submarine-cables",
+  "travel-advisories",
+  "grid-loss",
+  "energy-mix",
+  "air-quality",
+  "port-congestion",
+  "trade-balance",
+]);
 
 export const DATA_LAYER_LABELS: Record<DataLayerId, string> = {
   flights: "Military Aircraft Activity",
@@ -70,8 +79,8 @@ export const DATA_LAYER_DESCRIPTIONS: Record<DataLayerId, string> = {
   weather: "Open-Meteo - current conditions at 12 monitored capitals, for Climate & Environment context.",
   gdp: "World Bank - GDP by country. Structural context for how much economic exposure a threat in that country represents.",
   population: "World Bank - population by country. Structural context for how many people a threat in that country could affect.",
-  cyber: "CISA KEV - vulnerabilities with confirmed active exploitation, most recent first. Global feed (no country attribution yet) for the Cyber & Technology pillar.",
-  telegram: "The same 12 Telegram channels feeding scored events, filtered to breaking incidents only (not a raw channel firehose) - shown here with full channel attribution as context rather than mapped/scored.",
+  cyber: "CISA KEV - vulnerabilities with confirmed active exploitation, most recent first, for the Cyber & Technology pillar. Plotted at the vendor's headquarters: a proxy, not where the exploitation happened.",
+  telegram: "The latest reviewed incidents from the 12 named Telegram channels (official accounts and clearly labelled partisan ones), with full channel attribution. The same posts also appear in the feed.",
   "gps-jamming":
     "gpsjam.org - aircraft-derived GPS/GNSS interference, attributed to the nearest country/coastline. Jamming clusters concentrate near contested straits and active conflict zones, a Geopolitical & Security signal.",
   "submarine-cables":

@@ -27,7 +27,7 @@ export default function ForexPanel({ data, cftc }: ForexPanelProps) {
         <h2 className="mb-1 font-mono text-xs uppercase tracking-[0.2em] text-red-500">
           Forex
         </h2>
-        <p className="mb-1 font-mono text-[10px] text-red-800">
+        <p className="mb-1 font-mono text-[10px] text-neutral-500">
           USD vs. major and geopolitically exposed currencies · units per 1 USD · green = USD stronger
         </p>
         {newest && (
@@ -38,7 +38,7 @@ export default function ForexPanel({ data, cftc }: ForexPanelProps) {
         )}
 
         {rates.length === 0 && (
-          <p className="p-1 font-mono text-xs text-neutral-600">
+          <p className="p-1 font-mono text-xs text-neutral-500">
             Loading rates…
           </p>
         )}

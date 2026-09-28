@@ -11,25 +11,13 @@ import {
 import ForexPanel from "./ForexPanel";
 import CommodityPanel from "./CommodityPanel";
 import type { CftcResponse, ForexResponse, CommodityResponse } from "@/lib/dataLayerTypes";
+import { countryName } from "@/lib/format";
 
 interface LiveWirePanelProps {
   selectedCountry: string | null;
   forex: ForexResponse | null;
   cftc: CftcResponse | null;
   commodities: CommodityResponse | null;
-}
-
-const regionNames =
-  typeof Intl !== "undefined"
-    ? new Intl.DisplayNames(["en"], { type: "region" })
-    : null;
-
-function countryName(code: string): string {
-  try {
-    return regionNames?.of(code) ?? code;
-  } catch {
-    return code;
-  }
 }
 
 export default function LiveWirePanel({
@@ -74,7 +62,7 @@ export default function LiveWirePanel({
             Live Wire
           </h2>
           {isAuto ? (
-            <span className="font-mono text-[9px] uppercase tracking-wider text-neutral-600">
+            <span className="font-mono text-[9px] uppercase tracking-wider text-neutral-500">
               auto
             </span>
           ) : (
@@ -86,7 +74,7 @@ export default function LiveWirePanel({
             </button>
           )}
         </div>
-        <p className="mb-2 font-mono text-[10px] text-red-800">
+        <p className="mb-2 font-mono text-[10px] text-neutral-500">
           {selectedCountry
             ? `Suggested for ${countryName(selectedCountry)}: ${channel.region}`
             : "No country selected - showing global coverage."}
@@ -114,7 +102,7 @@ export default function LiveWirePanel({
               className={`rounded-full border px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider transition ${
                 channelId === id
                   ? "border-red-500 bg-red-950/60 text-red-300"
-                  : "border-neutral-800 text-neutral-600 hover:border-red-900 hover:text-red-700"
+                  : "border-neutral-800 text-neutral-500 hover:border-red-900 hover:text-red-400"
               }`}
               title={c.region}
             >

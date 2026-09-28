@@ -32,22 +32,11 @@ import type {
   PortCongestionResponse,
   TradeBalanceResponse,
   CommodityResponse,
+  SanctionsResponse,
 } from "@/lib/dataLayerTypes";
+import { countryName } from "@/lib/format";
 
 export type DashboardTab = "feed" | "risk" | "layers" | "forex" | "trends";
-
-const regionNames =
-  typeof Intl !== "undefined"
-    ? new Intl.DisplayNames(["en"], { type: "region" })
-    : null;
-
-function countryName(code: string): string {
-  try {
-    return regionNames?.of(code) ?? code;
-  } catch {
-    return code;
-  }
-}
 
 interface DashboardProps {
   activeTab: DashboardTab;
@@ -56,6 +45,7 @@ interface DashboardProps {
 
   events: GeoEvent[];
   feedLoading?: boolean;
+  feedEmptyMessage?: string;
   selectedEventId: number | null;
   onSelectEvent: (event: GeoEvent) => void;
 
@@ -85,6 +75,7 @@ interface DashboardProps {
   airQuality: AirQualityResponse | null;
   portCongestion: PortCongestionResponse | null;
   tradeBalance: TradeBalanceResponse | null;
+  sanctions: SanctionsResponse | null;
 
   forex: ForexResponse | null;
   cftc: CftcResponse | null;
@@ -121,24 +112,27 @@ export default function Dashboard(props: DashboardProps) {
         </div>
       )}
       {showTabBar && (
-        <div className="flex shrink-0 border-b border-red-950">
+        <div role="tablist" aria-label="Dashboard" className="flex shrink-0 border-b border-red-950">
           {TAB_META.map((tab) => {
             const isActive = activeTab === tab.id;
             const count = tabCount[tab.id];
             return (
               <button
                 key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
                 onClick={() => onTabChange(tab.id)}
                 className={`flex flex-1 flex-col items-center gap-1.5 py-2.5 font-mono text-[10px] uppercase tracking-wider transition ${
                   isActive
                     ? "text-red-300"
-                    : "text-neutral-600 hover:text-red-700"
+                    : "text-neutral-500 hover:text-red-400"
                 }`}
               >
                 <span className="flex items-center gap-1.5 whitespace-nowrap">
                   <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tab.dot}`} />
                   {tab.label}
-                  {!!count && count > 0 && <span className="text-neutral-600">{count}</span>}
+                  {!!count && count > 0 && <span className="text-neutral-500">{count}</span>}
                 </span>
                 <span
                   className={`h-0.5 w-8 rounded-full transition ${
@@ -173,6 +167,7 @@ export default function Dashboard(props: DashboardProps) {
               <FeedPanel
                 events={props.events}
                 loading={props.feedLoading}
+                emptyMessage={props.feedEmptyMessage}
                 selectedId={props.selectedEventId}
                 onSelect={props.onSelectEvent}
               />
@@ -210,6 +205,7 @@ export default function Dashboard(props: DashboardProps) {
             airQuality={props.airQuality}
             portCongestion={props.portCongestion}
             tradeBalance={props.tradeBalance}
+            sanctions={props.sanctions}
           />
         )}
         {activeTab === "forex" && (
@@ -221,7 +217,12 @@ export default function Dashboard(props: DashboardProps) {
           />
         )}
         {activeTab === "trends" && (
-          <TrendsPanel countryScores={props.countryScores} anomalies={props.anomalies} />
+          <TrendsPanel
+            countryScores={props.countryScores}
+            anomalies={props.anomalies}
+            selectedCountry={props.selectedCountry}
+            onSelectCountry={props.onSelectCountry}
+          />
         )}
       </div>
     </div>

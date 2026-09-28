@@ -24,7 +24,7 @@ export default function CommodityPanel({ data }: CommodityPanelProps) {
         <h2 className="mb-1 font-mono text-xs uppercase tracking-[0.2em] text-red-500">
           Energy and Commodities
         </h2>
-        <p className="mb-1 font-mono text-[10px] text-red-800">
+        <p className="mb-1 font-mono text-[10px] text-neutral-500">
           Front-month futures in USD · change vs. previous session close
         </p>
         {newest && (
@@ -35,7 +35,7 @@ export default function CommodityPanel({ data }: CommodityPanelProps) {
         )}
 
         {commodities.length === 0 && (
-          <p className="p-1 font-mono text-xs text-neutral-600">
+          <p className="p-1 font-mono text-xs text-neutral-500">
             Loading prices…
           </p>
         )}
@@ -50,12 +50,12 @@ export default function CommodityPanel({ data }: CommodityPanelProps) {
               <span className="font-mono text-xs text-red-300">{c.label}</span>
               <span className="font-mono text-xs text-neutral-300">
                 {formatPrice(c.price, c.unit)}
-                <span className="ml-1 text-neutral-600">{c.unit}</span>
+                <span className="ml-1 text-neutral-500">{c.unit}</span>
               </span>
               <span
                 className={`w-16 shrink-0 text-right font-mono text-[11px] ${
                   c.changePct == null
-                    ? "text-neutral-600"
+                    ? "text-neutral-500"
                     : up
                       ? "text-emerald-500"
                       : "text-red-500"

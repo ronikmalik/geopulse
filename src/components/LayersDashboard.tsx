@@ -10,6 +10,7 @@ import {
   DATA_LAYERS,
   DATA_LAYER_LABELS,
   DATA_LAYER_DESCRIPTIONS,
+  MAPPED_DATA_LAYERS,
   type DataLayerId,
 } from "@/lib/dataLayers";
 import type {
@@ -29,6 +30,7 @@ import type {
   AirQualityResponse,
   PortCongestionResponse,
   TradeBalanceResponse,
+  SanctionsResponse,
 } from "@/lib/dataLayerTypes";
 
 interface LayersDashboardProps {
@@ -53,6 +55,7 @@ interface LayersDashboardProps {
   airQuality: AirQualityResponse | null;
   portCongestion: PortCongestionResponse | null;
   tradeBalance: TradeBalanceResponse | null;
+  sanctions: SanctionsResponse | null;
 }
 
 const LAYER_DESCRIPTIONS: Partial<Record<Category, string>> = {
@@ -104,6 +107,7 @@ export default function LayersDashboard({
   airQuality,
   portCongestion,
   tradeBalance,
+  sanctions,
 }: LayersDashboardProps) {
   function renderPreview(id: DataLayerId) {
     if (id === "flights" && flights) {
@@ -298,7 +302,7 @@ export default function LayersDashboard({
     if (id === "port-congestion" && portCongestion) {
       return (
         <div className="mt-1.5 space-y-0.5 text-[11px] text-neutral-500">
-          <div className="text-neutral-600">Quietest chokepoints (vessels/day):</div>
+          <div className="text-neutral-500">Quietest chokepoints (vessels/day):</div>
           {portCongestion.chokepoints.slice(0, 6).map((c) => (
             <div key={c.name} className="flex justify-between gap-2">
               <span className="truncate">{c.name}</span>
@@ -327,6 +331,41 @@ export default function LayersDashboard({
         </div>
       );
     }
+    if (id === "sanctions" && sanctions) {
+      const added = sanctions.deltas.filter((d) => d.change === "added" && d.name);
+      const removedByList = new Map<string, number>();
+      for (const d of sanctions.deltas) {
+        if (d.change === "removed") removedByList.set(d.list, (removedByList.get(d.list) ?? 0) + 1);
+      }
+      if (sanctions.deltas.length === 0) {
+        return (
+          <span className="mt-1 block text-[11px] text-neutral-500">
+            No designation changes recorded in the last 120 days.
+          </span>
+        );
+      }
+      return (
+        <div className="mt-1.5 space-y-0.5 text-[11px] text-neutral-500">
+          {added.slice(0, 6).map((d, i) => (
+            <div key={`${d.list}:${d.name}:${i}`} className="flex justify-between gap-2">
+              <span className="truncate" dir="auto">
+                {d.name}
+              </span>
+              <span className="shrink-0 uppercase">
+                +{d.list}
+                {d.program ? ` ${d.program}` : ""}
+              </span>
+            </div>
+          ))}
+          {added.length > 6 && <div className="text-neutral-500">+{added.length - 6} more added</div>}
+          {[...removedByList].map(([list, count]) => (
+            <div key={list} className="text-neutral-500">
+              {count} delisted from {list.toUpperCase()} (names are not kept once an entry leaves the list)
+            </div>
+          ))}
+        </div>
+      );
+    }
     return null;
   }
 
@@ -336,8 +375,8 @@ export default function LayersDashboard({
         <h2 className="mb-2 font-mono text-xs uppercase tracking-[0.2em] text-red-500">
           Event Layers
         </h2>
-        <p className="mb-2 font-mono text-[10px] text-red-800">
-          All eight pillars are on by default. Untick to narrow the feed to specific categories.
+        <p className="mb-2 text-[11px] leading-snug text-neutral-500">
+          Every category is on by default. Untick one to narrow the feed and the globe.
         </p>
         {LAYER_CATEGORIES.map((cat) => {
           const isActive = active.has(cat);
@@ -345,6 +384,8 @@ export default function LayersDashboard({
           return (
             <button
               key={cat}
+              type="button"
+              aria-pressed={isActive}
               onClick={() => onToggle(cat)}
               className={`mb-2 flex w-full items-start gap-3 rounded border px-3 py-2.5 text-left transition ${
                 isActive
@@ -390,14 +431,17 @@ export default function LayersDashboard({
         <h2 className="mb-2 mt-4 font-mono text-xs uppercase tracking-[0.2em] text-red-500">
           Context Layers
         </h2>
-        <p className="mb-2 font-mono text-[10px] text-red-800">
-          Structural and situational context, not scored events. Flights, Commercial Air Traffic, Weather, GPS Jamming, Submarine Cables, Travel Advisories, Grid Losses, Energy Mix, Trade Balance, Chokepoint Traffic, Air Quality, and Cyber (Actively Exploited Vulnerabilities, plotted by vendor headquarters - a proxy, not the real exploitation location) all render as points on the globe (toggle one, then look at the map) and preview here; GDP/Population/Telegram/Food Price Index are ticker-only for now.
+        <p className="mb-2 text-[11px] leading-snug text-neutral-500">
+          Context around the events, not scored into Pulse Levels. Layers marked
+          MAP also plot points on the globe; PANEL layers show their data here only.
         </p>
         {DATA_LAYERS.map((id) => {
           const isActive = activeDataLayers.has(id);
           return (
             <button
               key={id}
+              type="button"
+              aria-pressed={isActive}
               onClick={() => onToggleDataLayer(id)}
               className={`mb-2 flex w-full items-start gap-3 rounded border px-3 py-2.5 text-left transition ${
                 isActive
@@ -415,12 +459,20 @@ export default function LayersDashboard({
                 ✓
               </span>
               <span className="min-w-0 flex-1">
-                <span
-                  className={`block font-mono text-xs uppercase tracking-wider ${
-                    isActive ? "text-red-300" : "text-neutral-400"
-                  }`}
-                >
-                  {DATA_LAYER_LABELS[id]}
+                <span className="flex items-center justify-between gap-2">
+                  <span
+                    className={`block font-mono text-xs uppercase tracking-wider ${
+                      isActive ? "text-red-300" : "text-neutral-400"
+                    }`}
+                  >
+                    {DATA_LAYER_LABELS[id]}
+                  </span>
+                  <span
+                    className="shrink-0 rounded-sm border border-neutral-800 px-1 py-0.5 font-mono text-[8px] uppercase tracking-wider text-neutral-500"
+                    title={MAPPED_DATA_LAYERS.has(id) ? "Plots points on the globe when switched on" : "Shown in this panel only"}
+                  >
+                    {MAPPED_DATA_LAYERS.has(id) ? "Map" : "Panel"}
+                  </span>
                 </span>
                 <span className="mt-0.5 block text-[11px] text-neutral-500">
                   {DATA_LAYER_DESCRIPTIONS[id]}

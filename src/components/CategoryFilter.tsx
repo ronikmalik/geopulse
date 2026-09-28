@@ -22,7 +22,7 @@ export default function CategoryFilter({
             className={`shrink-0 rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition ${
               isActive
                 ? "border-red-500 bg-red-950/60 text-red-300 shadow-[0_0_8px_rgba(255,0,0,0.3)]"
-                : "border-neutral-800 text-neutral-600 hover:border-red-900 hover:text-red-700"
+                : "border-neutral-800 text-neutral-500 hover:border-red-900 hover:text-red-400"
             }`}
           >
             {CATEGORY_LABELS[cat]}

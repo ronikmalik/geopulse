@@ -48,3 +48,6 @@ next-env.d.ts
 # this is a safety net after one got committed by mistake on 2026-09-10)
 /scratch_*.ts
 /scratch_*.js
+
+# Playwright MCP screenshots/snapshots from local UI checks
+/.playwright-mcp/

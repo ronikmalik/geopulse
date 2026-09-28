@@ -22,6 +22,9 @@ export function useAnomalies(): Map<string, AnomalyFindingResponse[]> {
     const load = async () => {
       try {
         const res = await fetch("/api/anomalies");
+        // A failed response keeps the last known findings rather than
+        // clearing every badge.
+        if (!res.ok) return;
         const data = await res.json();
         if (cancelled) return;
         const grouped = new Map<string, AnomalyFindingResponse[]>();

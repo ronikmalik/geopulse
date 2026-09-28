@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import GlobeView from "@/components/Globe";
 import CategoryFilter from "@/components/CategoryFilter";
 import AlertToast from "@/components/AlertToast";
+import ConnectionStatus from "@/components/ConnectionStatus";
 import Dashboard, { type DashboardTab } from "@/components/Dashboard";
 import { useEventStream } from "@/lib/useEventStream";
 import { usePulsingEvents } from "@/lib/usePulsingEvents";
@@ -46,8 +47,10 @@ import type {
   PortCongestionResponse,
   TradeBalanceResponse,
   CommodityResponse,
+  SanctionsResponse,
 } from "@/lib/dataLayerTypes";
 import type { GeoEvent } from "@/lib/types";
+import { countryName } from "@/lib/format";
 
 const FOREX_POLL_MS = 60_000;
 const CFTC_POLL_MS = 60 * 60_000;
@@ -293,6 +296,25 @@ export default function Home() {
     DATA_LAYER_POLL_MS["trade-balance"],
     activeDataLayers.has("trade-balance"),
   );
+  // The sanctions toggle existed with nothing behind it until 2026-09-28:
+  // no poll, no preview, so switching it on did nothing at all.
+  const sanctionsLayer = useLiveLayer<SanctionsResponse>(
+    "/api/layers/sanctions",
+    DATA_LAYER_POLL_MS.sanctions,
+    activeDataLayers.has("sanctions"),
+  );
+
+  // Escape clears the current selection (event and country), which also
+  // lets the globe resume its idle rotation.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setSelected(null);
+      setSelectedCountry(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   // Forex is the app's headline feature, not an opt-in layer — it polls
   // continuously rather than gating behind a checkbox.
@@ -376,9 +398,16 @@ export default function Home() {
     feedLoading: selectedCountry
       ? countryFeedLoading
       : isIsolated && categoryFeedLoading,
+    feedEmptyMessage: selectedCountry
+      ? `No recent events for ${countryName(selectedCountry)}.`
+      : isIsolated
+        ? "No recent events in the selected categories."
+        : undefined,
     selectedEventId: selected?.id ?? null,
+    // Clicking the open card again closes it (there was no other way to
+    // deselect an event short of picking another one).
     onSelectEvent: (event: GeoEvent) => {
-      setSelected(event);
+      setSelected((cur) => (cur?.id === event.id ? null : event));
       setMobileOpen(false);
     },
     countryScores,
@@ -406,6 +435,7 @@ export default function Home() {
     airQuality: airQualityLayer.data,
     portCongestion: portCongestionLayer.data,
     tradeBalance: tradeBalanceLayer.data,
+    sanctions: sanctionsLayer.data,
     forex: forexLayer.data,
     cftc: cftcLayer.data,
     commodities: commoditiesLayer.data,
@@ -414,7 +444,9 @@ export default function Home() {
 
   return (
     <div className="relative h-dvh w-dvw overflow-hidden bg-black">
-      <div className="absolute inset-0">
+      {/* On desktop the globe stops at the panel's edge so it is centred
+          in the space you can actually see, not behind the panel. */}
+      <div className="absolute inset-0 lg:right-96">
         <GlobeView
           events={mapEvents}
           onSelect={(event) => {
@@ -439,10 +471,16 @@ export default function Home() {
       {/* Top bar */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-20 p-3 sm:p-4 lg:right-96">
         <div className="pointer-events-auto min-w-0">
-          <h1 className="font-mono text-base font-bold tracking-[0.2em] text-red-500 drop-shadow-[0_0_10px_rgba(255,0,0,0.6)] sm:text-lg sm:tracking-[0.3em]">
-            GEOPULSE
-          </h1>
-          <p className="font-mono text-[9px] tracking-widest text-red-800 sm:text-[10px]">
+          <div className="flex items-center justify-between gap-3 pr-1 lg:pr-0">
+            <h1 className="font-mono text-base font-bold tracking-[0.2em] text-red-500 drop-shadow-[0_0_10px_rgba(255,0,0,0.6)] sm:text-lg sm:tracking-[0.3em]">
+              GEOPULSE
+            </h1>
+            {/* The desktop panel carries its own status line. */}
+            <div className="lg:hidden">
+              <ConnectionStatus status={status} />
+            </div>
+          </div>
+          <p className="font-mono text-[9px] tracking-widest text-red-700 sm:text-[10px]">
             GLOBAL RISK INTELLIGENCE
           </p>
           <div className="mt-2 -ml-1 no-scrollbar max-w-[calc(100vw-1.5rem)] overflow-x-auto pl-1 pb-1 [mask-image:linear-gradient(to_right,black_82%,transparent_100%)] sm:max-w-none sm:overflow-visible sm:[mask-image:none]">

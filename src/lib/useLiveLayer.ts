@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTabVisible } from "./useTabVisible";
 
 // Generic polling hook shared by every /api/layers/* data layer. Fetching
@@ -22,6 +22,11 @@ export function useLiveLayer<T>(
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const visible = useTabVisible();
+  // Most polls return the same cached document. Skipping the state update
+  // when the body is byte-identical avoids re-plotting every globe point
+  // for nothing (2026-09-28).
+  const lastBodyRef = useRef<string | null>(null);
+  const bodyErrorRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!enabled || !visible) return;
@@ -31,8 +36,11 @@ export function useLiveLayer<T>(
       try {
         const res = await fetch(url);
         if (!res.ok) throw new Error(`${res.status}`);
-        const json = (await res.json()) as T;
-        if (!cancelled) {
+        const body = await res.text();
+        if (cancelled) return;
+        if (body !== lastBodyRef.current) {
+          lastBodyRef.current = body;
+          const json = JSON.parse(body) as T;
           setData(json);
           // Some /api/layers/* routes deliberately return HTTP 200 with an
           // empty result plus an `error` field on an upstream failure
@@ -40,8 +48,11 @@ export function useLiveLayer<T>(
           // be told apart from a genuinely empty live reading, so surface
           // this the same way an HTTP-level failure would be.
           const bodyError = (json as { error?: unknown }).error;
-          setError(typeof bodyError === "string" ? bodyError : null);
+          bodyErrorRef.current = typeof bodyError === "string" ? bodyError : null;
         }
+        // Also clears an HTTP error from an earlier poll once the same
+        // good body comes back; an unchanged value does not re-render.
+        setError(bodyErrorRef.current);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       }

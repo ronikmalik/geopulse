@@ -115,3 +115,20 @@ export interface PortCongestionResponse {
 export interface TradeBalanceResponse {
   countries: CountryTradeSummary[];
 }
+
+// Mirrors SanctionsDeltaView in src/lib/sanctions.ts (server-only module).
+// `name` is null on removals by design: the delisted entry is gone from
+// the published file, so there is no name to record.
+export interface SanctionsDelta {
+  list: string;
+  change: string;
+  name: string | null;
+  entityType: string | null;
+  program: string | null;
+  country: string | null;
+  detectedAt: string;
+}
+
+export interface SanctionsResponse {
+  deltas: SanctionsDelta[];
+}

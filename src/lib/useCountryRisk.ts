@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ThreatLevel, MomentumDirection } from "@/lib/threat";
 import { useTabVisible } from "./useTabVisible";
 
@@ -22,6 +22,9 @@ const POLL_INTERVAL_MS = 60_000;
 export function useCountryRisk() {
   const [scores, setScores] = useState<CountryRiskScore[]>([]);
   const visible = useTabVisible();
+  // The route is CDN-cached for longer than this poll, so most polls return
+  // the same body; an unchanged one must not trigger a full polygon rebuild.
+  const lastBodyRef = useRef<string | null>(null);
 
   // Paused while the tab is hidden (2026-09-09) — this poll also drives
   // Globe.tsx's refreshPolygons, a full country-polygon mesh rebuild, so
@@ -37,8 +40,13 @@ export function useCountryRisk() {
       try {
         const res = await fetch("/api/risk");
         if (!res.ok) return; // An error payload must not erase the globe's last known scores.
-        const data = await res.json();
-        if (!cancelled && Array.isArray(data.scores)) setScores(data.scores);
+        const body = await res.text();
+        if (cancelled || body === lastBodyRef.current) return;
+        const data = JSON.parse(body);
+        if (Array.isArray(data.scores)) {
+          lastBodyRef.current = body;
+          setScores(data.scores);
+        }
       } catch {
         // keep last known scores on transient failure
       }

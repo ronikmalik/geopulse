@@ -4,24 +4,24 @@ import { useEffect, useRef, useState } from "react";
 import type { GeoEvent } from "@/lib/types";
 import { CATEGORY_LABELS, type Category } from "@/lib/categories";
 import { sourceLabel } from "@/lib/sourceLabels";
-import { splitAttribution, stripOutletSuffix } from "@/lib/displayText";
+import { eventPlace, splitAttribution, stripOutletSuffix } from "@/lib/displayText";
+import { timeAgo } from "@/lib/format";
 
 interface FeedPanelProps {
   events: GeoEvent[];
   loading?: boolean;
   selectedId: number | null;
   onSelect: (event: GeoEvent) => void;
+  // Shown when there is nothing to list. The default suits the live feed;
+  // a country or category view passes its own, since "listening" there
+  // would suggest data is on its way when the answer is simply "none".
+  emptyMessage?: string;
 }
 
-function timeAgo(iso: string | Date): string {
-  const date = typeof iso === "string" ? new Date(iso) : iso;
-  const diffMs = Date.now() - date.getTime();
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
+async function fetchJson<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as T;
 }
 
 interface DuplicateSource {
@@ -40,9 +40,8 @@ function AdditionalSources({ eventId }: { eventId: number }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/events/duplicates?id=${eventId}`)
-      .then((res) => res.json())
-      .then((data: { sources: DuplicateSource[] }) => {
+    fetchJson<{ sources: DuplicateSource[] }>(`/api/events/duplicates?id=${eventId}`)
+      .then((data) => {
         if (!cancelled) setSources(data.sources ?? []);
       })
       .catch(() => {
@@ -55,7 +54,7 @@ function AdditionalSources({ eventId }: { eventId: number }) {
 
   if (!sources) {
     return (
-      <p className="mt-1.5 font-mono text-[10px] text-neutral-600">
+      <p className="mt-1.5 font-mono text-[10px] text-neutral-500">
         loading other sources…
       </p>
     );
@@ -107,9 +106,8 @@ function RelatedEvents({ eventId }: { eventId: number }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/events/similar?id=${eventId}`)
-      .then((res) => res.json())
-      .then((data: { items: SimilarEvent[] }) => {
+    fetchJson<{ items: SimilarEvent[] }>(`/api/events/similar?id=${eventId}`)
+      .then((data) => {
         if (!cancelled) setItems(data.items ?? []);
       })
       .catch(() => {
@@ -128,19 +126,24 @@ function RelatedEvents({ eventId }: { eventId: number }) {
         Related:
       </p>
       <div className="mt-1 space-y-1">
-        {items.map((item) => (
-          <a
-            key={item.id}
-            href={item.url}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="block truncate font-mono text-[10px] text-neutral-400 hover:text-red-400"
-            title={item.title}
-          >
-            {sourceLabel(item.source)} - {item.title}
-          </a>
-        ))}
+        {items.map((item) => {
+          // Telegram titles carry the channel label as a prefix; the
+          // source is already printed first, so show the post alone.
+          const title = stripOutletSuffix(splitAttribution(item.title, item.source).body);
+          return (
+            <a
+              key={item.id}
+              href={item.url}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="block truncate font-mono text-[10px] text-neutral-400 hover:text-red-400"
+              title={`${title} (${timeAgo(item.publishedAt)})`}
+            >
+              {sourceLabel(item.source)} - {title}
+            </a>
+          );
+        })}
       </div>
     </div>
   );
@@ -151,6 +154,7 @@ export default function FeedPanel({
   loading,
   selectedId,
   onSelect,
+  emptyMessage = "Listening for signals…",
 }: FeedPanelProps) {
   const sorted = [...events].sort(
     (a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime(),
@@ -172,13 +176,13 @@ export default function FeedPanel({
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto">
         {loading && (
-          <p className="p-4 font-mono text-xs text-neutral-600">
+          <p className="p-4 font-mono text-xs text-neutral-500">
             Loading feed…
           </p>
         )}
         {!loading && sorted.length === 0 && (
-          <p className="p-4 font-mono text-xs text-neutral-600">
-            Listening for signals…
+          <p className="p-4 font-mono text-xs text-neutral-500">
+            {emptyMessage}
           </p>
         )}
         {sorted.map((event) => {
@@ -209,7 +213,7 @@ export default function FeedPanel({
             </div>
             <div className="mt-1 flex items-center gap-1.5">
               <span className="font-mono text-xs text-red-300">
-                {event.location}
+                {eventPlace(event)}
               </span>
               {sourceCount > 0 && (
                 <span

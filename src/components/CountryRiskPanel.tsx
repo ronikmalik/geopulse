@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { splitAttribution, stripOutletSuffix } from "@/lib/displayText";
 import { useWatchlist } from "@/lib/useWatchlist";
 import { useTabVisible } from "@/lib/useTabVisible";
@@ -9,6 +9,7 @@ import type { AnomalyFindingResponse } from "@/lib/useAnomalies";
 import { signalDescription } from "@/lib/anomalyLabels";
 import {
   THREAT_COLORS,
+  THREAT_DESCRIPTIONS,
   THREAT_LEVEL_THRESHOLDS,
   THREAT_LABELS,
   momentumArrow,
@@ -19,6 +20,7 @@ import {
 } from "@/lib/threat";
 import { CATEGORY_LABELS, type Category } from "@/lib/categories";
 import { sourceLabel } from "@/lib/sourceLabels";
+import { countryName, timeAgo } from "@/lib/format";
 
 type ConfidenceTier = "single-source" | "corroborated" | "cross-confirmed";
 
@@ -136,28 +138,6 @@ function AnomalyBadge({ findings }: { findings: AnomalyFindingResponse[] }) {
   );
 }
 
-const regionNames =
-  typeof Intl !== "undefined"
-    ? new Intl.DisplayNames(["en"], { type: "region" })
-    : null;
-
-function countryName(code: string): string {
-  try {
-    return regionNames?.of(code) ?? code;
-  } catch {
-    return code;
-  }
-}
-
-function timeAgo(iso: string): string {
-  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
-
 // Event text for the country list: the post itself, then its source —
 // with the machine-translation disclosure kept on the source line when the
 // stored text carried one (see splitAttribution).
@@ -166,7 +146,7 @@ function RiskEventText({ summary, source }: { summary: string; source: string })
   return (
     <>
       <p className="mt-0.5 line-clamp-2 text-[11px] text-neutral-300">{stripOutletSuffix(body)}</p>
-      <span className="mt-0.5 block font-mono text-[9px] text-neutral-600">
+      <span className="mt-0.5 block font-mono text-[9px] text-neutral-500">
         Source: {sourceLabel(source)}
         {translatedFrom && ` · machine-translated from ${translatedFrom}`}
       </span>
@@ -179,7 +159,7 @@ function ThreatBadge({ level, label }: { level: ThreatLevel; label: string }) {
     <span
       className="rounded-sm px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-wider text-black"
       style={{ backgroundColor: THREAT_COLORS[level] }}
-      title={`Pulse Level ${level}`}
+      title={`Pulse Level ${level}: ${THREAT_DESCRIPTIONS[level]}`}
     >
       {label}
     </span>
@@ -214,6 +194,14 @@ export default function CountryRiskPanel({
   const [snapshot, setSnapshot] = useState<CountrySnapshot | null>(null);
   const { watchlist, toggle } = useWatchlist();
   const visible = useTabVisible();
+  const [query, setQuery] = useState("");
+  // The open row is brought into view: a country picked on the globe can
+  // sit far down a list of ~200, and the panel otherwise opened at the top
+  // with the expanded row nowhere in sight.
+  const expandedRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (selectedCountry) expandedRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [selectedCountry]);
 
   useEffect(() => {
     // No setDetail(null) reset here: every render site below already
@@ -269,7 +257,10 @@ export default function CountryRiskPanel({
     if (!selectedCountry) return;
     let cancelled = false;
     fetch(`/api/country-snapshot?country=${selectedCountry}`)
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
       .then((data) => {
         if (!cancelled) setSnapshot(data);
       })
@@ -281,33 +272,56 @@ export default function CountryRiskPanel({
     };
   }, [selectedCountry]);
 
-  // Selecting a country with no current score (e.g. clicked on the globe
-  // with no recent events) still gets a row, so it stays visible/expandable.
-  const selectedHasScore =
-    selectedCountry && scores.some((s) => s.country === selectedCountry);
-  const rows: (CountryRiskScore | { country: string; placeholder: true })[] =
-    selectedCountry && !selectedHasScore
-      ? [{ country: selectedCountry, placeholder: true }, ...scores]
-      : scores;
-
-  const ranked = [...rows].sort((a, b) => {
-    const aWatched = watchlist.has(a.country);
-    const bWatched = watchlist.has(b.country);
-    if (aWatched !== bWatched) return aWatched ? -1 : 1;
-    const aLevel = "threatLevel" in a ? a.threatLevel : 0;
-    const bLevel = "threatLevel" in b ? b.threatLevel : 0;
-    if (aLevel !== bLevel) return bLevel - aLevel;
-    const aScore = "score" in a ? a.score : -1;
-    const bScore = "score" in b ? b.score : -1;
-    return bScore - aScore;
-  });
+  const ranked = useMemo(() => {
+    // Selecting a country with no current score (e.g. clicked on the globe
+    // with no recent events) still gets a row, so it stays visible/expandable.
+    const selectedHasScore =
+      selectedCountry && scores.some((s) => s.country === selectedCountry);
+    const rows: (CountryRiskScore | { country: string; placeholder: true })[] =
+      selectedCountry && !selectedHasScore
+        ? [{ country: selectedCountry, placeholder: true }, ...scores]
+        : scores;
+    const q = query.trim().toLowerCase();
+    return rows
+      .filter(
+        (r) =>
+          !q ||
+          r.country === selectedCountry ||
+          r.country.toLowerCase() === q ||
+          countryName(r.country).toLowerCase().includes(q),
+      )
+      .sort((a, b) => {
+        const aWatched = watchlist.has(a.country);
+        const bWatched = watchlist.has(b.country);
+        if (aWatched !== bWatched) return aWatched ? -1 : 1;
+        const aLevel = "threatLevel" in a ? a.threatLevel : 0;
+        const bLevel = "threatLevel" in b ? b.threatLevel : 0;
+        if (aLevel !== bLevel) return bLevel - aLevel;
+        const aScore = "score" in a ? a.score : -1;
+        const bScore = "score" in b ? b.score : -1;
+        return bScore - aScore;
+      });
+  }, [scores, query, selectedCountry, watchlist]);
 
   return (
     <div className="flex h-full flex-col">
+      <div className="shrink-0 border-b border-red-950 px-3 py-2">
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={`Filter ${scores.length} countries…`}
+          aria-label="Filter countries"
+          className="w-full rounded border border-neutral-800 bg-black/60 px-2.5 py-1.5 font-mono text-xs text-red-300 placeholder:text-neutral-500 focus:border-red-700 focus:outline-none"
+        />
+        <p className="mt-1.5 font-mono text-[9px] uppercase tracking-wider text-neutral-500">
+          ★ watchlist · ↑↓ momentum 0-100 · Pulse Level
+        </p>
+      </div>
       <div className="flex-1 overflow-y-auto">
         {ranked.length === 0 && (
-          <p className="p-4 font-mono text-xs text-neutral-600">
-            No scored countries yet… click any country on the globe.
+          <p className="p-4 font-mono text-xs text-neutral-500">
+            {query ? "No country matches that filter." : "No scored countries yet. Click any country on the globe."}
           </p>
         )}
         {ranked.map((r) => {
@@ -323,21 +337,29 @@ export default function CountryRiskPanel({
           const lastEventAt = "lastEventAt" in r ? r.lastEventAt : "";
           const findings = anomalies.get(r.country) ?? [];
           return (
-            <div key={r.country} className="border-b border-red-950">
+            <div
+              key={r.country}
+              ref={isExpanded ? expandedRef : undefined}
+              className="scroll-mt-1 border-b border-red-950"
+            >
               <div className="flex items-center gap-2 px-4 py-2.5">
                 <button
+                  type="button"
                   onClick={() => toggle(r.country)}
-                  aria-label={isWatched ? "Remove from watchlist" : "Add to watchlist"}
+                  aria-label={isWatched ? `Remove ${countryName(r.country)} from watchlist` : `Add ${countryName(r.country)} to watchlist`}
+                  aria-pressed={isWatched}
                   className={`-m-2.5 p-2.5 font-mono text-sm ${
-                    isWatched ? "text-red-500" : "text-neutral-700 hover:text-red-700"
+                    isWatched ? "text-red-500" : "text-neutral-500 hover:text-red-400"
                   }`}
                 >
                   {isWatched ? "★" : "☆"}
                 </button>
                 <button
+                  type="button"
                   onClick={() =>
                     onSelectCountry(isExpanded ? null : r.country)
                   }
+                  aria-expanded={isExpanded}
                   className="flex-1 text-left"
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -353,7 +375,7 @@ export default function CountryRiskPanel({
                     )}
                   </div>
                   <div className="mt-1 flex items-center justify-between gap-2">
-                    <span className="font-mono text-[10px] text-neutral-600">
+                    <span className="font-mono text-[10px] text-neutral-500">
                       {isPlaceholder || eventCount === 0
                         ? "no recent events"
                         : `${eventCount} events · ${timeAgo(lastEventAt)}`}
@@ -369,7 +391,7 @@ export default function CountryRiskPanel({
                     </p>
                   )}
                   {loadingDetail && (
-                    <p className="font-mono text-[10px] text-neutral-600">
+                    <p className="font-mono text-[10px] text-neutral-500">
                       loading pulse…
                     </p>
                   )}
@@ -386,14 +408,14 @@ export default function CountryRiskPanel({
                       {detail.brief && (
                         <div className="mb-2 border-b border-red-950/70 pb-2">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="font-mono text-[9px] uppercase tracking-wider text-neutral-600">
+                            <span className="font-mono text-[9px] uppercase tracking-wider text-neutral-500">
                               AI summary · {detail.brief.eventCount} events
                             </span>
                             <span className="font-mono text-[9px] text-neutral-700">
                               {timeAgo(detail.brief.generatedAt)}
                             </span>
                           </div>
-                          <p className="mt-1 font-mono text-[11px] leading-relaxed text-neutral-300">
+                          <p className="mt-1 text-xs leading-relaxed text-neutral-300">
                             {detail.brief.briefText}
                           </p>
                         </div>
@@ -415,8 +437,21 @@ export default function CountryRiskPanel({
                       )}
                       {snapshot?.country === r.country && snapshot.dossier && (
                         <div className="mb-2 border-b border-red-950/70 pb-2">
+                          {/* The dossier's own summary sentence repeats the GDP,
+                              population and advisory shown just below, so
+                              only the fields it adds are listed here. */}
                           <p className="font-mono text-[10px] leading-relaxed text-neutral-400">
-                            {snapshot.dossier.summary}
+                            {[
+                              snapshot.dossier.region,
+                              snapshot.dossier.incomeLevel && snapshot.dossier.incomeLevel !== "Aggregates"
+                                ? snapshot.dossier.incomeLevel
+                                : null,
+                              snapshot.dossier.capitalCity
+                                ? `Capital ${snapshot.dossier.capitalCity.replace(/\.$/, "")}`
+                                : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
                           </p>
                           {snapshot.dossier.travelAdvisory && (
                             <a
@@ -469,7 +504,7 @@ export default function CountryRiskPanel({
                           {explainPulseLevel(detail.pillars)}
                         </p>
                         <details className="mt-1 text-[10px] leading-snug text-neutral-500">
-                          <summary className="cursor-pointer font-mono uppercase tracking-wider text-neutral-600 hover:text-neutral-400">
+                          <summary className="cursor-pointer font-mono uppercase tracking-wider text-neutral-500 hover:text-neutral-400">
                             How this is scored
                           </summary>
                           <ul className="mt-1 list-disc space-y-0.5 pl-4">
@@ -513,7 +548,7 @@ export default function CountryRiskPanel({
                             )}
                             {p.covered && (
                               <div className="mt-0.5 flex items-center justify-between">
-                                <span className="font-mono text-[9px] text-neutral-600">
+                                <span className="font-mono text-[9px] text-neutral-500">
                                   {p.eventCount} evt
                                 </span>
                                 <MomentumTag
@@ -582,7 +617,7 @@ export default function CountryRiskPanel({
                         )}
 
                       {detail.events.length === 0 && (
-                        <p className="font-mono text-[10px] text-neutral-600">
+                        <p className="font-mono text-[10px] text-neutral-500">
                           No tracked events for this country in the last 30 days.
                         </p>
                       )}
@@ -598,7 +633,7 @@ export default function CountryRiskPanel({
                             <span className="font-mono text-[9px] uppercase tracking-wider text-red-700">
                               {CATEGORY_LABELS[e.category as Category] ?? e.category} · sev {e.severity}
                             </span>
-                            <span className="font-mono text-[9px] text-neutral-600">
+                            <span className="font-mono text-[9px] text-neutral-500">
                               {timeAgo(e.publishedAt)}
                             </span>
                           </div>

@@ -59,6 +59,11 @@ export function useEventStream() {
     let inFlight = false;
     let retryDelay = INITIAL_RETRY_MS;
     let hasLoaded = false;
+    // The feed is one CDN-cached document, regenerated only when the
+    // pipeline purges it, so most polls return exactly the last body.
+    // Reconciling it anyway replaced the events array each time, which
+    // re-plotted the globe every 12 seconds (2026-09-28).
+    let lastBody: string | null = null;
 
     function schedule(ms: number) {
       if (cancelled) return;
@@ -104,9 +109,13 @@ export function useEventStream() {
         // route now is that the same document serves everyone.
         const res = await fetch("/api/events/feed");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as FeedResponse;
+        const body = await res.text();
         if (cancelled) return;
-        applyReconcile(data.events);
+        if (body !== lastBody) {
+          const data = JSON.parse(body) as FeedResponse;
+          applyReconcile(data.events);
+          lastBody = body;
+        }
         hasLoaded = true;
         retryDelay = INITIAL_RETRY_MS;
         setStatus("live");

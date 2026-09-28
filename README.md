@@ -7,7 +7,7 @@ and renders it on a live 3D globe with a Threat Level + Momentum
 assessment per country and per risk pillar — not a single falsely-precise
 "risk score."
 
-Live at: https://geopulse-green.vercel.app
+Live at: https://geopulseanalytics.com
 
 ## How it's organized
 

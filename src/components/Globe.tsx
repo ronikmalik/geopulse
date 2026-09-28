@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { html } from "@/lib/html";
-import { stripOutletSuffix } from "@/lib/displayText";
+import { eventPlace, splitAttribution, stripOutletSuffix } from "@/lib/displayText";
+import { sourceLabel } from "@/lib/sourceLabels";
+import { COUNTRY_CENTROIDS } from "@/lib/countryCentroids";
 import * as topojson from "topojson-client";
 import countries110m from "world-atlas/countries-110m.json";
 import type { GeoEvent } from "@/lib/types";
@@ -20,6 +22,21 @@ function isExtraPoint(d: GlobePoint): d is ExtraMapPoint {
 }
 
 const RED = "#ff2d2d";
+
+const DEFAULT_ALTITUDE = 2.3;
+// How close the camera comes when it flies to a selection.
+const EVENT_ALTITUDE = 1.4;
+const COUNTRY_ALTITUDE = 1.8;
+
+// Camera distance that keeps the whole globe on screen. The default was
+// tuned on a landscape desktop, where height is the limiting dimension; on
+// a portrait phone the width is, and at 2.3 the globe overflowed both
+// edges (2026-09-28). 2.27 is the measured diameter-to-height ratio at the
+// default altitude; 0.92 leaves a small margin either side.
+function fittingAltitude(width: number, height: number): number {
+  if (width <= 0 || height <= 0) return DEFAULT_ALTITUDE;
+  return Math.max(DEFAULT_ALTITUDE, (2.27 * height) / (0.92 * width) - 1);
+}
 
 const countryFeatures = topojson.feature(
   countries110m as unknown as Topology,
@@ -211,7 +228,7 @@ export default function GlobeView({
           const p = d as GlobePoint;
           const body = isExtraPoint(p)
             ? p.label
-            : html`<b>${p.location}</b><br/>${stripOutletSuffix(p.summary)}`;
+            : html`<b>${eventPlace(p)}</b><br/>${stripOutletSuffix(splitAttribution(p.summary, p.source).body)}<br/><span style="color:#a3a3a3">${sourceLabel(p.source)}</span>`;
           return `<div style="font-family:monospace;color:#ff5555;background:#0a0000;border:1px solid #ff2d2d;padding:6px 8px;border-radius:2px;max-width:260px">
               ${body}
             </div>`;
@@ -281,11 +298,11 @@ export default function GlobeView({
           const threat = code ? threatByCountryRef.current[code] : undefined;
           const name =
             (d as { properties?: { name?: string } }).properties?.name ?? "";
-          const threatLine = threat
-            ? `<br/>pulse: ${threat.threatLabel} · momentum ${threat.momentum}`
+          const threatLine = threat && score
+            ? html`<br/>pulse: ${threat.threatLabel} · momentum ${threat.momentum}`
             : "";
           return `<div style="font-family:monospace;color:#ff5555;background:#0a0000;border:1px solid #ff2d2d;padding:6px 8px;border-radius:2px">
-              <b>${name}</b>${score ? threatLine : ""}
+              ${html`<b>${name}</b>`}${threatLine}
             </div>`;
         })
         .onPolygonClick((d) => {
@@ -293,7 +310,11 @@ export default function GlobeView({
           if (code) onCountryClickRef.current?.(code);
         });
 
-      globe.pointOfView({ lat: 25, lng: 30, altitude: 2.3 });
+      globe.pointOfView({
+        lat: 25,
+        lng: 30,
+        altitude: fittingAltitude(container.clientWidth, container.clientHeight),
+      });
 
       const globeMaterial = globe.globeMaterial() as THREE.MeshPhongMaterial;
       globeMaterial.color = new (globeMaterial.color.constructor as new (
@@ -316,16 +337,19 @@ export default function GlobeView({
       controls.autoRotateSpeed = 0.35;
       controls.enableDamping = true;
 
+      // Observe the container rather than the window: its size also
+      // changes with layout (the desktop panel), not only window resizes.
       const handleResize = () => {
         globe.width(container.clientWidth).height(container.clientHeight);
       };
-      window.addEventListener("resize", handleResize);
+      const resizeObserver = new ResizeObserver(handleResize);
+      resizeObserver.observe(container);
       handleResize();
 
       globeRef.current = globe;
       (
         globeRef.current as unknown as { __cleanup?: () => void }
-      ).__cleanup = () => window.removeEventListener("resize", handleResize);
+      ).__cleanup = () => resizeObserver.disconnect();
       if (!disposed) setReady(true);
     });
 
@@ -359,13 +383,42 @@ export default function GlobeView({
     );
   }, [events, extraPoints, ready, pulsingIds]);
 
+  // Fly once per selection. This effect used to depend on `events` too,
+  // and the feed replaces that array on every 12-second poll, so the camera
+  // snapped back to the selected event every few seconds while the user
+  // was looking somewhere else (2026-09-28). `events` is still read, so a
+  // selection made before its event arrives flies as soon as it does.
+  const flownToIdRef = useRef<number | null>(null);
   useEffect(() => {
     const globe = globeRef.current;
-    if (!globe || !ready || flyToId == null) return;
+    if (!globe || !ready || flyToId == null || flownToIdRef.current === flyToId) return;
     const target = events.find((e) => e.id === flyToId);
     if (!target) return;
-    globe.pointOfView({ lat: target.lat, lng: target.lon, altitude: 1.4 }, 1200);
+    flownToIdRef.current = flyToId;
+    globe.pointOfView({ lat: target.lat, lng: target.lon, altitude: EVENT_ALTITUDE }, 1200);
   }, [flyToId, events, ready]);
+
+  // A country picked anywhere (the Pulse list, a globe click) is brought
+  // into view; before, choosing Ukraine from the list left the globe
+  // spinning over the Pacific. Capital coordinates, like every other
+  // country-level point in the app.
+  useEffect(() => {
+    const globe = globeRef.current;
+    if (!globe || !ready || !selectedCountry) return;
+    const centroid = COUNTRY_CENTROIDS[selectedCountry];
+    if (!centroid) return;
+    globe.pointOfView({ lat: centroid.lat, lng: centroid.lon, altitude: COUNTRY_ALTITUDE }, 1200);
+  }, [selectedCountry, ready]);
+
+  // Idle rotation stops while something is selected, so the selection
+  // stays in view, and resumes once the selection is cleared.
+  const hasSelection = selectedCountry != null || flyToId != null;
+  useEffect(() => {
+    const globe = globeRef.current;
+    if (!globe || !ready) return;
+    (globe.controls() as { autoRotate: boolean }).autoRotate = !hasSelection;
+    if (flyToId == null) flownToIdRef.current = null;
+  }, [hasSelection, flyToId, ready]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }
