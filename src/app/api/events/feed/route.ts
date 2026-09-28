@@ -30,10 +30,14 @@ import { NOT_KILL_SWITCHED } from "@/lib/killSwitch";
 // sourceCount so a card can show "N more sources" without a round-trip.
 //
 // REVALIDATE_SECONDS is the safety net if the purge ever stops arriving
-// (runner down, secret rotated): the feed is then at most this stale,
-// which is one pipeline cycle. Under normal operation the purge lands
-// first and this timer never fires.
-export const revalidate = 900;
+// (runner down, secret rotated): the feed is then at most this stale.
+// Under normal operation the purge lands first and this timer never fires.
+// An hour since 2026-09-28 (was 15 minutes): with the 30-minute September
+// cadence, a 15-minute timer regenerated the feed between pipeline runs,
+// waking Neon for rows that could not have changed. The runner now also
+// requests the route right after purging, so it regenerates while the
+// database is still awake.
+export const revalidate = 3600;
 
 const PRIMARY_ONLY = isNull(events.primaryEventId);
 const APPROVED_ONLY = eq(events.reviewStatus, "approved");

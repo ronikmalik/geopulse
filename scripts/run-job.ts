@@ -77,7 +77,14 @@ const JOB_TIMEOUT_MS = (() => {
 // visible. Best-effort: without APP_ORIGIN/CRON_SECRET, or on any failure,
 // the routes fall back to their own time-based revalidate, which is one
 // pipeline cycle of staleness, never data loss.
-async function purgeReadCaches(): Promise<{ purged: boolean; detail: string }> {
+//
+// Then each purged path is requested once (2026-09-28), so the routes
+// regenerate now, while this job has the database awake, instead of on
+// the next viewer's poll — which could come minutes after Neon had gone
+// back to sleep and cost a whole extra wake-up (at least 5 minutes of
+// compute) to serve data that was ready here. A failed prewarm is harmless:
+// the next viewer regenerates the route as before.
+async function purgeReadCaches(): Promise<{ purged: boolean; detail: string; prewarmed?: number }> {
   const origin = process.env.APP_ORIGIN;
   const secret = process.env.CRON_SECRET;
   if (!origin || !secret) return { purged: false, detail: "APP_ORIGIN or CRON_SECRET not set" };
@@ -87,7 +94,20 @@ async function purgeReadCaches(): Promise<{ purged: boolean; detail: string }> {
       headers: { Authorization: `Bearer ${secret}` },
       signal: AbortSignal.timeout(15_000),
     });
-    return { purged: res.ok, detail: res.ok ? await res.text() : `HTTP ${res.status}` };
+    if (!res.ok) return { purged: false, detail: `HTTP ${res.status}` };
+    const detail = await res.text();
+    let paths: string[] = [];
+    try {
+      const parsed = JSON.parse(detail) as { revalidated?: unknown };
+      if (Array.isArray(parsed.revalidated)) paths = parsed.revalidated.filter((x): x is string => typeof x === "string");
+    } catch {
+      // An older deployment answered with something else; skip the prewarm.
+    }
+    const warmed = await Promise.allSettled(
+      paths.map((path) => fetch(new URL(path, origin), { signal: AbortSignal.timeout(30_000) }).then((r) => r.ok)),
+    );
+    const prewarmed = warmed.filter((w) => w.status === "fulfilled" && w.value).length;
+    return { purged: true, detail, prewarmed };
   } catch (err) {
     return { purged: false, detail: String(err) };
   }
@@ -168,7 +188,10 @@ const JOBS: Record<string, () => Promise<unknown>> = {
       errors.push(`scan: ${err}`);
       return null;
     });
-    return { military, commercial, gpsJamming, chokepoints, scan, errors };
+    // /api/anomalies is only regenerated on purge now; publish today's scan.
+    const purge = await purgeReadCaches();
+    if (!purge.purged) errors.push(`purge: ${purge.detail}`);
+    return { military, commercial, gpsJamming, chokepoints, scan, purge, errors };
   },
   // The daily backlog sweep also draws the day's gate-review sample (see
   // src/lib/gateReview.ts) — same once-a-day cadence, and it's the one
@@ -179,7 +202,11 @@ const JOBS: Record<string, () => Promise<unknown>> = {
       console.error(`sampleGateDecisions failed: ${err}`);
       return { sampled: 0, approved: 0, rejected: 0 };
     });
-    return { ...audit, gateSample };
+    // Applied findings can withdraw or restore live events; show that now
+    // rather than at the feed's hourly fallback.
+    const purge = await purgeReadCaches();
+    if (!purge.purged) console.error(`read-cache purge skipped/failed: ${purge.detail}`);
+    return { ...audit, gateSample, purge };
   },
   "train-risk-model": () => trainAndShadowPredict(),
   "train-narrative-clusters": () => trainNarrativeClusters(),

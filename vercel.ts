@@ -17,6 +17,10 @@ export const config: VercelConfig = {
     // daily snapshot/audit jobs are deliberately NOT here: snapshot
     // writes are not idempotent (one row per country per call), so they
     // must run from exactly one scheduler.
+    //
+    // Since 2026-09-28 the route stands down when the pipeline has ingested
+    // in the last 90 minutes (the normal case), so the floor only spends
+    // Vercel CPU on days it is actually needed.
     { path: "/api/ingest", schedule: "0 6 * * *" },
   ],
 };

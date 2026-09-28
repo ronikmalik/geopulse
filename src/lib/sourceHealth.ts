@@ -92,3 +92,15 @@ export async function getSourceHealth(): Promise<SourceHealthRow[]> {
   const db = getDb();
   return db.select().from(sourceHealth).orderBy(sourceHealth.source);
 }
+
+// Most recent successful fetch by any ingest source (the anomaly scan's
+// marker excluded) — how the daily Vercel ingest floor tells whether the
+// scheduled pipeline is already running (2026-09-28).
+export async function lastIngestSuccessAt(): Promise<Date | null> {
+  const db = getDb();
+  const [row] = await db
+    .select({ at: sql<string | null>`max(${sourceHealth.lastSuccessAt})` })
+    .from(sourceHealth)
+    .where(sql`${sourceHealth.source} <> ${ANOMALY_SCAN_SOURCE}`);
+  return row?.at ? new Date(row.at) : null;
+}

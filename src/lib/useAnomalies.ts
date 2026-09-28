@@ -6,7 +6,8 @@ import type { AnomalyFindingResponse } from "@/app/api/anomalies/route";
 
 export type { AnomalyFindingResponse };
 
-const POLL_INTERVAL_MS = 5 * 60_000;
+// Findings come from a once-a-day scan (2026-09-28: was every 5 minutes).
+const POLL_INTERVAL_MS = 30 * 60_000;
 
 // Same shape/posture as useAircraftAnomalies.ts, generalized to every
 // signal type — a country can now have more than one finding at once

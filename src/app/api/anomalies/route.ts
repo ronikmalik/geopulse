@@ -1,8 +1,6 @@
-import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { anomalyFindings } from "@/db/schema";
-import { cachedJson } from "@/lib/apiParams";
 import { latestAnomalyScanSql } from "@/lib/sourceHealth";
 
 export interface AnomalyFindingResponse {
@@ -37,39 +35,44 @@ export interface AnomalyFindingResponse {
 // needed on the client.
 const STALENESS_CUTOFF_MS = 7 * 24 * 60 * 60_000;
 
+// Served like /api/events/feed since 2026-09-28: an ISR route handler,
+// regenerated when the runner purges it (after the daily scan, and after
+// each ingest+review) rather than on a 5-minute CDN lifetime. Findings
+// change once a day, yet any open tab re-queried them every 5-10 minutes,
+// which alone could keep Neon from ever scaling to zero. Errors are thrown
+// rather than answered with an empty list: ISR keeps the last good copy
+// on a failed regeneration, where a cached empty 200 would have hidden
+// every badge until the next regeneration.
+export const revalidate = 21600;
+
 export async function GET() {
-  try {
-    const db = getDb();
-    const [latest] = await db
-      .select({ detectedAt: latestAnomalyScanSql })
-      .from(anomalyFindings);
+  const db = getDb();
+  const [latest] = await db
+    .select({ detectedAt: latestAnomalyScanSql })
+    .from(anomalyFindings);
 
-    if (!latest?.detectedAt) {
-      return NextResponse.json({ detectedAt: null, findings: [] });
-    }
-
-    if (Date.now() - new Date(latest.detectedAt).getTime() > STALENESS_CUTOFF_MS) {
-      return NextResponse.json({ detectedAt: null, findings: [] });
-    }
-
-    const rows = await db
-      .select({
-        signalType: anomalyFindings.signalType,
-        country: anomalyFindings.country,
-        category: anomalyFindings.category,
-        observedValue: anomalyFindings.observedValue,
-        baselineMean: anomalyFindings.baselineMean,
-        baselineStdDev: anomalyFindings.baselineStdDev,
-        sampleSize: anomalyFindings.sampleSize,
-        jump: anomalyFindings.jump,
-        zScore: anomalyFindings.zScore,
-      })
-      .from(anomalyFindings)
-      .where(eq(anomalyFindings.detectedAt, new Date(latest.detectedAt)));
-
-    return cachedJson({ detectedAt: latest.detectedAt, findings: rows }, 300);
-  } catch (err) {
-    console.error(`anomalies fetch failed: ${err}`);
-    return NextResponse.json({ detectedAt: null, findings: [] });
+  if (!latest?.detectedAt) {
+    return Response.json({ detectedAt: null, findings: [] });
   }
+
+  if (Date.now() - new Date(latest.detectedAt).getTime() > STALENESS_CUTOFF_MS) {
+    return Response.json({ detectedAt: null, findings: [] });
+  }
+
+  const rows = await db
+    .select({
+      signalType: anomalyFindings.signalType,
+      country: anomalyFindings.country,
+      category: anomalyFindings.category,
+      observedValue: anomalyFindings.observedValue,
+      baselineMean: anomalyFindings.baselineMean,
+      baselineStdDev: anomalyFindings.baselineStdDev,
+      sampleSize: anomalyFindings.sampleSize,
+      jump: anomalyFindings.jump,
+      zScore: anomalyFindings.zScore,
+    })
+    .from(anomalyFindings)
+    .where(eq(anomalyFindings.detectedAt, new Date(latest.detectedAt)));
+
+  return Response.json({ detectedAt: latest.detectedAt, findings: rows });
 }

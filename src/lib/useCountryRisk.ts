@@ -17,7 +17,9 @@ export interface CountryRiskScore {
   momentumDirection: MomentumDirection;
 }
 
-const POLL_INTERVAL_MS = 60_000;
+// The summary regenerates only when the pipeline purges it (every 15-30
+// min); a 60s poll was 15-30 identical requests per change (2026-09-28).
+const POLL_INTERVAL_MS = 5 * 60_000;
 
 export function useCountryRisk() {
   const [scores, setScores] = useState<CountryRiskScore[]>([]);
@@ -38,7 +40,7 @@ export function useCountryRisk() {
     let cancelled = false;
     const load = async () => {
       try {
-        const res = await fetch("/api/risk");
+        const res = await fetch("/api/risk/summary");
         if (!res.ok) return; // An error payload must not erase the globe's last known scores.
         const body = await res.text();
         if (cancelled || body === lastBodyRef.current) return;

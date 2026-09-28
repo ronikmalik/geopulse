@@ -24,8 +24,13 @@ export type ConnectionState = "connecting" | "live" | "disconnected";
 // approvals, corrections and kill-switch removals reach an open tab,
 // which the old cursor could never represent; it used to happen every
 // tenth poll, now it is simply every poll.
-const POLL_INTERVAL_MS = 12_000;
-const HIDDEN_POLL_INTERVAL_MS = 60_000;
+// 60s visible, 5 min hidden (2026-09-28; was 12s/60s). The feed changes
+// only when the pipeline purges it, every 15-30 minutes, so a 12-second
+// poll was ~150 identical requests per change, each one a Vercel edge
+// request against the Hobby plan's monthly allowance. New items now show
+// within a minute of the purge instead of 12 seconds.
+const POLL_INTERVAL_MS = 60_000;
+const HIDDEN_POLL_INTERVAL_MS = 5 * 60_000;
 const INITIAL_RETRY_MS = 3_000;
 const MAX_RETRY_MS = 60_000;
 

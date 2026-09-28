@@ -8,8 +8,10 @@ import { getLatestCountryBrief } from "@/lib/countryBriefs";
 import { badRequest, cachedJson, parseCountryParam } from "@/lib/apiParams";
 import { SCORING_VERSION } from "@/lib/scoringMethod";
 
-// The globe's colour layer (every country's current score, no param) and
-// the per-country risk panel (?country=XX). Scores only move when an
+// The per-country risk panel (?country=XX). The no-param form (every
+// country's score) is what browsers loaded before 2026-09-28 and stays for
+// tabs still running that code; the app now reads /api/risk/summary, which
+// the pipeline regenerates instead of a CDN timer. Scores only move when an
 // ingest cycle inserts/approves events (~every 15 min), so 60s at the CDN
 // is invisible to a viewer and turns N open tabs polling the globe into
 // ~1 invocation/minute — this was the single most-invoked non-stream

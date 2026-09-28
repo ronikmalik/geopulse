@@ -10,8 +10,11 @@ import { isCronAuthorized } from "@/lib/cronAuth";
 // state, and a leaked query string must not be enough to trigger it.
 //
 // The path list is fixed here rather than taken from the request body so
-// the endpoint can never be pointed at an arbitrary path.
-const PATHS = ["/api/events/feed"] as const;
+// the endpoint can never be pointed at an arbitrary path. The response
+// echoes it so the runner can request each path straight away, making the
+// regeneration happen while the database is still awake from the pipeline
+// rather than whenever the next viewer arrives (2026-09-28).
+const PATHS = ["/api/events/feed", "/api/risk/summary", "/api/anomalies"] as const;
 
 export async function POST(req: NextRequest) {
   if (!isCronAuthorized(req, { headerOnly: true })) {
