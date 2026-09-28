@@ -13,6 +13,7 @@ const FAMILY_LABEL: Record<string, string> = {
   "risk-score-delta": "Country risk-score forecast (change over horizon)",
   "text-classifier": "Shadow text classifier (k-NN on embeddings)",
   "narrative-clusters": "Narrative clusters (k-means on embeddings)",
+  "gate-student": "Gate student (local model of the review gate)",
 };
 
 const FAMILY_BLURB: Record<string, string> = {
@@ -22,6 +23,8 @@ const FAMILY_BLURB: Record<string, string> = {
     "A k-nearest-neighbour classifier over article embeddings, trained on every kept/dropped decision. It can only be promoted after beating the live Gemini gate on at least 50 human-graded decisions - the one feedback channel that is not Gemini judging Gemini.",
   "narrative-clusters":
     "Groups embedded articles into narratives for the novelty signal. Silhouette near 0 means the clusters are barely better than random; that number is reported as-is.",
+  "gate-student":
+    "A word and word-pair model trained on the review gate's own past publish/reject decisions, retrained daily as decisions accumulate, and scored on the newest fifth it never saw. It makes no decisions and needs no API calls. coverage@t is the share of decisions it is at least t confident about; agreement@t is how often it then matches the gate. It reproduces the gate; it is not ground truth.",
 };
 
 function num(v: unknown, digits = 2): string {

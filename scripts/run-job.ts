@@ -53,6 +53,7 @@ import { trainNarrativeClusters } from "../src/lib/narrativeTraining";
 import { trainAndEvaluateTextClassifier } from "../src/lib/textClassifierTraining";
 import { syncSourceCredibility } from "../src/lib/sourceCredibility";
 import { sampleGateDecisions, checkGradingProgress } from "../src/lib/gateReview";
+import { trainAndRecordGateStudent } from "../src/lib/gateStudent";
 import { checkPipelineHealth } from "../src/lib/pipelineHealth";
 import { exhaustedCallCount } from "../src/lib/geminiGenerate";
 
@@ -202,15 +203,30 @@ const JOBS: Record<string, () => Promise<unknown>> = {
       console.error(`sampleGateDecisions failed: ${err}`);
       return { sampled: 0, approved: 0, rejected: 0 };
     });
+    // Retrain the gate student on every gate decision so far, including
+    // today's, and record its held-out scores (src/lib/gateStudent.ts).
+    // Well under a second at current volume; shadow only.
+    const gateStudent = await trainAndRecordGateStudent().catch((err) => {
+      console.error(`gate student training failed: ${err}`);
+      return null;
+    });
     // Applied findings can withdraw or restore live events; show that now
     // rather than at the feed's hourly fallback.
     const purge = await purgeReadCaches();
     if (!purge.purged) console.error(`read-cache purge skipped/failed: ${purge.detail}`);
-    return { ...audit, gateSample, purge };
+    return {
+      ...audit,
+      gateSample,
+      gateStudent: gateStudent && { trained: gateStudent.trained, metrics: gateStudent.metrics },
+      purge,
+    };
   },
   "train-risk-model": () => trainAndShadowPredict(),
   "train-narrative-clusters": () => trainNarrativeClusters(),
   "train-text-classifier": () => trainAndEvaluateTextClassifier(),
+  // Also runs inside the daily audit-classifier job; listed on its own for
+  // manual runs (npm run job -- train-gate-student).
+  "train-gate-student": () => trainAndRecordGateStudent(),
   "sync-source-credibility": () => syncSourceCredibility(),
   // Weekly: fetch both sanctions lists whole and record what changed
   // since last time — neither publisher offers a change feed, so the
