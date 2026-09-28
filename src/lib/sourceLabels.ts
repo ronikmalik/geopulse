@@ -1,4 +1,4 @@
-import { TELEGRAM_CHANNELS } from "./sources/telegram";
+import { TELEGRAM_CHANNELS } from "./sources/telegramChannels";
 
 // Display names for the events.source values stored by ingest.ts — every
 // event card in the UI shows one of these next to its summary, so a

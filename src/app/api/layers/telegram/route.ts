@@ -1,65 +1,63 @@
-import { fetchTelegramChannel, TELEGRAM_CHANNELS } from "@/lib/sources/telegram";
-import { withCache } from "@/lib/layerCache";
+import { NextResponse } from "next/server";
+import { and, desc, eq, gte, like } from "drizzle-orm";
+import { getDb } from "@/db";
+import { events } from "@/db/schema";
+import { NOT_KILL_SWITCHED } from "@/lib/killSwitch";
+import { sourceLabel } from "@/lib/sourceLabels";
+import { splitAttribution } from "@/lib/displayText";
 import { cachedJson } from "@/lib/apiParams";
 import type { TelegramLayerPost } from "@/lib/dataLayerTypes";
 
-// Unlike the ingest.ts rotation (which spreads the 9 channels across
-// several cron cycles to keep request volume down — see
-// docs/TELEGRAM_SOURCES.md), this route is user-triggered by opening the
-// Layers panel, not an unattended cron, so it fetches every channel in
-// one go. Still sequential with spacing rather than a burst of 9
-// concurrent requests, and cached for the same 5 minutes as the poll
-// interval so re-opening the panel doesn't re-fetch on every mount.
-export const maxDuration = 30;
-
-const CACHE_TTL_MS = 5 * 60_000;
-const QUERY_SPACING_MS = 400;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-// telegram.ts's DirectItem.summary is "<label>[ [translated from X]]:
-// <excerpt>" — deliberate for the events table (every stored event stays
-// self-describing even out of context, see docs/TELEGRAM_SOURCES.md
-// "Framing discipline"). This layer's UI already shows channelLabel as
-// its own field, so stripping the known, controlled prefix back off here
-// avoids showing it twice. Safe because this route owns both sides of
-// the format (same package, same author).
-function stripLabelPrefix(summary: string, label: string): string {
-  const prefix = new RegExp(`^${escapeRegExp(label)}( \\[translated from [^\\]]+\\])?: `);
-  return summary.replace(prefix, "");
-}
+// Reads the Telegram posts ingestion already stored and review approved
+// (2026-09-28). This route used to call fetchTelegramChannel for every
+// channel on a cache miss, which is ingestion itself: it spent the
+// translation budget on page views and wrote every post to
+// classification_archive, after which the scheduled ingest skipped those
+// URLs as already seen. A viewer opening this layer could therefore stop
+// posts from ever reaching the feed. Reading stored rows costs one indexed
+// query, shows only what passed the review gate, and never touches
+// Telegram, the translation API or the archive.
+const WINDOW_HOURS = 48;
+const LIMIT = 40;
 
 export async function GET() {
-  const posts = await withCache("layer:telegram", CACHE_TTL_MS, async () => {
-    const all: TelegramLayerPost[] = [];
-    for (let i = 0; i < TELEGRAM_CHANNELS.length; i++) {
-      if (i > 0) await sleep(QUERY_SPACING_MS);
-      const config = TELEGRAM_CHANNELS[i];
-      try {
-        const items = await fetchTelegramChannel(config);
-        for (const item of items) {
-          all.push({
-            channelLabel: config.label,
-            country: config.country,
-            url: item.url,
-            text: stripLabelPrefix(item.summary, config.label),
-            translated: item.summary.includes("[translated from"),
-            publishedAt: item.publishedAt.toISOString(),
-          });
-        }
-      } catch (err) {
-        console.error(`Telegram layer fetch failed for ${config.handle}: ${err}`);
-      }
-    }
-    all.sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1));
-    return all;
-  });
+  try {
+    const db = getDb();
+    const since = new Date(Date.now() - WINDOW_HOURS * 60 * 60_000);
+    const rows = await db
+      .select({
+        source: events.source,
+        country: events.country,
+        url: events.url,
+        summary: events.summary,
+        publishedAt: events.publishedAt,
+      })
+      .from(events)
+      .where(
+        and(
+          like(events.source, "telegram:%"),
+          eq(events.reviewStatus, "approved"),
+          NOT_KILL_SWITCHED,
+          gte(events.publishedAt, since),
+        ),
+      )
+      .orderBy(desc(events.publishedAt))
+      .limit(LIMIT);
 
-  return cachedJson({ posts }, 300);
+    const posts: TelegramLayerPost[] = rows.map((r) => {
+      const { body, translatedFrom } = splitAttribution(r.summary, r.source);
+      return {
+        channelLabel: sourceLabel(r.source),
+        country: r.country ?? "",
+        url: r.url,
+        text: body,
+        translated: translatedFrom !== null,
+        publishedAt: r.publishedAt.toISOString(),
+      };
+    });
+    return cachedJson({ posts }, 300);
+  } catch (err) {
+    console.error(`layer:telegram failed: ${err}`);
+    return NextResponse.json({ posts: [], error: "Telegram posts unavailable" });
+  }
 }
