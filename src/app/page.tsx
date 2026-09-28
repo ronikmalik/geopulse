@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import GlobeView from "@/components/Globe";
 import CategoryFilter from "@/components/CategoryFilter";
 import AlertToast from "@/components/AlertToast";
@@ -73,6 +73,21 @@ const MOBILE_TABS: { id: DashboardTab; label: string }[] = [
   { id: "trends", label: "Trends" },
 ];
 
+// Matches Tailwind's lg breakpoint, where the dashboard panel is always
+// shown. False during server render and the first client render.
+const DESKTOP_QUERY = "(min-width: 1024px)";
+function useIsDesktop(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const mq = window.matchMedia(DESKTOP_QUERY);
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia(DESKTOP_QUERY).matches,
+    () => false,
+  );
+}
+
 export default function Home() {
   const { events, status, incoming, dismissIncoming } = useEventStream();
   const countryScores = useCountryRisk();
@@ -92,6 +107,7 @@ export default function Home() {
   const [categoryFeedLoading, setCategoryFeedLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<DashboardTab>("feed");
   const [mobileOpen, setMobileOpen] = useState(false);
+  const isDesktop = useIsDesktop();
   const [activeDataLayers, setActiveDataLayers] = useState<Set<DataLayerId>>(
     new Set(),
   );
@@ -337,26 +353,29 @@ export default function Home() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  // Forex is the app's headline feature, not an opt-in layer — it polls
-  // continuously rather than gating behind a checkbox.
+  // Market quotes poll only while the Live Wire tab is on screen
+  // (2026-09-28). They used to poll every minute from every open tab
+  // whether or not anyone looked at them: Vercel's own per-route numbers
+  // put /api/layers/forex and /commodities at about two thirds of the
+  // project's function CPU, on a plan whose 4 CPU-hours were already
+  // exceeded. Opening the tab fetches at once and keeps the same 60s
+  // freshness while it stays open, so nothing a reader sees gets older.
+  const liveWireOnScreen = activeTab === "forex" && (isDesktop || mobileOpen);
   const forexLayer = useLiveLayer<ForexResponse>(
     "/api/layers/forex",
     FOREX_POLL_MS,
-    true,
+    liveWireOnScreen,
   );
-  // CFTC Commitments of Traders — weekly speculative positioning, same
-  // always-on treatment as the rates themselves.
+  // CFTC Commitments of Traders — weekly speculative positioning.
   const cftcLayer = useLiveLayer<CftcResponse>(
     "/api/layers/cftc",
     CFTC_POLL_MS,
-    true,
+    liveWireOnScreen,
   );
-  // Same always-on treatment — oil/gas/gold are as much a headline signal
-  // for this audience as FX rates, not an opt-in Context Layer.
   const commoditiesLayer = useLiveLayer<CommodityResponse>(
     "/api/layers/commodities",
     COMMODITIES_POLL_MS,
-    true,
+    liveWireOnScreen,
   );
 
   const extraPoints = useMemo(() => {
