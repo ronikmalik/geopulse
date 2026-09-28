@@ -1,3 +1,6 @@
+import { TELEGRAM_CHANNELS } from "./sources/telegramChannels";
+import { countryName } from "./format";
+
 // Display-time cleanup of headline text (2026-09-19). RSS titles and the
 // real titles fetched for GDELT items (articleTitleFetch.ts) routinely
 // carry the outlet's own branding tail — "… | Middle East Eye", "… - KOCO",
@@ -74,4 +77,25 @@ export function splitAttribution(text: string, source: string): AttributedText {
   const m = TELEGRAM_ATTRIBUTION.exec(text.trim());
   if (!m) return { body: text, translatedFrom: null };
   return { body: m[3].trim(), translatedFrom: m[2] ?? null };
+}
+
+// Where a feed card, toast or globe tooltip says an event happened.
+// Telegram rows stored before 2026-09-28 carry the channel's label as
+// their location (telegram.ts now stores the country, as RSS does), and
+// the geocoder leaves the label in place when it can't place a post; the
+// card then named its source twice and gave no place. Show the channel's
+// country instead - the point is plotted at that country's capital anyway.
+const TELEGRAM_LABEL_LOCATIONS = new Set(
+  TELEGRAM_CHANNELS.map((c) => c.label.replace(/—/g, "-")),
+);
+
+export function eventPlace(event: { source: string; location: string; country: string | null }): string {
+  if (
+    event.country &&
+    event.source.startsWith("telegram:") &&
+    TELEGRAM_LABEL_LOCATIONS.has(event.location.replace(/—/g, "-"))
+  ) {
+    return countryName(event.country);
+  }
+  return event.location;
 }

@@ -62,7 +62,6 @@ interface UsgsFeature {
     time: number;
     url: string;
     title: string;
-    tsunami: number;
   };
   geometry: { type: string; coordinates: [number, number, number] } | null;
 }
@@ -89,14 +88,17 @@ function mapFeatures(features: UsgsFeature[]): DirectItem[] {
       const [lon, lat] = f.geometry.coordinates;
       const mag = f.properties.mag as number;
       const place = f.properties.place ?? "Unknown location";
-      const tsunamiNote = f.properties.tsunami
-        ? " — tsunami warning issued"
-        : "";
+      // No tsunami wording (2026-09-28). This used to append "tsunami
+      // warning issued" whenever properties.tsunami was 1, but USGS sets
+      // that flag for any large event in an oceanic region and says "the
+      // existence or value of this flag does not indicate if a tsunami
+      // actually did or will exist" (earthquake.usgs.gov/data/comcat).
+      // Warnings come from NOAA (tsunami.gov), which this app doesn't read.
       return {
         source: "usgs",
         url: f.properties.url,
         title: f.properties.title,
-        summary: `Magnitude ${mag.toFixed(1)} earthquake ${place}${tsunamiNote}.`,
+        summary: `Magnitude ${mag.toFixed(1)} earthquake ${place}.`,
         category: "earthquake",
         location: place,
         country: usgsPlaceCountry(place),

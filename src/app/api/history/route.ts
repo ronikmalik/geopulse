@@ -12,8 +12,8 @@ export async function GET(req: NextRequest) {
   if (!country) return badRequest("country must be a 2-letter ISO code");
   const days = parseBoundedInt(req.nextUrl.searchParams.get("days"), 365, 1, 730);
 
-  const history = await getCountryHistory(country, days);
+  const { history, earlierMethodDays } = await getCountryHistory(country, days);
   const summary = summarizeHistory(country, history);
 
-  return cachedJson({ history, summary }, 300);
+  return cachedJson({ history, summary, earlierMethodDays }, 300);
 }

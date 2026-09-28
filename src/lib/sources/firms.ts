@@ -295,7 +295,7 @@ export async function fetchFirmsThermalAnomalies(): Promise<DirectItem[]> {
         source: "firms",
         url: `https://firms.modaps.eosdis.nasa.gov/map/#d:${dayBucket};l:modis;@${anchorLon.toFixed(2)},${anchorLat.toFixed(2)},7z`,
         title: `Large thermal anomaly cluster detected (satellite) near ${lat.toFixed(2)}, ${lon.toFixed(2)}`,
-        summary: `NASA FIRMS/MODIS detected ${c.count} high-confidence thermal anomalies (combined ${Math.round(c.totalFrp)} MW radiative power) clustered in one area within the last 24h. Satellite thermal data alone cannot confirm cause — wildfire, industrial fire, and explosive/conflict-related fire all look the same to this sensor.`,
+        summary: `NASA FIRMS/MODIS detected ${c.count} high-confidence thermal anomalies (combined ${Math.round(c.totalFrp)} MW radiative power) clustered in one area within the last 24h. Satellite thermal data alone cannot confirm cause - wildfire, industrial fire, and explosive/conflict-related fire all look the same to this sensor.`,
         category: "natural-disaster",
         location: `${lat.toFixed(2)}, ${lon.toFixed(2)}`,
         country,

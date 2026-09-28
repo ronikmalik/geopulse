@@ -31,10 +31,10 @@ export const THREAT_LABELS: Record<ThreatLevel, string> = {
 // otherwise calm country. See THREAT_LEVEL_THRESHOLDS below for where that
 // bar is actually set.
 export const THREAT_DESCRIPTIONS: Record<ThreatLevel, string> = {
-  1: "Normal conditions — no significant active signal.",
+  1: "Normal conditions - no significant active signal.",
   2: "Localized or moderate disruption worth monitoring.",
   3: "Sustained, high-magnitude signal with real regional impact.",
-  4: "Extreme, sustained signal — major war, catastrophic disaster, or large-scale unrest.",
+  4: "Extreme, sustained signal - major war, catastrophic disaster, or large-scale unrest.",
 };
 
 // Muted-neutral to alarm red, tracking the app's existing red-alert palette.

@@ -42,12 +42,23 @@ export interface HistorySnapshot {
   momentum: number;
 }
 
+export interface CountryHistory {
+  history: HistorySnapshot[];
+  // Days in the window that were scored under an earlier method and are
+  // therefore left out of `history` (see getCountryHistory).
+  earlierMethodDays: number;
+}
+
 // One country's trend over time — the trailing baseline the whole
 // snapshot system exists to eventually enable.
-export async function getCountryHistory(
-  country: string,
-  days = 365,
-): Promise<HistorySnapshot[]> {
+//
+// Only snapshots scored by the current method (2026-09-28). The score's
+// scale changed with each SCORING_VERSION (Ukraine reads ~21 under v1 and
+// ~1,280 under v2 for similar weeks), so a chart, peak or rising/falling
+// call across versions measured the method change, not the country.
+// One snapshot per UTC day, the latest: a re-run snapshot job left some
+// days with two rows seconds apart.
+export async function getCountryHistory(country: string, days = 365): Promise<CountryHistory> {
   const db = getDb();
   const iso2 = country.toUpperCase();
   const rows = await db.query.countryStateHistory.findMany({
@@ -59,12 +70,24 @@ export async function getCountryHistory(
     orderBy: (h, { asc }) => asc(h.snapshotAt),
   });
 
-  return rows.map((r) => ({
-    snapshotAt: r.snapshotAt.toISOString(),
-    score: r.score,
-    threatLevel: r.threatLevel as ThreatLevel,
-    momentum: r.momentum,
-  }));
+  const byDay = new Map<string, HistorySnapshot>();
+  const earlierDays = new Set<string>();
+  for (const r of rows) {
+    const day = r.snapshotAt.toISOString().slice(0, 10);
+    if (r.scoringVersion !== SCORING_VERSION) {
+      earlierDays.add(day);
+      continue;
+    }
+    byDay.set(day, {
+      snapshotAt: r.snapshotAt.toISOString(),
+      score: r.score,
+      threatLevel: r.threatLevel as ThreatLevel,
+      momentum: r.momentum,
+    });
+  }
+  const history = [...byDay.values()];
+  for (const h of history) earlierDays.delete(h.snapshotAt.slice(0, 10));
+  return { history, earlierMethodDays: earlierDays.size };
 }
 
 export interface HistorySummary {
@@ -93,7 +116,7 @@ export function summarizeHistory(country: string, history: HistorySnapshot[]): H
       levelDayCounts: {},
       peak: null,
       trend: "insufficient-data",
-      text: `No history recorded yet for this country - snapshots started ${new Date().toISOString().slice(0, 10)} and accumulate once a day.`,
+      text: `No snapshots recorded yet for this country under scoring method v${SCORING_VERSION}. One is taken each day.`,
     };
   }
 
@@ -130,7 +153,7 @@ export function summarizeHistory(country: string, history: HistorySnapshot[]): H
       : `Trend over this window: ${trend}.`;
 
   const text =
-    `Tracking ${iso2} for ${history.length} day${history.length === 1 ? "" : "s"}. ` +
+    `${history.length} daily snapshot${history.length === 1 ? "" : "s"} under scoring method v${SCORING_VERSION}. ` +
     `Currently ${THREAT_LABELS[latest.threatLevel]} (score ${latest.score.toFixed(1)}, momentum ${latest.momentum}). ` +
     `Breakdown: ${levelBreakdown}. ` +
     `Peak: ${THREAT_LABELS[peak.threatLevel]} on ${peak.snapshotAt.slice(0, 10)}. ` +
