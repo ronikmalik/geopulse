@@ -7,10 +7,11 @@ import {
   type TsunamiBulletin,
 } from "../src/lib/sources/tsunami";
 import { summarizeOoni } from "../src/lib/sources/ooni";
-import { parseRadarOutages } from "../src/lib/sources/cloudflareRadar";
+import { parseRadarOutages, radarOutagesToItems } from "../src/lib/sources/cloudflareRadar";
 import { nearestMajorPort, MAJOR_PORTS } from "../src/lib/ports";
 import { COUNTRY_CENTROIDS } from "../src/lib/countryCentroids";
-import { internetCensorshipToPoints, internetOutagesToPoints } from "../src/lib/mapPoints";
+import { internetCensorshipToPoints } from "../src/lib/mapPoints";
+import { DATA_LAYERS, DATA_LAYER_GROUPS } from "../src/lib/dataLayers";
 
 // Trimmed from the live NTWC and PTWC feeds (tsunami.gov, 2026-09-28).
 const NTWC = `<?xml version="1.0" encoding="UTF-8"?>
@@ -111,9 +112,15 @@ test("Cloudflare Radar outages keep only country-attributed ones and read cause 
   assert.deepEqual(outages[0].countries, [{ code: "IQ", name: "Iraq" }]);
   assert.equal(outages[0].cause, "Government directed");
   assert.equal(outages[0].type, "Nationwide");
-  const [point] = internetOutagesToPoints(outages);
-  assert.match(point.label, /ongoing/);
-  assert.match(point.label, /Cloudflare Radar, CC BY-NC 4.0/);
+  // As a feed event: infrastructure-outage, at the capital, severity by scope.
+  const [item] = radarOutagesToItems(outages);
+  assert.equal(item.source, "cloudflare-radar");
+  assert.equal(item.category, "infrastructure-outage");
+  assert.equal(item.country, "IQ");
+  assert.equal(item.severity, 4);
+  assert.equal(item.url, "https://radar.cloudflare.com/outage-center#a1-IQ");
+  assert.equal(item.title, "Internet outage in Iraq: government directed");
+  assert.equal(item.summary, "Exam-related shutdown. Cloudflare Radar confirmed a nationwide internet outage in Iraq, cause: government directed, since 2026-09-26 04:00 UTC.");
 });
 
 test("a port is named only for precisely placed events within 50 km", () => {
@@ -127,4 +134,10 @@ test("a port is named only for precisely placed events within 50 km", () => {
   // An event still on its country's placeholder position gets no port.
   const lisbon = COUNTRY_CENTROIDS.PT;
   assert.equal(nearestMajorPort({ lat: lisbon.lat, lon: lisbon.lon, country: "PT" }), null);
+});
+
+test("every context layer is in exactly one Layers-panel group", () => {
+  const grouped = DATA_LAYER_GROUPS.flatMap((g) => g.layers);
+  assert.equal(new Set(grouped).size, grouped.length, "no layer listed twice");
+  assert.deepEqual([...grouped].sort(), [...DATA_LAYERS].sort());
 });

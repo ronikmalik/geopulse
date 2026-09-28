@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { STRUCTURAL_SOURCES } from "./structuralSources";
+import { ANOMALY_SCAN_SOURCE } from "./sourceHealth";
 import { getUsageBudget, MONTHLY_BYTE_CAP } from "./translationUsage";
 
 // Daily alarm for the parts of the pipeline that fail quietly (2026-09-23).
@@ -63,6 +64,9 @@ export const HEALTH_LIMITS = {
   // feeds (USGS, GDACS, EONET, IODA) are excluded: a quiet day is real.
   mustPublishDaily: ["gdelt", "rss", "telegram"],
   maxHoursSinceSourceSuccess: 6,
+  // The anomaly scan stamps source_health once a day (anomalyScan.ts), so
+  // it gets two days before it counts as stopped, not six hours.
+  maxHoursSinceAnomalyScan: 48,
   // Measured 2026-09-23: 342k used by the 23rd (~70% of the cap), heading
   // for ~410k. 95% means the month is about to run dry.
   translationShareOfCap: 0.95,
@@ -93,8 +97,9 @@ export function evaluatePipelineHealth(m: PipelineMetrics): string[] {
     }
   }
   for (const [source, hours] of Object.entries(m.hoursSinceSourceSuccess)) {
-    if (hours > L.maxHoursSinceSourceSuccess) {
-      failures.push(`${source} has not fetched successfully for ${hours.toFixed(1)} h (limit ${L.maxHoursSinceSourceSuccess} h).`);
+    const limit = source === ANOMALY_SCAN_SOURCE ? L.maxHoursSinceAnomalyScan : L.maxHoursSinceSourceSuccess;
+    if (hours > limit) {
+      failures.push(`${source} has not fetched successfully for ${hours.toFixed(1)} h (limit ${limit} h).`);
     }
   }
   if (m.translationMonthUsed > L.translationShareOfCap * MONTHLY_BYTE_CAP) {

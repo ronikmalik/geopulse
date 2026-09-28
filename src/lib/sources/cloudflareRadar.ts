@@ -8,6 +8,9 @@
 // Needs a free API token (CLOUDFLARE_API_TOKEN, Account > Radar: Read).
 // LICENSE: Radar API data is CC BY-NC 4.0 (radar.cloudflare.com/about):
 // non-commercial use with attribution. Same position as OONI (ooni.ts).
+import { COUNTRY_CENTROIDS } from "../countryCentroids";
+import type { DirectItem } from "./direct";
+
 const ENDPOINT = "https://api.cloudflare.com/client/v4/radar/annotations/outages";
 
 export interface RadarOutage {
@@ -85,4 +88,68 @@ export async function fetchRadarOutages(token = process.env.CLOUDFLARE_API_TOKEN
   });
   if (!res.ok) throw new Error(`Cloudflare Radar outages: HTTP ${res.status}`);
   return parseRadarOutages(await res.json());
+}
+
+// ---------------------------------------------------------------------
+// As feed events (2026-09-28). A confirmed outage is an event, so it joins
+// IODA in the Infrastructure Outages category instead of sitting in a
+// separate map layer: IODA detects outages automatically from probing and
+// routing data; Cloudflare's are confirmed by its team from its own
+// traffic, with a stated cause. Two independent instruments, so an outage
+// both report counts as corroborated rather than deduplicated away. One
+// event per outage and affected country, at the capital (country-level).
+
+const OUTAGE_CENTER = "https://radar.cloudflare.com/outage-center";
+
+export function radarOutageSeverity(type: string | null): number {
+  const t = (type ?? "").toLowerCase();
+  if (t.includes("nationwide")) return 4;
+  if (t.includes("regional")) return 3;
+  return 2;
+}
+
+function utc(iso: string): string {
+  return iso.slice(0, 16).replace("T", " ");
+}
+
+export function radarOutagesToItems(outages: RadarOutage[]): DirectItem[] {
+  const items: DirectItem[] = [];
+  for (const o of outages) {
+    for (const c of o.countries) {
+      const at = COUNTRY_CENTROIDS[c.code];
+      if (!at) continue;
+      const kind = o.type ? `${o.type.toLowerCase()} ` : "";
+      const cause = o.cause ? `, cause: ${o.cause.toLowerCase()}` : "";
+      const span = o.endDate ? `, ${utc(o.startDate)} to ${utc(o.endDate)} UTC` : `, since ${utc(o.startDate)} UTC`;
+      const lead = o.description ? `${o.description.trim().replace(/[.\s]*$/, "")}. ` : "";
+      items.push({
+        source: "cloudflare-radar",
+        url: `${OUTAGE_CENTER}#${encodeURIComponent(o.id)}-${c.code}`,
+        title: `Internet outage in ${c.name}${o.cause ? `: ${o.cause.toLowerCase()}` : ""}`,
+        summary: `${lead}Cloudflare Radar confirmed a ${kind}internet outage in ${c.name}${cause}${span}.`,
+        category: "infrastructure-outage",
+        location: at.name,
+        country: c.code,
+        lat: at.lat,
+        lon: at.lon,
+        severity: radarOutageSeverity(o.type),
+        publishedAt: new Date(o.startDate),
+      });
+    }
+  }
+  return items;
+}
+
+// Ingest runs on GitHub Actions, where the token is not set; there it
+// reads the site's own cached layer route (APP_ORIGIN), which holds the
+// token on Vercel. Either path yields the same outages.
+export async function fetchRadarOutageItems(): Promise<DirectItem[]> {
+  if (process.env.CLOUDFLARE_API_TOKEN) return radarOutagesToItems(await fetchRadarOutages());
+  const origin = process.env.APP_ORIGIN;
+  if (!origin) throw new RadarNotConfiguredError();
+  const res = await fetch(new URL("/api/layers/internet-outages", origin), { signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) throw new Error(`internet-outages route: HTTP ${res.status}`);
+  const body = (await res.json()) as { outages?: RadarOutage[]; error?: string };
+  if (body.error) throw new Error(`internet-outages route: ${body.error}`);
+  return radarOutagesToItems(body.outages ?? []);
 }

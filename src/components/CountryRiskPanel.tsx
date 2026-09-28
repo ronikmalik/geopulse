@@ -107,7 +107,20 @@ interface CountrySnapshot {
     changePct: number;
   } | null;
   dossier: CountryDossier | null;
+  // OONI website-blocking rates for the last 7 days (CC BY-NC-SA 4.0).
+  connectivity?: {
+    measurements: number;
+    confirmedRate: number;
+    anomalyRate: number;
+    confirmedRatePrev: number | null;
+    since: string;
+    until: string;
+  } | null;
+  // Large and medium seaports (NGA World Port Index).
+  ports?: { name: string; size: "L" | "M" }[];
 }
+
+const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 
 const compactNumber = new Intl.NumberFormat("en-US", {
   notation: "compact",
@@ -565,6 +578,29 @@ export default function CountryRiskPanel({
                           </div>
                         ))}
                       </div>
+
+                      {snapshot?.country === r.country && (snapshot.connectivity || (snapshot.ports?.length ?? 0) > 0) && (
+                        <div className="mb-2 space-y-1 border-b border-red-950/70 pb-2 font-mono text-[10px] leading-relaxed text-neutral-400">
+                          {snapshot.connectivity && (
+                            <p title={`OONI measurements ${snapshot.connectivity.since} to ${snapshot.connectivity.until}, CC BY-NC-SA 4.0 (ooni.org)`}>
+                              <span className="uppercase tracking-wider text-neutral-500">Website blocking (OONI, 7 days): </span>
+                              {pct(snapshot.connectivity.confirmedRate)} confirmed block pages,{" "}
+                              {pct(snapshot.connectivity.anomalyRate)} possible interference, of{" "}
+                              {snapshot.connectivity.measurements.toLocaleString()} tests
+                              {snapshot.connectivity.confirmedRatePrev !== null &&
+                                Math.abs(snapshot.connectivity.confirmedRate - snapshot.connectivity.confirmedRatePrev) >= 0.01 &&
+                                ` (${snapshot.connectivity.confirmedRate > snapshot.connectivity.confirmedRatePrev ? "up" : "down"} from ${pct(snapshot.connectivity.confirmedRatePrev)} the week before)`}
+                            </p>
+                          )}
+                          {(snapshot.ports?.length ?? 0) > 0 && (
+                            <p title="Large and medium seaports, NGA World Port Index">
+                              <span className="uppercase tracking-wider text-neutral-500">Major seaports: </span>
+                              {snapshot.ports!.slice(0, 6).map((port) => `${port.name}${port.size === "L" ? " (large)" : ""}`).join(", ")}
+                              {snapshot.ports!.length > 6 && ` and ${snapshot.ports!.length - 6} more`}
+                            </p>
+                          )}
+                        </div>
+                      )}
 
                       {snapshot?.country === r.country &&
                         (snapshot.currency || snapshot.index) && (

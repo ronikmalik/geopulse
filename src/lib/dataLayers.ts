@@ -29,7 +29,6 @@ export const DATA_LAYERS = [
   "major-ports",
   "trade-balance",
   "sanctions",
-  "internet-outages",
   "internet-censorship",
 ] as const;
 
@@ -53,9 +52,19 @@ export const MAPPED_DATA_LAYERS: ReadonlySet<DataLayerId> = new Set<DataLayerId>
   "port-congestion",
   "major-ports",
   "trade-balance",
-  "internet-outages",
   "internet-censorship",
 ]);
+
+// How the Layers panel groups the context layers (2026-09-28: nineteen
+// in one list had become hard to scan). Every layer appears in exactly one
+// group; scripts/new-sources.test.ts checks that.
+export const DATA_LAYER_GROUPS: { label: string; layers: DataLayerId[] }[] = [
+  { label: "Security & conflict", layers: ["flights", "gps-jamming", "telegram", "travel-advisories", "sanctions"] },
+  { label: "Connectivity & cyber", layers: ["internet-censorship", "submarine-cables", "cyber"] },
+  { label: "Transport & trade", layers: ["commercial-flights", "port-congestion", "major-ports", "trade-balance"] },
+  { label: "Economy & resources", layers: ["gdp", "population", "food-price-index", "energy-mix", "grid-loss"] },
+  { label: "Environment", layers: ["weather", "air-quality"] },
+];
 
 export const DATA_LAYER_LABELS: Record<DataLayerId, string> = {
   flights: "Military Aircraft Activity",
@@ -76,7 +85,6 @@ export const DATA_LAYER_LABELS: Record<DataLayerId, string> = {
   "port-congestion": "Maritime Chokepoint Traffic",
   "major-ports": "Major Seaports",
   "trade-balance": "Trade Partner Exposure",
-  "internet-outages": "Internet Outages (Cloudflare)",
   "internet-censorship": "Website Blocking (OONI)",
 };
 
@@ -108,8 +116,6 @@ export const DATA_LAYER_DESCRIPTIONS: Record<DataLayerId, string> = {
     "Open-Meteo - model-estimated PM2.5 at the same 12 monitored capitals as Weather. Environmental context only, not fed into the risk model.",
   "major-ports":
     "NGA World Port Index - the 417 large and medium seaports worldwide (US government data, public domain). Supply-chain context; an expanded feed card also names any major port within 50 km of the event.",
-  "internet-outages":
-    "Cloudflare Radar - internet outages Cloudflare has confirmed over the last 14 days, with their cause (government-directed, power outage, cable cut...) and scope. Data CC BY-NC 4.0, radar.cloudflare.com.",
   "internet-censorship":
     "OONI - per country, the share of website tests in the last 7 days that hit a confirmed block page, and the share flagged as possible interference. Counts blocking of any kind, including gambling and piracy lists. Data CC BY-NC-SA 4.0, ooni.org; these derived rates are shared under the same licence.",
   "port-congestion":
@@ -146,7 +152,6 @@ export const DATA_LAYER_POLL_MS: Record<DataLayerId, number> = {
   // Static snapshot built into the deployment; one fetch per session.
   "major-ports": 24 * 60 * 60_000,
   // Matched to each route's cache (see the route files).
-  "internet-outages": 15 * 60_000,
   "internet-censorship": 60 * 60_000,
   // Written weekly by the sync-sanctions job; the route only reads stored
   // rows, so polling faster than this refreshes nothing.

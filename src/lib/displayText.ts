@@ -99,3 +99,30 @@ export function eventPlace(event: { source: string; location: string; country: s
   }
   return event.location;
 }
+
+// NOAA's tsunami status is appended to a quake's summary by
+// tsunamiEnrichment.ts ("... Tsunami status (NOAA NTWC): information
+// bulletin - "There is NO tsunami danger from this earthquake.""). Cards
+// show it as its own line, coloured by what NOAA said.
+export interface TsunamiStatus {
+  center: string;
+  text: string; // everything after "Tsunami status (NOAA X): "
+  tone: "calm" | "alert" | "caution" | "info";
+}
+
+const TSUNAMI_STATUS = / Tsunami status \(NOAA ([A-Z]+)\): ([\s\S]+)$/;
+
+export function splitTsunamiStatus(summary: string): { body: string; tsunami: TsunamiStatus | null } {
+  const m = TSUNAMI_STATUS.exec(summary);
+  if (!m) return { body: summary, tsunami: null };
+  const text = m[2].trim();
+  const lower = text.toLowerCase();
+  const tone: TsunamiStatus["tone"] = /no tsunami (danger|threat)/.test(lower)
+    ? "calm"
+    : /^(warning|threat)/.test(lower)
+      ? "alert"
+      : /^(advisory|watch)/.test(lower)
+        ? "caution"
+        : "info";
+  return { body: summary.slice(0, m.index).trim(), tsunami: { center: m[1], text, tone } };
+}

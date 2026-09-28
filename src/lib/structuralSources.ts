@@ -11,7 +11,9 @@
 // hit, and spent 13% of the embedding budget (786 of 5,867 rows in the 14
 // days to 2026-09-20) doing it. Their "related" lookup is structured
 // instead — see relatedStructuralEvents in similarEvents.ts.
-export const STRUCTURAL_SOURCES = ["usgs", "eonet", "gdacs", "ioda", "firms"] as const;
+// cloudflare-radar added 2026-09-28: confirmed outage annotations, one
+// templated event per outage and country, like IODA's.
+export const STRUCTURAL_SOURCES = ["usgs", "eonet", "gdacs", "ioda", "firms", "cloudflare-radar"] as const;
 
 export type StructuralSource = (typeof STRUCTURAL_SOURCES)[number];
 

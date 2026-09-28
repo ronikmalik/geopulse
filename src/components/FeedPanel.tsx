@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { GeoEvent } from "@/lib/types";
 import { CATEGORY_LABELS, type Category } from "@/lib/categories";
 import { sourceLabel } from "@/lib/sourceLabels";
-import { eventPlace, splitAttribution, stripOutletSuffix } from "@/lib/displayText";
+import { eventPlace, splitAttribution, splitTsunamiStatus, stripOutletSuffix, type TsunamiStatus } from "@/lib/displayText";
 import { timeAgo } from "@/lib/format";
 
 interface FeedPanelProps {
@@ -17,6 +17,18 @@ interface FeedPanelProps {
   // would suggest data is on its way when the answer is simply "none".
   emptyMessage?: string;
 }
+
+const TSUNAMI_TONE: Record<TsunamiStatus["tone"], string> = {
+  calm: "border-emerald-900/70 text-emerald-400",
+  info: "border-neutral-700 text-neutral-300",
+  caution: "border-amber-800 text-amber-400",
+  alert: "border-red-700 text-red-300",
+};
+
+// Rows the local gate model published during a Gemini outage carry this
+// reviewModel prefix (gateStudent.ts GATE_STUDENT_MODEL_ID) until the
+// gate re-checks them.
+const LOCAL_MODEL_PREFIX = "gate-student:";
 
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
@@ -213,6 +225,8 @@ export default function FeedPanel({
           const isSelected = selectedId === event.id;
           const sourceCount = event.sourceCount ?? 0;
           const attributed = splitAttribution(event.summary, event.source);
+          const { body, tsunami } = splitTsunamiStatus(attributed.body);
+          const byLocalModel = event.reviewModel?.startsWith(LOCAL_MODEL_PREFIX) ?? false;
           return (
           <article
             key={event.id}
@@ -249,8 +263,13 @@ export default function FeedPanel({
               )}
             </div>
             <p className={`mt-1 text-sm text-neutral-300 ${isSelected ? "" : "line-clamp-2"}`}>
-              {stripOutletSuffix(attributed.body)}
+              {stripOutletSuffix(body)}
             </p>
+            {tsunami && (
+              <p className={`mt-1.5 inline-block rounded border px-1.5 py-0.5 font-mono text-[10px] ${TSUNAMI_TONE[tsunami.tone]}`}>
+                NOAA {tsunami.center}: {tsunami.text}
+              </p>
+            )}
             <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-neutral-400">
               {sourceLabel(event.source)}
               {attributed.translatedFrom && (
@@ -259,6 +278,14 @@ export default function FeedPanel({
                   title="Machine-translated. The original post is linked below."
                 >
                   Translated · {attributed.translatedFrom}
+                </span>
+              )}
+              {byLocalModel && (
+                <span
+                  className="rounded border border-sky-900 px-1 font-mono text-[9px] uppercase tracking-wider text-sky-400"
+                  title={event.reviewReasoning ?? "Published by the local gate model while Gemini was unavailable; Gemini re-checks it."}
+                >
+                  Local model review · re-check pending
                 </span>
               )}
             </p>

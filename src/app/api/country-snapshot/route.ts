@@ -6,6 +6,8 @@ import { fetchIndexQuote, FinnhubNotConfiguredError } from "@/lib/sources/finnhu
 import { fetchCountryDossier } from "@/lib/countryDossier";
 import { withCache } from "@/lib/layerCache";
 import { badRequest, cachedJson, parseCountryParam } from "@/lib/apiParams";
+import { fetchOoniInterference } from "@/lib/sources/ooni";
+import { MAJOR_PORTS } from "@/lib/ports";
 
 export async function GET(req: NextRequest) {
   // Validated to a strict 2-letter code (2026-09-19): this value is
@@ -46,5 +48,22 @@ export async function GET(req: NextRequest) {
     fetchCountryDossier(iso2).catch(() => null),
   );
 
-  return cachedJson({ ...snapshot, dossier }, 300);
+  // Connectivity and seaports for the country panel (2026-09-28): the
+  // same OONI summary the map layer uses (one upstream call per six hours
+  // per instance, shared cache key), and the static port snapshot.
+  const ooni = await withCache("layer:internet-censorship", 6 * 60 * 60_000, () => fetchOoniInterference()).catch(() => null);
+  const blocking = ooni?.countries.find((c) => c.country === iso2) ?? null;
+  const ports = MAJOR_PORTS.filter((p) => p.country === iso2)
+    .sort((a, b) => (a.size === b.size ? a.name.localeCompare(b.name) : a.size === "L" ? -1 : 1))
+    .map((p) => ({ name: p.name, size: p.size }));
+
+  return cachedJson(
+    {
+      ...snapshot,
+      dossier,
+      connectivity: blocking && ooni ? { ...blocking, since: ooni.since, until: ooni.until } : null,
+      ports,
+    },
+    300,
+  );
 }

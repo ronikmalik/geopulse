@@ -29,6 +29,7 @@ const DIRECT_SOURCE_NAMES: Record<string, string> = {
   eonet: "NASA EONET",
   gdacs: "GDACS",
   ioda: "IODA (Georgia Tech)",
+  "cloudflare-radar": "Cloudflare Radar (CC BY-NC 4.0)",
   firms: "NASA FIRMS (satellite)",
 };
 

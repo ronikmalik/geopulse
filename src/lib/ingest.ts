@@ -9,6 +9,7 @@ import { applyTsunamiBulletins, type TsunamiEnrichmentResult } from "./tsunamiEn
 import { fetchNasaEonet } from "./sources/eonet";
 import { fetchGdacsAlerts } from "./sources/gdacs";
 import { fetchIodaOutages } from "./sources/ioda";
+import { fetchRadarOutageItems } from "./sources/cloudflareRadar";
 import { fetchFirmsThermalAnomalies } from "./sources/firms";
 import { fetchTelegramChannel, TELEGRAM_CHANNELS } from "./sources/telegram";
 import { removeAlreadyResolvedPending } from "./pendingTranslation";
@@ -256,7 +257,11 @@ export async function runIngest(
   const TELEGRAM_QUERY_TIMEOUT_MS = 7_000;
   const telegramErrors: string[] = [];
 
-  const [gdelt, rss, usgs, eonet, gdacs, ioda, firms, telegram] = await Promise.all([
+  // Cloudflare Radar outages (2026-09-28) run only where they can be
+  // reached: with the token (Vercel) or via the site's own route
+  // (APP_ORIGIN, set on the GitHub runner). Skipped, not failed, elsewhere.
+  const radarReachable = Boolean(process.env.CLOUDFLARE_API_TOKEN || process.env.APP_ORIGIN);
+  const [gdelt, rss, usgs, eonet, gdacs, ioda, firms, telegram, radar] = await Promise.all([
     // Replaced 2026-09-10: this used to fan out into several sequential
     // DOC 2.0 search-API queries (one per category, or per-country for
     // priorityGdelt — see git history / categories.ts's PRIORITY_GDELT_*
@@ -367,9 +372,12 @@ export async function runIngest(
       }
       return combined;
     }),
+    priorityGdelt || !radarReachable
+      ? skippedFetch<DirectItem>("cloudflare-radar")
+      : trackFetch("cloudflare-radar", fetchRadarOutageItems),
   ]);
 
-  const errors = [rss, usgs, eonet, gdacs, ioda, firms, telegram]
+  const errors = [rss, usgs, eonet, gdacs, ioda, firms, telegram, radar]
     .filter((r) => r.error)
     .map((r) => `${r.source}: ${r.error}`);
   // gdelt.error is only set when every query failed (see above) — in that
@@ -383,7 +391,7 @@ export async function runIngest(
   // why recording them would misrepresent lastAttemptAt for a fetch that
   // never actually ran this cycle.
   await recordSourceHealth(
-    priorityGdelt ? [gdelt] : [gdelt, rss, usgs, eonet, gdacs, ioda, firms, telegram],
+    priorityGdelt ? [gdelt] : [gdelt, rss, usgs, eonet, gdacs, ioda, firms, telegram, ...(radarReachable ? [radar] : [])],
   );
 
   // RSS "world news" feeds carry a rolling window that isn't necessarily
@@ -420,6 +428,7 @@ export async function runIngest(
     ...ioda.items,
     ...firms.items,
     ...telegram.items,
+    ...radar.items,
   ]);
 
   if (candidates.length === 0 && direct.length === 0) {

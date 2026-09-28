@@ -25,7 +25,6 @@ import {
   airQualityToPoints,
   cisaKevToPoints,
   majorPortsToPoints,
-  internetOutagesToPoints,
   internetCensorshipToPoints,
 } from "@/lib/mapPoints";
 import { CATEGORIES, type Category } from "@/lib/categories";
@@ -52,7 +51,6 @@ import type {
   CommodityResponse,
   SanctionsResponse,
   MajorPortsResponse,
-  InternetOutagesResponse,
   InternetCensorshipResponse,
 } from "@/lib/dataLayerTypes";
 import type { GeoEvent } from "@/lib/types";
@@ -330,11 +328,6 @@ export default function Home() {
     DATA_LAYER_POLL_MS["major-ports"],
     activeDataLayers.has("major-ports"),
   );
-  const internetOutagesLayer = useLiveLayer<InternetOutagesResponse>(
-    "/api/layers/internet-outages",
-    DATA_LAYER_POLL_MS["internet-outages"],
-    activeDataLayers.has("internet-outages"),
-  );
   const internetCensorshipLayer = useLiveLayer<InternetCensorshipResponse>(
     "/api/layers/internet-censorship",
     DATA_LAYER_POLL_MS["internet-censorship"],
@@ -419,9 +412,6 @@ export default function Home() {
     if (activeDataLayers.has("major-ports") && majorPortsLayer.data) {
       points.push(...majorPortsToPoints(majorPortsLayer.data.ports));
     }
-    if (activeDataLayers.has("internet-outages") && internetOutagesLayer.data) {
-      points.push(...internetOutagesToPoints(internetOutagesLayer.data.outages));
-    }
     if (activeDataLayers.has("internet-censorship") && internetCensorshipLayer.data) {
       points.push(...internetCensorshipToPoints(internetCensorshipLayer.data.countries));
     }
@@ -441,7 +431,6 @@ export default function Home() {
     airQualityLayer.data,
     cyberLayer.data,
     majorPortsLayer.data,
-    internetOutagesLayer.data,
     internetCensorshipLayer.data,
   ]);
 
@@ -489,8 +478,6 @@ export default function Home() {
     tradeBalance: tradeBalanceLayer.data,
     sanctions: sanctionsLayer.data,
     majorPorts: majorPortsLayer.data,
-    internetOutages: internetOutagesLayer.data,
-    internetOutagesError: internetOutagesLayer.error,
     internetCensorship: internetCensorshipLayer.data,
     internetCensorshipError: internetCensorshipLayer.error,
     forex: forexLayer.data,

@@ -626,6 +626,9 @@ test("the pipeline alarm stays quiet on a healthy day and names each quiet failu
   assert.match(evaluatePipelineHealth({ ...healthy, embeddingsToday: 0 }).join(), /Gemini key/);
   assert.match(evaluatePipelineHealth({ ...healthy, events24hBySource: { rss: 74, telegram: 49 } }).join(), /No gdelt events/);
   assert.match(evaluatePipelineHealth({ ...healthy, hoursSinceSourceSuccess: { gdelt: Infinity } }).join(), /gdelt has not fetched/);
+  // The daily anomaly scan's marker is judged on a daily clock, not the ingest one.
+  assert.deepEqual(evaluatePipelineHealth({ ...healthy, hoursSinceSourceSuccess: { "anomaly-scan": 23.5 } }), []);
+  assert.match(evaluatePipelineHealth({ ...healthy, hoursSinceSourceSuccess: { "anomaly-scan": 50 } }).join(), /anomaly-scan has not fetched/);
   assert.match(evaluatePipelineHealth({ ...healthy, translationMonthUsed: 480_000 }).join(), /monthly cap/);
   // A large historical tail is context, not a fault; recent rows being
   // left behind is.

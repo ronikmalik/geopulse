@@ -12,7 +12,7 @@ import type { AirQualityReading } from "@/lib/sources/openMeteoAirQuality";
 import type { KevEntry } from "@/lib/sources/cisakev";
 import { COUNTRY_CENTROIDS } from "@/lib/countryCentroids";
 import { ALPHA2_TO_ALPHA3 } from "@/lib/iso3";
-import type { MajorPortsResponse, InternetOutage, CensorshipCountry } from "@/lib/dataLayerTypes";
+import type { MajorPortsResponse, CensorshipCountry } from "@/lib/dataLayerTypes";
 
 // A point rendered on the globe that isn't a geopolitical GeoEvent — the
 // `kind` discriminant is how Globe.tsx tells these apart from events sharing
@@ -33,7 +33,6 @@ export interface ExtraMapPoint {
     | "air-quality"
     | "cyber"
     | "major-port"
-    | "internet-outage"
     | "internet-censorship";
   id: string;
   lat: number;
@@ -392,34 +391,6 @@ export function majorPortsToPoints(ports: MajorPortsResponse["ports"]): ExtraMap
     radius: p.size === "L" ? 0.2 : 0.13,
     label: html`<b>${p.name}</b> (${p.country})<br/>${p.size === "L" ? "Large" : "Medium"} seaport - NGA World Port Index`,
   }));
-}
-
-const OUTAGE_ONGOING_COLOR = "#fb923c"; // orange
-const OUTAGE_ENDED_COLOR = "#fdba74"; // pale orange
-
-// One point per affected country, at its capital (these are country- or
-// region-level outages, not a precise location).
-export function internetOutagesToPoints(outages: InternetOutage[]): ExtraMapPoint[] {
-  const points: ExtraMapPoint[] = [];
-  for (const o of outages) {
-    for (const c of o.countries) {
-      const at = centroidFor(c.code);
-      if (!at) continue;
-      const when = o.endDate
-        ? `${o.startDate.slice(0, 10)} to ${o.endDate.slice(0, 10)}`
-        : `since ${o.startDate.slice(0, 16).replace("T", " ")} UTC, ongoing`;
-      points.push({
-        kind: "internet-outage",
-        id: `outage-${o.id}-${c.code}`,
-        lat: at.lat,
-        lon: at.lon,
-        color: o.endDate ? OUTAGE_ENDED_COLOR : OUTAGE_ONGOING_COLOR,
-        radius: o.endDate ? 0.22 : 0.34,
-        label: html`<b>${c.name}</b><br/>Internet outage (${o.type ?? "outage"}): ${o.cause ?? "cause not stated"}<br/>${when}<br/>Source: Cloudflare Radar, CC BY-NC 4.0`,
-      });
-    }
-  }
-  return points;
 }
 
 const CENSORSHIP_COLOR = "#a855f7"; // purple

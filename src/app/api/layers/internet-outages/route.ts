@@ -3,8 +3,11 @@ import { fetchRadarOutages, RadarNotConfiguredError } from "@/lib/sources/cloudf
 import { withCache } from "@/lib/layerCache";
 import { cachedJson } from "@/lib/apiParams";
 
-// Cloudflare adds or closes an outage annotation a few times a day at
-// most; 15 minutes in memory and at the CDN is plenty. No database.
+// Not a map layer any more (2026-09-28): Cloudflare outages are feed
+// events now (cloudflareRadar.ts, radarOutagesToItems). This route stays
+// as the way the GitHub-hosted ingest reads Radar through Vercel, which
+// holds the token. Cloudflare adds or closes an annotation a few times a
+// day at most; 15 minutes in memory and at the CDN is plenty.
 export async function GET() {
   try {
     const outages = await withCache("layer:internet-outages", 15 * 60_000, () => fetchRadarOutages());

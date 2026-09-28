@@ -7,7 +7,7 @@ import {
 } from "@/lib/categories";
 import { PILLARS, pillarForCategory } from "@/lib/pillars";
 import {
-  DATA_LAYERS,
+  DATA_LAYER_GROUPS,
   DATA_LAYER_LABELS,
   DATA_LAYER_DESCRIPTIONS,
   MAPPED_DATA_LAYERS,
@@ -32,10 +32,9 @@ import type {
   TradeBalanceResponse,
   SanctionsResponse,
   MajorPortsResponse,
-  InternetOutagesResponse,
   InternetCensorshipResponse,
 } from "@/lib/dataLayerTypes";
-import { countryName, timeAgo } from "@/lib/format";
+import { countryName } from "@/lib/format";
 
 interface LayersDashboardProps {
   active: Set<Category>;
@@ -61,8 +60,6 @@ interface LayersDashboardProps {
   tradeBalance: TradeBalanceResponse | null;
   sanctions: SanctionsResponse | null;
   majorPorts: MajorPortsResponse | null;
-  internetOutages: InternetOutagesResponse | null;
-  internetOutagesError: string | null;
   internetCensorship: InternetCensorshipResponse | null;
   internetCensorshipError: string | null;
 }
@@ -87,7 +84,7 @@ const LAYER_DESCRIPTIONS: Partial<Record<Category, string>> = {
     "NASA EONET + GDACS - cyclones, volcanoes, tsunamis, severe storms.",
   "climate-hazard": "NASA EONET + GDACS - floods, wildfires, drought.",
   "infrastructure-outage":
-    "IODA (Georgia Tech) - country-level internet connectivity disruptions.",
+    "IODA (Georgia Tech) detects internet outages automatically; Cloudflare Radar adds outages its team has confirmed, with the cause (government shutdown, cable cut, power). Cloudflare data CC BY-NC 4.0.",
 };
 
 function formatUsd(value: number): string {
@@ -128,8 +125,6 @@ export default function LayersDashboard({
   tradeBalance,
   sanctions,
   majorPorts,
-  internetOutages,
-  internetOutagesError,
   internetCensorship,
   internetCensorshipError,
 }: LayersDashboardProps) {
@@ -363,33 +358,6 @@ export default function LayersDashboard({
         </span>
       );
     }
-    if (id === "internet-outages" && (internetOutages || internetOutagesError)) {
-      if (internetOutagesError || !internetOutages) {
-        return <span className="mt-1 block text-[11px] text-amber-500">Unavailable: {internetOutagesError}</span>;
-      }
-      if (internetOutages.outages.length === 0) {
-        return <span className="mt-1 block text-[11px] text-neutral-500">No confirmed outages in the last 14 days.</span>;
-      }
-      return (
-        <div className="mt-1.5 space-y-1 text-[11px] text-neutral-500">
-          {internetOutages.outages.slice(0, 6).map((o) => (
-            <div key={o.id}>
-              <div className="flex justify-between gap-2">
-                <span className="truncate text-neutral-400">{o.countries.map((c) => c.name).join(", ")}</span>
-                <span className={`shrink-0 ${o.endDate ? "" : "text-orange-400"}`}>
-                  {o.endDate ? timeAgo(o.endDate) : "ongoing"}
-                </span>
-              </div>
-              <div className="truncate">
-                {o.cause ?? "Cause not stated"}
-                {o.type ? ` - ${o.type}` : ""}
-              </div>
-            </div>
-          ))}
-          <div className="text-neutral-600">{internetOutages.attribution}</div>
-        </div>
-      );
-    }
     if (id === "internet-censorship" && (internetCensorship || internetCensorshipError)) {
       if (internetCensorshipError || !internetCensorship) {
         return <span className="mt-1 block text-[11px] text-amber-500">Unavailable: {internetCensorshipError}</span>;
@@ -516,54 +484,67 @@ export default function LayersDashboard({
           Context around the events, not scored into Pulse Levels. Layers marked
           MAP also plot points on the globe; PANEL layers show their data here only.
         </p>
-        {DATA_LAYERS.map((id) => {
-          const isActive = activeDataLayers.has(id);
+        {DATA_LAYER_GROUPS.map((group) => {
+          const on = group.layers.filter((id) => activeDataLayers.has(id)).length;
           return (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={isActive}
-              onClick={() => onToggleDataLayer(id)}
-              className={`mb-2 flex w-full items-start gap-3 rounded border px-3 py-2.5 text-left transition ${
-                isActive
-                  ? "border-red-500 bg-red-950/40"
-                  : "border-neutral-800 hover:border-red-900"
-              }`}
-            >
-              <span
-                className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border font-mono text-[10px] leading-none ${
-                  isActive
-                    ? "border-red-400 bg-red-500 text-black"
-                    : "border-neutral-700 text-transparent"
-                }`}
-              >
-                ✓
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center justify-between gap-2">
-                  <span
-                    className={`block font-mono text-xs uppercase tracking-wider ${
-                      isActive ? "text-red-300" : "text-neutral-400"
-                    }`}
-                  >
-                    {DATA_LAYER_LABELS[id]}
-                  </span>
-                  <span
-                    className="shrink-0 rounded-sm border border-neutral-800 px-1 py-0.5 font-mono text-[8px] uppercase tracking-wider text-neutral-500"
-                    title={MAPPED_DATA_LAYERS.has(id) ? "Plots points on the globe when switched on" : "Shown in this panel only"}
-                  >
-                    {MAPPED_DATA_LAYERS.has(id) ? "Map" : "Panel"}
-                  </span>
-                </span>
-                <span className="mt-0.5 block text-[11px] text-neutral-500">
-                  {DATA_LAYER_DESCRIPTIONS[id]}
-                </span>
-                {isActive && renderPreview(id)}
-              </span>
-            </button>
+            <section key={group.label} className="mb-3">
+              <h3 className="mb-1.5 flex items-center justify-between font-mono text-[10px] uppercase tracking-wider text-neutral-400">
+                {group.label}
+                {on > 0 && <span className="text-red-400">{on} on</span>}
+              </h3>
+              {group.layers.map(renderLayer)}
+            </section>
           );
         })}
       </div>
     </div>
   );
+
+  function renderLayer(id: DataLayerId) {
+    const isActive = activeDataLayers.has(id);
+    return (
+      <button
+        key={id}
+        type="button"
+        aria-pressed={isActive}
+        onClick={() => onToggleDataLayer(id)}
+        className={`mb-2 flex w-full items-start gap-3 rounded border px-3 py-2.5 text-left transition ${
+          isActive
+            ? "border-red-500 bg-red-950/40"
+            : "border-neutral-800 hover:border-red-900"
+        }`}
+      >
+        <span
+          className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border font-mono text-[10px] leading-none ${
+            isActive
+              ? "border-red-400 bg-red-500 text-black"
+              : "border-neutral-700 text-transparent"
+          }`}
+        >
+          ✓
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center justify-between gap-2">
+            <span
+              className={`block font-mono text-xs uppercase tracking-wider ${
+                isActive ? "text-red-300" : "text-neutral-400"
+              }`}
+            >
+              {DATA_LAYER_LABELS[id]}
+            </span>
+            <span
+              className="shrink-0 rounded-sm border border-neutral-800 px-1 py-0.5 font-mono text-[8px] uppercase tracking-wider text-neutral-500"
+              title={MAPPED_DATA_LAYERS.has(id) ? "Plots points on the globe when switched on" : "Shown in this panel only"}
+            >
+              {MAPPED_DATA_LAYERS.has(id) ? "Map" : "Panel"}
+            </span>
+          </span>
+          <span className="mt-0.5 block text-[11px] text-neutral-500">
+            {DATA_LAYER_DESCRIPTIONS[id]}
+          </span>
+          {isActive && renderPreview(id)}
+        </span>
+      </button>
+    );
+  }
 }
