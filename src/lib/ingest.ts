@@ -6,6 +6,7 @@ import { discoverGdeltCandidates, drainPendingGdeltTitles } from "./sources/gdel
 import { fetchAllRssFeeds } from "./sources/rss";
 import { fetchUsgsEarthquakes } from "./sources/usgs";
 import { applyTsunamiBulletins, type TsunamiEnrichmentResult } from "./tsunamiEnrichment";
+import { refreshGdacsEvents } from "./gdacsEvents";
 import { fetchNasaEonet } from "./sources/eonet";
 import { fetchGdacsAlerts } from "./sources/gdacs";
 import { fetchIodaOutages } from "./sources/ioda";
@@ -91,6 +92,7 @@ export interface IngestResult {
     embeddedFeed: number | null;
     embeddedArchive: number | null;
     tsunami?: TsunamiEnrichmentResult | null;
+    gdacsRefreshed?: number | null;
   };
 }
 
@@ -790,6 +792,15 @@ export async function runIngest(
     }
   }
 
+  // A GDACS disaster already stored takes its latest episode's values
+  // (2026-09-29) — see src/lib/gdacsEvents.ts.
+  let gdacsRefreshed: number | null = null;
+  try {
+    gdacsRefreshed = await refreshGdacsEvents(direct.filter((d) => existingUrls.has(d.url)));
+  } catch (err) {
+    errors.push(`gdacs refresh: ${err}`);
+  }
+
   // Best-effort, non-blocking enrichment/review passes — see the doc
   // comment on backfillFeedArchiveEmbeddings for why these run decoupled
   // from the insert paths above rather than inline per-item. Each step
@@ -899,6 +910,7 @@ export async function runIngest(
       embeddedFeed,
       embeddedArchive,
       tsunami,
+      gdacsRefreshed,
     },
   };
 }

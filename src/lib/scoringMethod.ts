@@ -75,7 +75,10 @@ export function corroborationMultiplierSqlExpr(countSql: string): string {
 // this list: the number of distinct stories about a country is the thing
 // the score is supposed to measure. GDACS is not on it either — its
 // alerts are already impact-assessed (green/orange/red) by humans and
-// models upstream, one alert per disaster, not per detection.
+// models upstream, one alert per disaster, not per detection. (Stored as
+// one row per disaster since 2026-09-29; before that each GDACS update was
+// its own row, so a long-running cyclone or flood counted several times —
+// see sources/gdacs.ts.)
 export const SENSOR_SOURCES: ReadonlySet<string> = new Set(["firms", "usgs", "eonet"]);
 
 // Each sensor's contribution to one country-pillar approaches this value

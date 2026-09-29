@@ -22,6 +22,7 @@ import { GET as getAnomalies } from "../src/app/api/anomalies/route";
 import { GET as getHealth } from "../src/app/api/admin/health/route";
 import { GET as getModels } from "../src/app/api/admin/ai-models/route";
 import { applyTsunamiBulletins } from "../src/lib/tsunamiEnrichment";
+import { consolidateGdacsEpisodes, refreshGdacsEvents } from "../src/lib/gdacsEvents";
 import { publishConfidentPendingGdelt, loadGateExamples, GATE_STUDENT_MODEL_ID } from "../src/lib/gateStudent";
 import type { TsunamiBulletin } from "../src/lib/sources/tsunami";
 
@@ -423,4 +424,39 @@ test("the gate model stays off during an outage when its publish calls are not r
   assert.equal(result.published, 0);
   assert.match(result.skipped ?? "", /not enough evidence yet/);
   assert.equal((await pg.query<{ s: string }>("select review_status as s from events where id = 90010")).rows[0].s, "pending");
+});
+
+test("GDACS episodes fold into one row per disaster, and a later episode refreshes that row", async (t) => {
+  const { pg, event } = await fixture(t);
+  const report = (episode: number) => `https://www.gdacs.org/report.aspx?eventid=1001325&episodeid=${episode}&eventtype=TC`;
+  const perEvent = "https://www.gdacs.org/report.aspx?eventid=1001325&eventtype=TC";
+  const gdacs = { source: "gdacs", title: "Tropical Cyclone POLO-26", category: "natural-disaster", country: "MX", location: "Tropical Cyclone POLO-26", publishedAt: new Date("2026-09-21T03:00:00Z") };
+  await event(1, { ...gdacs, url: report(30), severity: 5, lat: 16, lon: -104 });
+  await event(2, { ...gdacs, url: report(31), severity: 3, lat: 17, lon: -105 });
+  await event(3, { ...gdacs, url: report(33), severity: 3, lat: 18, lon: -106, populationExposed: 1200 });
+  await event(4, { ...gdacs, url: "https://www.gdacs.org/report.aspx?eventid=1104121&episodeid=19&eventtype=FL", title: "Flood in India", country: "IN", category: "climate-hazard" });
+
+  // Dry run reports without writing.
+  assert.deepEqual(await consolidateGdacsEpisodes(false), { events: 2, rekeyed: 2, superseded: 2 });
+  assert.equal((await pg.query("select 1 from events where review_status = 'rejected'")).rows.length, 0);
+
+  assert.deepEqual(await consolidateGdacsEpisodes(true), { events: 2, rekeyed: 2, superseded: 2 });
+  const rows = (await pg.query<{ id: number; url: string; review_status: string; review_reasoning: string | null }>(
+    "select id, url, review_status, review_reasoning from events order by id")).rows;
+  assert.deepEqual(rows.map((r) => r.review_status), ["rejected", "rejected", "approved", "approved"]);
+  assert.equal(rows[2].url, perEvent);
+  assert.match(rows[0].review_reasoning ?? "", /now tracked as event 3/);
+  // A lone episode row moves to the per-event link too, or the next ingest would store it again.
+  assert.equal(rows[3].url, "https://www.gdacs.org/report.aspx?eventid=1104121&eventtype=FL");
+  assert.deepEqual(await consolidateGdacsEpisodes(true), { events: 0, rekeyed: 0, superseded: 0 });
+
+  // Episode 36 escalates and moves: one row changes, exposure is recomputed later.
+  const latest = { ...gdacs, url: perEvent, summary: "Tropical Cyclone (Red alert): POLO-26", severity: 5, lat: 19, lon: -107, category: "natural-disaster" as const };
+  assert.equal(await refreshGdacsEvents([latest]), 1);
+  assert.equal(await refreshGdacsEvents([latest]), 0);
+  const kept = (await pg.query<{ severity: number; lat: number; population_exposed: number | null; summary: string }>(
+    "select severity, lat, population_exposed, summary from events where id = 3")).rows[0];
+  assert.deepEqual(kept, { severity: 5, lat: 19, population_exposed: null, summary: latest.summary });
+  // Other sources are never touched, even on a matching URL.
+  assert.equal(await refreshGdacsEvents([{ ...latest, source: "eonet" }]), 0);
 });

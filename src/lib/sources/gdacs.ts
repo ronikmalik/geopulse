@@ -18,6 +18,31 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
 
 const EXCLUDED_EVENT_TYPES = new Set(["EQ"]);
 
+// One row per disaster, not per update (2026-09-29). GDACS re-issues an
+// event as numbered "episodes" (each forecast or impact update), and the
+// report link it hands out carries the episode number. Events are
+// deduplicated by URL, so every update used to land as a new row:
+// Tropical Cyclone POLO-26 had 14 approved rows in five days. The link
+// without an episode is GDACS's own page for the latest episode (checked
+// 2026-09-29), so it doubles as a stable key. src/lib/gdacsEvents.ts
+// refreshes the stored row when a later episode changes it.
+const REPORT_PAGE = "https://www.gdacs.org/report.aspx";
+
+export function gdacsEventUrl(eventtype: string, eventid: number | string): string {
+  return `${REPORT_PAGE}?eventid=${eventid}&eventtype=${eventtype}`;
+}
+
+// The per-event link for any GDACS report link, with or without an
+// episode; null for anything that is not one.
+export function canonicalGdacsUrl(url: string): string | null {
+  if (!url.startsWith(`${REPORT_PAGE}?`)) return null;
+  const params = new URL(url).searchParams;
+  const eventid = params.get("eventid");
+  const eventtype = params.get("eventtype");
+  if (!eventid || !/^\d+$/.test(eventid) || !eventtype || !/^[A-Z]{2}$/.test(eventtype)) return null;
+  return gdacsEventUrl(eventtype, eventid);
+}
+
 // Flood/drought/wildfire are climate-pillar hazards (per the blueprint's
 // Climate & Environment pillar); cyclone/volcano/tsunami are physical
 // hazard-pillar events (Natural & Biological Hazards) — see
@@ -29,6 +54,7 @@ interface GdacsFeature {
   geometry: { type: string; coordinates: [number, number] } | null;
   properties: {
     eventtype: string;
+    eventid?: number;
     name: string;
     description: string | null;
     alertlevel: "Green" | "Orange" | "Red" | string;
@@ -83,7 +109,7 @@ export async function fetchGdacsAlerts(): Promise<DirectItem[]> {
 
       return {
         source: "gdacs",
-        url: reportUrl,
+        url: (p.eventid ? gdacsEventUrl(p.eventtype, p.eventid) : canonicalGdacsUrl(reportUrl)) ?? reportUrl,
         title: p.name,
         summary: `${typeLabel} (${p.alertlevel} alert): ${p.description || p.name}`,
         category: CLIMATE_EVENT_TYPES.has(p.eventtype)

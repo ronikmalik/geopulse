@@ -12,6 +12,7 @@ import { nearestMajorPort, MAJOR_PORTS } from "../src/lib/ports";
 import { COUNTRY_CENTROIDS } from "../src/lib/countryCentroids";
 import { internetCensorshipToPoints } from "../src/lib/mapPoints";
 import { DATA_LAYERS, DATA_LAYER_GROUPS } from "../src/lib/dataLayers";
+import { canonicalGdacsUrl, fetchGdacsAlerts } from "../src/lib/sources/gdacs";
 
 // Trimmed from the live NTWC and PTWC feeds (tsunami.gov, 2026-09-28).
 const NTWC = `<?xml version="1.0" encoding="UTF-8"?>
@@ -140,4 +141,32 @@ test("every context layer is in exactly one Layers-panel group", () => {
   const grouped = DATA_LAYER_GROUPS.flatMap((g) => g.layers);
   assert.equal(new Set(grouped).size, grouped.length, "no layer listed twice");
   assert.deepEqual([...grouped].sort(), [...DATA_LAYERS].sort());
+});
+
+test("a GDACS disaster keeps one URL across its episodes", async (t) => {
+  assert.equal(
+    canonicalGdacsUrl("https://www.gdacs.org/report.aspx?eventid=1001325&episodeid=36&eventtype=TC"),
+    "https://www.gdacs.org/report.aspx?eventid=1001325&eventtype=TC",
+  );
+  assert.equal(canonicalGdacsUrl("https://www.gdacs.org/report.aspx?eventid=1001325&eventtype=TC"), "https://www.gdacs.org/report.aspx?eventid=1001325&eventtype=TC");
+  assert.equal(canonicalGdacsUrl("https://www.gdacs.org/report.aspx?eventid=abc&eventtype=TC"), null);
+  assert.equal(canonicalGdacsUrl("https://example.invalid/report.aspx?eventid=1&eventtype=TC"), null);
+
+  // Shape trimmed from the live geteventlist response (2026-09-29).
+  const feature = (episodeid: number, alertlevel: string) => ({
+    geometry: { type: "Point", coordinates: [-107.1, 19.2] },
+    properties: {
+      eventtype: "TC", eventid: 1001325, episodeid, name: "Tropical Cyclone POLO-26", description: "POLO-26",
+      alertlevel, fromdate: "2026-09-21T03:00:00", affectedcountries: [{ iso2: "MX", countryname: "Mexico" }],
+      url: { report: `https://www.gdacs.org/report.aspx?eventid=1001325&episodeid=${episodeid}&eventtype=TC` },
+    },
+  });
+  let episode = feature(35, "Orange");
+  t.mock.method(globalThis, "fetch", async () => Response.json({ features: [episode] }));
+  const first = await fetchGdacsAlerts();
+  episode = feature(36, "Red");
+  const second = await fetchGdacsAlerts();
+  assert.equal(first[0].url, "https://www.gdacs.org/report.aspx?eventid=1001325&eventtype=TC");
+  assert.equal(second[0].url, first[0].url);
+  assert.deepEqual([first[0].severity, second[0].severity], [3, 5]);
 });
