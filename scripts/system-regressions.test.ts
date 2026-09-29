@@ -14,6 +14,7 @@ import { withCache } from "../src/lib/layerCache";
 import { chooseBestK, classifyViaKnn, prepareLabeledExamples } from "../src/lib/textClassifier";
 import { isLowCredibility, lookupCredibility } from "../src/lib/sourceCredibility";
 import { resolveLocationsBatch } from "../src/lib/geocodeEvents";
+import { summarizeHistory, withLivePoint, type HistorySnapshot } from "../src/lib/historySummary";
 
 const candidates = [{ id: 1, country: "UA", severity: 3, source: "gdelt" }, { id: 2, country: "IR", severity: 3, source: "telegram:presstv" }];
 const accepted = { id: 1, country: "UA", severity: 3, validInclusion: true, reasoning: "" };
@@ -723,4 +724,27 @@ test("Telegram posts are embedded as their content, not their channel label", as
   // News keeps its title + summary exactly as before.
   assert.equal(embeddingText({ source: "rss:bbc-world", title: "T", summary: "S" }), "T\nS");
   assert.equal(embeddingText({ source: "gdelt", title: "T", summary: "S" }), "T\nS");
+});
+
+test("the Trends chart ends on the live score, standing in for today's snapshot", () => {
+  const day = (d: string, score: number): HistorySnapshot => ({ snapshotAt: `${d}T18:15:00.000Z`, score, threatLevel: 1, momentum: 0 });
+  const history = ["2026-09-24", "2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28", "2026-09-29"].map((d) => day(d, 0));
+  const live: HistorySnapshot = { snapshotAt: "2026-09-29T20:05:00.000Z", score: 26.25, threatLevel: 3, momentum: 93 };
+
+  const series = withLivePoint(history, live);
+  assert.equal(series.length, 6, "today's snapshot is replaced, not doubled");
+  assert.deepEqual(series.at(-1), { ...live, live: true });
+  assert.equal(series.filter((h) => h.live).length, 1);
+
+  const summary = summarizeHistory("EE", series);
+  assert.equal(summary.current?.threatLabel, "High");
+  assert.match(summary.text, /^5 daily snapshots under scoring method v\d+, then today's live score\. Now High \(score 26\.3, momentum 93\)/);
+  assert.match(summary.text, /Peak: High now\./);
+
+  // Before today's snapshot exists the live point is simply appended.
+  assert.equal(withLivePoint(history.slice(0, 5), live).length, 6);
+  // No live score loaded yet: the stored history is shown as it is.
+  assert.equal(withLivePoint(history, null), history);
+  // Snapshot-only summaries (the public API) keep their wording.
+  assert.match(summarizeHistory("EE", history).text, /^6 daily snapshots under scoring method v\d+\. Currently Low/);
 });

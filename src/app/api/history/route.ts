@@ -1,10 +1,12 @@
 import { NextRequest } from "next/server";
-import { getCountryHistory, summarizeHistory } from "@/lib/history";
+import { getCountryHistory } from "@/lib/history";
+import { summarizeHistory } from "@/lib/historySummary";
 import { badRequest, cachedJson, parseBoundedInt, parseCountryParam } from "@/lib/apiParams";
 
 // Backs the Trends tab: a country's daily country_state_history snapshots
 // plus a deterministic, computed-from-the-numbers summary (see
-// summarizeHistory in src/lib/history.ts) — not a free-text/LLM answer.
+// summarizeHistory in src/lib/historySummary.ts) — not a free-text/LLM
+// answer. Snapshots only; the Trends tab adds the live score itself.
 // Snapshots are written once a day, so a 5-minute CDN cache can never
 // hide a real change for long.
 export async function GET(req: NextRequest) {

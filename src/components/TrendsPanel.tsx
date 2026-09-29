@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CountryRiskScore } from "@/lib/useCountryRisk";
 import type { AnomalyFindingResponse } from "@/lib/useAnomalies";
 import { signalDescription } from "@/lib/anomalyLabels";
-import { THREAT_COLORS, momentumArrow, momentumBucketLabel, type ThreatLevel } from "@/lib/threat";
+import { THREAT_COLORS, THREAT_LABELS, momentumArrow, momentumBucketLabel } from "@/lib/threat";
 import { countryName } from "@/lib/format";
+import { summarizeHistory, withLivePoint, type HistorySnapshot } from "@/lib/historySummary";
 
 interface TrendsPanelProps {
   countryScores: CountryRiskScore[];
@@ -17,27 +18,10 @@ interface TrendsPanelProps {
   onSelectCountry: (country: string | null) => void;
 }
 
-// Mirrors HistorySnapshot/HistorySummary from src/lib/history.ts — defined
-// locally rather than imported so this client component never pulls in
-// that module's server-only db access (same pattern CountryRiskPanel.tsx
-// uses for the shapes it fetches from /api/risk).
-interface HistorySnapshot {
-  snapshotAt: string;
-  score: number;
-  threatLevel: ThreatLevel;
-  momentum: number;
-}
-
-interface HistorySummary {
-  country: string;
-  daysTracked: number;
-  trend: "rising" | "falling" | "steady" | "insufficient-data";
-  text: string;
-}
-
+// /api/history also returns a snapshot-only summary; the panel builds its
+// own with the live score as the newest point (historySummary.ts).
 interface HistoryResponse {
   history: HistorySnapshot[];
-  summary: HistorySummary | null;
   earlierMethodDays?: number;
 }
 
@@ -52,27 +36,37 @@ const CHART_HEIGHT = 90;
 const MOVERS_SHOWN = 8;
 
 function HistoryChart({ history }: { history: HistorySnapshot[] }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Newest on the right, in view: a long history overflows to the left.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [history.length]);
+
   if (history.length === 0) return null;
   const maxScore = Math.max(...history.map((h) => h.score), 5);
+  const first = history[0];
+  const last = history[history.length - 1];
+  const label = (h: HistorySnapshot) => (h.live ? "Live now" : formatDate(h.snapshotAt));
 
   return (
     <div>
-      <div className="flex h-[90px] items-end gap-[3px] overflow-x-auto rounded border border-neutral-800 bg-black/40 p-2">
+      <div ref={scrollRef} className="flex h-[90px] items-end gap-[3px] overflow-x-auto rounded border border-neutral-800 bg-black/40 p-2">
         {history.map((h) => {
           const barHeight = Math.max(4, (h.score / maxScore) * CHART_HEIGHT);
           return (
             <div
               key={h.snapshotAt}
-              className="w-3 shrink-0 rounded-t-sm"
+              className={`w-3 shrink-0 rounded-t-sm${h.live ? " ring-1 ring-white/80" : ""}`}
               style={{ height: `${barHeight}px`, backgroundColor: THREAT_COLORS[h.threatLevel] }}
-              title={`${formatDate(h.snapshotAt)} - score ${h.score.toFixed(1)}`}
+              title={`${label(h)} - score ${h.score.toFixed(1)} (${THREAT_LABELS[h.threatLevel]})`}
             />
           );
         })}
       </div>
       <div className="mt-1 flex justify-between font-mono text-[9px] text-neutral-500">
-        <span>{formatDate(history[0].snapshotAt)}</span>
-        {history.length > 1 && <span>{formatDate(history[history.length - 1].snapshotAt)}</span>}
+        <span className={first.live ? "text-red-300" : undefined}>{label(first)}</span>
+        {history.length > 1 && <span className={last.live ? "text-red-300" : undefined}>{label(last)}</span>}
       </div>
     </div>
   );
@@ -112,6 +106,8 @@ export default function TrendsPanel({
   const [query, setQuery] = useState("");
   const [data, setData] = useState<(HistoryResponse & { country: string }) | null>(null);
   const [failedCountry, setFailedCountry] = useState<string | null>(null);
+  // Only its UTC day matters: the live point stands in for that day's snapshot.
+  const [openedAt] = useState(() => new Date().toISOString());
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -161,6 +157,25 @@ export default function TrendsPanel({
   }, [selectedCountry]);
 
   const current = selectedCountry && data?.country === selectedCountry ? data : null;
+
+  // The chart's last bar is the live score (2026-09-29), from the same
+  // /api/risk/summary poll that colors the globe. A country missing from a
+  // loaded summary has no scored events, so it is live at 0.
+  const series = useMemo(() => {
+    if (!current || !selectedCountry) return [];
+    const liveScore = countryScores.find((s) => s.country === selectedCountry);
+    const live: HistorySnapshot | null =
+      countryScores.length === 0
+        ? null
+        : {
+            snapshotAt: openedAt,
+            score: liveScore?.score ?? 0,
+            threatLevel: liveScore?.threatLevel ?? 1,
+            momentum: liveScore?.momentum ?? 0,
+          };
+    return withLivePoint(current.history, live);
+  }, [current, selectedCountry, countryScores, openedAt]);
+  const summary = current && selectedCountry ? summarizeHistory(selectedCountry, series) : null;
   const loading = !!selectedCountry && !current && failedCountry !== selectedCountry;
   const countryAnomalies = selectedCountry ? (anomalies.get(selectedCountry) ?? []) : [];
 
@@ -171,8 +186,8 @@ export default function TrendsPanel({
           Trends
         </h2>
         <p className="mb-3 text-[11px] leading-snug text-neutral-500">
-          A country&apos;s Pulse history, from one snapshot a day. Pick a country
-          on the globe or search for one.
+          A country&apos;s Pulse history, one snapshot a day, ending with the
+          live score. Pick a country on the globe or search for one.
         </p>
 
         <input
@@ -232,9 +247,9 @@ export default function TrendsPanel({
 
             {current && (
               <>
-                <HistoryChart history={current.history} />
+                <HistoryChart history={series} />
                 <p className="mt-3 whitespace-pre-wrap text-xs leading-relaxed text-neutral-300">
-                  {current.summary?.text}
+                  {summary?.text}
                 </p>
                 {!!current.earlierMethodDays && (
                   <p className="mt-2 text-[11px] leading-snug text-neutral-500">

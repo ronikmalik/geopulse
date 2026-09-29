@@ -31,7 +31,7 @@ const compactNumber = new Intl.NumberFormat("en-US", {
 // figure here is a real published statistic with its own reporting year,
 // nothing composed or inferred. The one-line summary below is template
 // text filled in from those same numbers, not generated — same
-// no-LLM-necessary discipline as src/lib/history.ts's summarizeHistory.
+// no-LLM-necessary discipline as src/lib/historySummary.ts's summarizeHistory.
 // World Bank's country metadata still carries some Russian-era or
 // otherwise superseded romanisations. Corrected to the form the country's
 // own government uses; only names seen in the live dossier are listed.
