@@ -92,8 +92,8 @@ Grouped by what they'd unlock, highest-value first:
 - WTO API, FAOSTAT — structural trade/food-system context (FAO Food Price Index above covers a simpler global-index cut of the same territory, not full FAOSTAT country-level production data).
 
 **Infrastructure & Connectivity depth**
-- Cloudflare Radar — needs an API token (free tier). Would meaningfully improve on
-  IODA's noisier outage-anomaly signal with named, categorized outage events.
+- ~~Cloudflare Radar~~ — integrated 2026-09-28 (see the table above); its named,
+  categorized outages are feed events alongside IODA's.
 - RIPE Atlas/RIPEstat — independent BGP/DNS/reachability confirmation layer.
 
 **Cyber & Technology (currently the other zero-country-coverage pillar)**
@@ -102,8 +102,9 @@ Grouped by what they'd unlock, highest-value first:
   precisely because it has no country dimension to attribute honestly.
 
 **Sanctions**
-- OFAC, EU, UK, UN, OpenSanctions — not started. Would feed the Political & Governance
-  and Geopolitical & Security pillars (new/lifted sanctions as discrete events).
+- OFAC and EU consolidated lists — integrated 2026-09-22 as a context layer of listing
+  deltas (`src/lib/sanctions.ts`), not yet scored. OpenSanctions rejected: its bulk data is
+  non-commercial only. UK (OFSI) and UN lists not started.
 
 ## Deduplication policy
 
