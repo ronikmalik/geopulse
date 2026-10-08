@@ -52,6 +52,16 @@ export interface PipelineMetrics {
   // MONTHLY_BYTE_CAP, so this is an early warning, not a guard: at the cap,
   // non-English Telegram posts stop being translated until the month turns.
   translationMonthUsed: number;
+  // pg_database_size. Neon Free allows 1 GB per project, and past it every
+  // insert fails until space is freed or the plan changes. Measured
+  // 2026-10-08: 153 MB, growing ~4.7 MB/day (85% of that the two
+  // embedding archives), so ~6 months of room.
+  databaseBytes: number;
+  // Hours since any ingest source was last attempted: the pipeline itself
+  // not running, as opposed to one source failing. Oct 3-8 2026 GitHub
+  // fired the ingest schedule every 3-7 h and this alarm reported only
+  // the downstream symptoms (stale sources, a "stuck" review gate).
+  hoursSinceLastIngest: number;
 }
 
 export const HEALTH_LIMITS = {
@@ -70,6 +80,10 @@ export const HEALTH_LIMITS = {
   // Measured 2026-09-23: 342k used by the 23rd (~70% of the cap), heading
   // for ~410k. 95% means the month is about to run dry.
   translationShareOfCap: 0.95,
+  // 800 of Neon Free's 1 GB: ~40 days of warning at the measured growth.
+  maxDatabaseBytes: 800 * 1024 * 1024,
+  // Ingest runs every 30 min (ingest.yml); 2 h is four missed runs.
+  maxHoursSinceLastIngest: 2,
 } as const;
 
 // Pure, so the thresholds themselves are testable.
@@ -104,6 +118,13 @@ export function evaluatePipelineHealth(m: PipelineMetrics): string[] {
   }
   if (m.translationMonthUsed > L.translationShareOfCap * MONTHLY_BYTE_CAP) {
     failures.push(`Translation at ${m.translationMonthUsed.toLocaleString()} of the ${MONTHLY_BYTE_CAP.toLocaleString()} monthly cap — non-English Telegram posts will soon go untranslated until the month turns. The cap itself cannot be exceeded.`);
+  }
+  if (m.databaseBytes > L.maxDatabaseBytes) {
+    const mb = (b: number) => Math.round(b / 1024 / 1024);
+    failures.push(`Database is ${mb(m.databaseBytes)} MB (limit ${mb(L.maxDatabaseBytes)} MB). Neon Free stops accepting inserts at 1 GB — upgrade the Neon plan or move old archive rows out before then.`);
+  }
+  if (m.hoursSinceLastIngest > L.maxHoursSinceLastIngest) {
+    failures.push(`The ingest pipeline last ran ${m.hoursSinceLastIngest.toFixed(1)} h ago (limit ${L.maxHoursSinceLastIngest} h) — the ingest.yml chain and its cron backstop have both stopped; check the Actions tab.`);
   }
   return failures;
 }
@@ -142,9 +163,16 @@ export async function gatherPipelineMetrics(): Promise<PipelineMetrics> {
   ).rows as { source: string; h: number | null }[];
 
   const translation = await getUsageBudget();
+  const size = await one<{ b: string | number }>(sql`select pg_database_size(current_database()) b`);
+  const lastIngest = await one<{ h: number | null }>(
+    sql`select extract(epoch from now() - max(last_attempt_at)) / 3600 h from source_health
+        where source <> ${ANOMALY_SCAN_SOURCE}`,
+  );
 
   return {
     translationMonthUsed: translation.monthUsed,
+    databaseBytes: Number(size.b ?? 0),
+    hoursSinceLastIngest: lastIngest.h === null || lastIngest.h === undefined ? Number.POSITIVE_INFINITY : Number(lastIngest.h),
     feedEmbeddingBacklog: Number(feed.n ?? 0),
     keptArchiveFallingBehind: Number(kept.behind ?? 0),
     keptArchiveBacklogTotal: Number(kept.total ?? 0),

@@ -42,17 +42,21 @@ name: Ingest live events
 # fixed 5 idle minutes before suspend, so a 30-minute cycle is ~20% duty
 # (~1.2 CU-hours/day) against ~40% (~2.4/day) at 15 minutes.
 #
-#
-# 2026-10-08: that September-only entry is gone and the 15-minute line
-# moved off :01. From Oct 3 06:12 UTC the old "1,16,31,46 * * 1-8,10-12 *"
-# fired only every 3-7 hours (13 runs in 5 days instead of ~480), while
-# every run it did start succeeded, Gemini review included. That was the
-# same silent schedule decay as Aug 27-Sep 4, fixed the same way (a new
-# expression). The minutes also avoid the top of the hour, GitHub's
-# busiest slot and the first one it drops runs from under load.
+# 2026-10-08: every 30 minutes, permanently. From Oct 3 06:12 UTC the
+# 15-minute cron fired only every 3-7 hours (13 runs in 5 days) while each
+# run it did start succeeded, Gemini review included, so the pipeline now
+# re-dispatches itself (the `next` job) and the cron is only the backstop.
+# 30, not 15: measured on the Oct 8 runs, a cycle keeps the database busy
+# ~2.5 min, plus Neon's fixed 5 idle minutes, i.e. ~50% duty at 15 min
+# (~3 CU-h/day, ~93/month) against the Free plan's 100 CU-h, and running
+# out suspends the database for the rest of the month. 30 min is ~25%
+# (~1.5/day). Nothing collected shrinks: GDELT reads a 75-minute window
+# of files (gdeltBulk.ts), the title drain takes 200 a cycle against ~160
+# new, RSS feeds keep hours of items, and every Gemini cap is per day.
+# Minutes :07/:37 keep clear of the top of the hour, GitHub's busiest slot.
 on:
   schedule:
-    - cron: "7,22,37,52 * * * *"
+    - cron: "7,37 * * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -103,27 +107,64 @@ jobs:
   # Self-dispatch (2026-10-08). GitHub's scheduler delayed this repo's
   # cron triggers by 3-7 hours for days at a time (daily-snapshots' 18:00
   # slot started at 22:25-23:56 the same week), but workflow_dispatch
-  # starts within seconds. So each run queues its successor for 15 minutes
+  # starts within seconds. So each run queues its successor for 30 minutes
   # after its own start; the cron above stays as the backstop that
   # restarts the chain if a run is cancelled or GitHub drops a dispatch.
   # Waiting on the runner costs nothing on a public repo. Skipped when
   # another ingest run is already waiting, so there is only ever one
   # chain. Off switch: set the repo variable INGEST_CHAIN to "off".
+  #
+  # It also keeps the repo's schedules alive while nobody commits. GitHub
+  # disables scheduled workflows in a public repo after 60 days without
+  # repository activity, silently, and a disabled workflow cannot be
+  # dispatched either, so this chain would stop with them. Two layers:
+  # re-enable every workflow GitHub did not see disabled by hand (the
+  # enable call is what keepalive actions use, and it also revives one
+  # already disabled for inactivity), and if the branch has had no commit
+  # for 50 days, commit a one-line date stamp to .github/keepalive.
   next:
     needs: generate-briefs
     if: ${{ !cancelled() && vars.INGEST_CHAIN != 'off' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     permissions:
       actions: write
+      contents: write
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - name: Wait until 15 minutes after this run started
+      - name: Keep workflows enabled
+        continue-on-error: true
+        run: |
+          gh api "repos/$GH_REPO/actions/workflows" --paginate \
+            --jq '.workflows[] | select(.state != "disabled_manually") | "\(.id) \(.state) \(.path)"' |
+          while read -r id state path; do
+            if gh api -X PUT "repos/$GH_REPO/actions/workflows/$id/enable" >/dev/null; then
+              [ "$state" = "active" ] || echo "re-enabled $path (was $state)"
+            else
+              echo "::warning::could not enable $path"
+            fi
+          done
+      - name: Commit a keepalive stamp after 50 quiet days
+        continue-on-error: true
+        run: |
+          branch="${{ github.ref_name }}"
+          last=$(gh api "repos/$GH_REPO/commits?sha=$branch&per_page=1" --jq '.[0].commit.committer.date')
+          age=$(( ($(date +%s) - $(date -d "$last" +%s)) / 86400 ))
+          echo "last commit on $branch: $last ($age days ago)"
+          if [ "$age" -ge 50 ]; then
+            sha=$(gh api "repos/$GH_REPO/contents/.github/keepalive?ref=$branch" --jq .sha 2>/dev/null || true)
+            gh api -X PUT "repos/$GH_REPO/contents/.github/keepalive" \
+              -f message="Keepalive: $age days without a commit (GitHub disables schedules at 60)" \
+              -f content="$(date -u +%Y-%m-%dT%H:%M:%SZ | base64)" \
+              -f branch="$branch" ${sha:+-f sha="$sha"} >/dev/null
+            echo "committed .github/keepalive"
+          fi
+      - name: Wait until 30 minutes after this run started
         run: |
           started=$(gh api "repos/$GH_REPO/actions/runs/${{ github.run_id }}" --jq .run_started_at)
-          wait=$(( $(date -d "$started" +%s) + 900 - $(date +%s) ))
+          wait=$(( $(date -d "$started" +%s) + 1800 - $(date +%s) ))
           echo "run started $started; waiting ${wait}s"
           if [ "$wait" -gt 0 ]; then sleep "$wait"; fi
       - name: Dispatch the next run unless one is already waiting

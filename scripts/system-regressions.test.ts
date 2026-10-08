@@ -618,6 +618,7 @@ test("the pipeline alarm stays quiet on a healthy day and names each quiet failu
     events24hBySource: { gdelt: 170, rss: 74, telegram: 49, usgs: 0 },
     hoursSinceSourceSuccess: { gdelt: 0.3, rss: 0.3, usgs: 0.3 },
     translationMonthUsed: 342_209,
+    databaseBytes: 160_489_472, hoursSinceLastIngest: 0.4,
   };
   // A quiet day for a hazard feed (usgs: 0) is real, not a failure.
   assert.deepEqual(evaluatePipelineHealth(healthy), []);
@@ -631,6 +632,9 @@ test("the pipeline alarm stays quiet on a healthy day and names each quiet failu
   assert.deepEqual(evaluatePipelineHealth({ ...healthy, hoursSinceSourceSuccess: { "anomaly-scan": 23.5 } }), []);
   assert.match(evaluatePipelineHealth({ ...healthy, hoursSinceSourceSuccess: { "anomaly-scan": 50 } }).join(), /anomaly-scan has not fetched/);
   assert.match(evaluatePipelineHealth({ ...healthy, translationMonthUsed: 480_000 }).join(), /monthly cap/);
+  // 2026-10-08: storage nearing Neon Free's 1 GB, and the scheduler itself stopping.
+  assert.match(evaluatePipelineHealth({ ...healthy, databaseBytes: 900 * 1024 * 1024 }).join(), /Database is 900 MB/);
+  assert.match(evaluatePipelineHealth({ ...healthy, hoursSinceLastIngest: 5.3 }).join(), /last ran 5\.3 h ago/);
   // A large historical tail is context, not a fault; recent rows being
   // left behind is.
   assert.deepEqual(evaluatePipelineHealth({ ...healthy, keptArchiveBacklogTotal: 50_000 }), []);
