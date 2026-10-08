@@ -178,8 +178,25 @@ export function runKMeans(vectors: number[][], k: number, rng: () => number = Ma
 // O(n^2) — fine at this app's real corpus size (low hundreds to low
 // thousands of embedded events), not something that needs an approximation
 // at this scale.
-function silhouetteScore(normalized: number[][], assignments: number[], k: number): number {
-  if (k < 2 || normalized.length <= k) return -1; // degenerate — never the best choice
+//
+// 2026-10-08: scored on an evenly spaced subsample once n passes
+// MAX_SILHOUETTE_SAMPLE (sklearn's silhouette_score(sample_size=) does the
+// same). The 30-day window had grown to ~11,000 embedded rows, and full
+// O(n^2) scoring for each of 8 candidate k's would no longer fit the
+// training job's 15-minute ceiling. The clustering itself still uses every
+// row; only the k-selection score is estimated.
+const MAX_SILHOUETTE_SAMPLE = 2_000;
+
+function silhouetteScore(allNormalized: number[][], allAssignments: number[], k: number): number {
+  if (k < 2 || allNormalized.length <= k) return -1; // degenerate — never the best choice
+  let normalized = allNormalized;
+  let assignments = allAssignments;
+  if (allNormalized.length > MAX_SILHOUETTE_SAMPLE) {
+    const step = allNormalized.length / MAX_SILHOUETTE_SAMPLE;
+    const picked = Array.from({ length: MAX_SILHOUETTE_SAMPLE }, (_, j) => Math.floor(j * step));
+    normalized = picked.map((i) => allNormalized[i]);
+    assignments = picked.map((i) => allAssignments[i]);
+  }
   const n = normalized.length;
   const byCluster: number[][] = Array.from({ length: k }, () => []);
   assignments.forEach((c, i) => byCluster[c].push(i));

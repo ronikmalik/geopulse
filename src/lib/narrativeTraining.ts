@@ -1,9 +1,10 @@
-import { and, gte, isNotNull, notInArray } from "drizzle-orm";
+import { and, asc, gt, gte, isNotNull, notInArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { recordModelRun } from "@/lib/modelRegistry";
 import { feedArchive, narrativeClusters, narrativeNoveltyFindings } from "@/db/schema";
 import { STRUCTURAL_SOURCES } from "./structuralSources";
 import { chooseBestK } from "@/lib/narrativeClustering";
+import { selectInIdPages } from "@/lib/pagedSelect";
 
 // Weekly training entrypoint for Project 1 (narrative clustering). Mirrors
 // riskModel.ts's own shadow-mode discipline: a scheduled batch job that
@@ -46,14 +47,25 @@ interface EmbeddedFeedItem {
 
 async function fetchEmbeddedFeedArchive(since: Date): Promise<EmbeddedFeedItem[]> {
   const db = getDb();
-  const rows = await db
-    .select({ id: feedArchive.id, embedding: feedArchive.embedding })
-    .from(feedArchive)
-    // Structural sources are excluded even where an older row still
-    // carries an embedding (backfilled before 2026-09-20): templated text
-    // forms one huge tight cluster that wins the silhouette score for free
-    // and distorts k-selection for the real narratives.
-    .where(and(isNotNull(feedArchive.embedding), gte(feedArchive.publishedAt, since), notInArray(feedArchive.source, [...STRUCTURAL_SOURCES])));
+  const rows = await selectInIdPages((afterId, limit) =>
+    db
+      .select({ id: feedArchive.id, embedding: feedArchive.embedding })
+      .from(feedArchive)
+      // Structural sources are excluded even where an older row still
+      // carries an embedding (backfilled before 2026-09-20): templated text
+      // forms one huge tight cluster that wins the silhouette score for free
+      // and distorts k-selection for the real narratives.
+      .where(
+        and(
+          isNotNull(feedArchive.embedding),
+          gte(feedArchive.publishedAt, since),
+          notInArray(feedArchive.source, [...STRUCTURAL_SOURCES]),
+          gt(feedArchive.id, afterId),
+        ),
+      )
+      .orderBy(asc(feedArchive.id))
+      .limit(limit),
+  );
   return rows
     .filter((r): r is { id: number; embedding: number[] } => r.embedding !== null)
     .map((r) => ({ id: r.id, embedding: r.embedding }));

@@ -1,10 +1,11 @@
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import { recordModelRun } from "@/lib/modelRegistry";
 import { classificationArchive, classifierAudit, textClassifierRuns } from "@/db/schema";
 import { chooseBestK, classifyViaKnn, prepareLabeledExamples, type LabeledExample } from "@/lib/textClassifier";
 import { normalize } from "@/lib/narrativeClustering";
 import { getHumanLabelledExamples } from "@/lib/gateReview";
+import { selectInIdPages } from "@/lib/pagedSelect";
 
 // Shadow evaluation of the embedded classification archive. Select k within
 // the reference pool, then measure agreement with held-out audit corrections.
@@ -34,16 +35,20 @@ interface RawLabeledRow {
 
 async function fetchLabeledExamplesWithEmbeddings(): Promise<LabeledExample[]> {
   const db = getDb();
-  const rows = await db
-    .select({
-      id: classificationArchive.id,
-      embedding: classificationArchive.embedding,
-      kept: classificationArchive.kept,
-      category: classificationArchive.category,
-      severity: classificationArchive.severity,
-    })
-    .from(classificationArchive)
-    .where(isNotNull(classificationArchive.embedding));
+  const rows = await selectInIdPages((afterId, limit) =>
+    db
+      .select({
+        id: classificationArchive.id,
+        embedding: classificationArchive.embedding,
+        kept: classificationArchive.kept,
+        category: classificationArchive.category,
+        severity: classificationArchive.severity,
+      })
+      .from(classificationArchive)
+      .where(and(isNotNull(classificationArchive.embedding), gt(classificationArchive.id, afterId)))
+      .orderBy(asc(classificationArchive.id))
+      .limit(limit),
+  );
 
   const withEmbeddings = rows.filter((r): r is RawLabeledRow & { embedding: number[] } => r.embedding !== null);
   return prepareLabeledExamples(withEmbeddings);
@@ -64,23 +69,29 @@ interface AuditCorrection {
 // is settled).
 async function fetchAuditCorrections(): Promise<AuditCorrection[]> {
   const db = getDb();
-  const rows = await db
-    .select({
-      archiveId: classifierAudit.archiveId,
-      kind: classifierAudit.kind,
-      embedding: classificationArchive.embedding,
-    })
-    .from(classifierAudit)
-    .innerJoin(classificationArchive, eq(classificationArchive.id, classifierAudit.archiveId))
-    .where(
-      and(
-        inArray(classifierAudit.status, ["applied", "approved"]),
-        inArray(classifierAudit.kind, ["false_positive", "false_negative"]),
-        isNotNull(classificationArchive.embedding),
-      ),
-    );
+  const rows = await selectInIdPages((afterId, limit) =>
+    db
+      .select({
+        id: classifierAudit.id,
+        archiveId: classifierAudit.archiveId,
+        kind: classifierAudit.kind,
+        embedding: classificationArchive.embedding,
+      })
+      .from(classifierAudit)
+      .innerJoin(classificationArchive, eq(classificationArchive.id, classifierAudit.archiveId))
+      .where(
+        and(
+          inArray(classifierAudit.status, ["applied", "approved"]),
+          inArray(classifierAudit.kind, ["false_positive", "false_negative"]),
+          isNotNull(classificationArchive.embedding),
+          gt(classifierAudit.id, afterId),
+        ),
+      )
+      .orderBy(asc(classifierAudit.id))
+      .limit(limit),
+  );
   return rows
-    .filter((r): r is AuditCorrection & { embedding: number[] } => r.embedding !== null)
+    .filter((r): r is typeof r & { embedding: number[] } => r.embedding !== null)
     .map((r) => ({ archiveId: r.archiveId, kind: r.kind, embedding: r.embedding }));
 }
 
