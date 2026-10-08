@@ -42,22 +42,29 @@ name: Ingest live events
 # fixed 5 idle minutes before suspend, so a 30-minute cycle is ~20% duty
 # (~1.2 CU-hours/day) against ~40% (~2.4/day) at 15 minutes.
 #
-#   1st entry: every 30 min, ONLY on September 21-30 (day-of-month 21-30,
-#              month 9). It stops firing by itself after Sept 30.
-#   2nd entry: the normal 15-minute cadence, every month EXCEPT September
-#              (months 1-8 and 10-12). It starts firing on October 1.
 #
-# Nothing needs editing on Oct 1. To end the slow period early, delete the
-# first entry and change the second to "* * * *" (all months) — or just
-# delete the "1-8,10-12" so the 15-min line reads "1,16,31,46 * * * *".
+# 2026-10-08: that September-only entry is gone and the 15-minute line
+# moved off :01. From Oct 3 06:12 UTC the old "1,16,31,46 * * 1-8,10-12 *"
+# fired only every 3-7 hours (13 runs in 5 days instead of ~480), while
+# every run it did start succeeded, Gemini review included. That was the
+# same silent schedule decay as Aug 27-Sep 4, fixed the same way (a new
+# expression). The minutes also avoid the top of the hour, GitHub's
+# busiest slot and the first one it drops runs from under load.
 on:
   schedule:
-    - cron: "1,31 * 21-30 9 *"
-    - cron: "1,16,31,46 * * 1-8,10-12 *"
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch: {}
 
 permissions:
   contents: read
+
+# One pipeline run at a time, and at most one waiting (GitHub cancels an
+# older pending run when a newer one queues). This is what keeps the
+# self-dispatch below from ever forking into two chains: a schedule firing
+# mid-chain just takes the waiting slot.
+concurrency:
+  group: ingest-pipeline
+  cancel-in-progress: false
 
 jobs:
   ingest:
@@ -92,3 +99,40 @@ jobs:
       job: generate-briefs
       timeout-minutes: 6
     secrets: inherit
+
+  # Self-dispatch (2026-10-08). GitHub's scheduler delayed this repo's
+  # cron triggers by 3-7 hours for days at a time (daily-snapshots' 18:00
+  # slot started at 22:25-23:56 the same week), but workflow_dispatch
+  # starts within seconds. So each run queues its successor for 15 minutes
+  # after its own start; the cron above stays as the backstop that
+  # restarts the chain if a run is cancelled or GitHub drops a dispatch.
+  # Waiting on the runner costs nothing on a public repo. Skipped when
+  # another ingest run is already waiting, so there is only ever one
+  # chain. Off switch: set the repo variable INGEST_CHAIN to "off".
+  next:
+    needs: generate-briefs
+    if: ${{ !cancelled() && vars.INGEST_CHAIN != 'off' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Wait until 15 minutes after this run started
+        run: |
+          started=$(gh api "repos/$GH_REPO/actions/runs/${{ github.run_id }}" --jq .run_started_at)
+          wait=$(( $(date -d "$started" +%s) + 900 - $(date +%s) ))
+          echo "run started $started; waiting ${wait}s"
+          if [ "$wait" -gt 0 ]; then sleep "$wait"; fi
+      - name: Dispatch the next run unless one is already waiting
+        run: |
+          others=$(gh run list --workflow ingest.yml --limit 20 --json databaseId,status \
+            --jq "[.[] | select(.databaseId != ${{ github.run_id }}) | select(.status != \"completed\")] | length")
+          if [ "$others" -gt 0 ]; then
+            echo "$others other ingest run(s) queued or running; not dispatching"
+          else
+            gh workflow run ingest.yml --ref "${{ github.ref_name }}"
+            echo "dispatched the next ingest run"
+          fi
