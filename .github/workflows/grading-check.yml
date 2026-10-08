@@ -7,9 +7,15 @@ name: Grading check
 # and the channel produced zero in its first week. A red run here is the
 # nudge; there is nothing to fix in code when it fires, only rows to grade
 # at /admin/gate-review. Mondays 15:00 UTC so it lands in a working day.
+#
+# Schedule removed 2026-10-08: the owner is leaving the project unattended
+# for months with no grading planned, so this would fail every Monday, and
+# a weekly red email that means nothing teaches its reader to ignore the
+# ones that do (the daily pipeline-health alarm). Restore the schedule
+# below when grading resumes; manual runs still work.
+#   schedule:
+#     - cron: "0 15 * * 1"
 on:
-  schedule:
-    - cron: "0 15 * * 1"
   workflow_dispatch: {}
 
 permissions:
