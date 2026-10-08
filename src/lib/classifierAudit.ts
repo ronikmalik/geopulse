@@ -1818,6 +1818,10 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
   let approved = 0;
   let rejected = 0;
   let withheld = 0;
+  // Whether Gemini could not give verdicts this round (no key, today's cap
+  // spent, every model down, or the round threw). Only then does the local
+  // gate model get a say over waiting GDELT items, see below.
+  let geminiUnavailable = !apiKey;
 
   if (apiKey) {
     try {
@@ -1840,6 +1844,7 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
           // practice, without needing a separate, larger cap of its own.
           if (!(await canAffordGeminiLiteCall("audit", round.length))) {
             exhausted = true;
+            geminiUnavailable = true;
             break;
           }
           const results = await Promise.all(
@@ -1850,6 +1855,7 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
           // tight reread loop over the same oldest pending rows.
           if (results.every((result) => result === null)) {
             exhausted = true;
+            geminiUnavailable = true;
             break;
           }
 
@@ -1915,6 +1921,7 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
         }
       }
     } catch (err) {
+      geminiUnavailable = true;
       console.error(`reviewPendingEvents failed: ${err}`);
     }
   }
@@ -1932,10 +1939,19 @@ export async function reviewPendingEvents(): Promise<PendingReviewResult> {
   // Gemini capacity is available again rather than growing unbounded.
   // GDELT items still waiting after FALLBACK_MIN_AGE_MINUTES: the local
   // gate model may publish the ones it is confident about (gateStudent.ts).
-  const studentFallback = await publishConfidentPendingGdelt().catch((err) => {
-    console.error(`gate student fallback failed: ${err}`);
-    return null;
-  });
+  // Only in a round where Gemini could not answer (2026-10-08): it used to
+  // run after every round with an old GDELT item waiting, which is routine
+  // (items between unusable verdicts), and each run reloads and refits the
+  // whole label history — 0.7 MB today, ~180 rows/day more, ~48 times a
+  // day, against Neon Free's 5 GB/month transfer allowance (exceeding it
+  // suspends the database). When Gemini is answering, the gate itself
+  // settles those items within MAX_REVIEW_ATTEMPTS rounds.
+  const studentFallback = geminiUnavailable
+    ? await publishConfidentPendingGdelt().catch((err) => {
+        console.error(`gate student fallback failed: ${err}`);
+        return null;
+      })
+    : null;
 
   let autoPromoted = 0;
   try {

@@ -234,7 +234,11 @@ export async function runIngest(
   // — a same-query retry would double this already-tight budget for no
   // benefit, since a failed query this cycle gets a fresh attempt next
   // rotation regardless.
-  const ROTATION_INTERVAL_MS = 15 * 60_000;
+  // Must equal the ingest cadence (ingest.yml): 15 -> 30 min on 2026-10-08
+  // with the cadence. Left at 15 against 30-minute runs, every run would
+  // land two slots on, and with 4 Telegram chunks only chunks 0 and 2 (or
+  // 1 and 3) would ever be read again.
+  const ROTATION_INTERVAL_MS = 30 * 60_000;
   const gdeltQueryErrors: string[] = [];
   const GDELT_BULK_TIMEOUT_MS = 20_000;
   // Deadline for drainPendingGdeltTitles — added 2026-09-11 alongside that
@@ -253,7 +257,8 @@ export async function runIngest(
   // Same rotation cadence as GDELT (ROTATION_INTERVAL_MS) but its own chunk
   // size — 18 channels (as of the 2026-09-04 v2 pass) at 3 per cycle
   // covers the full list roughly every 90 min, comfortably faster than
-  // GDELT's 7-category rotation needs.
+  // GDELT's 7-category rotation needs. (2026-10-08: 12 channels, 4 chunks,
+  // one per 30-minute run, so every channel is read every 2 h.)
   const TELEGRAM_CHUNK_SIZE = 3;
   const TELEGRAM_QUERY_SPACING_MS = 800;
   const TELEGRAM_QUERY_TIMEOUT_MS = 7_000;

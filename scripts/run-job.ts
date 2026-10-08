@@ -231,7 +231,17 @@ const JOBS: Record<string, () => Promise<unknown>> = {
   // Weekly: fetch both sanctions lists whole and record what changed
   // since last time — neither publisher offers a change feed, so the
   // diff has to be computed here. See src/lib/sanctions.ts.
-  "sync-sanctions": () => syncSanctions(),
+  // Fails the run (2026-10-08) when a list could not be fetched or its
+  // churn guard refused the update: both used to return quietly inside a
+  // green run, and an upstream ID-format change would trip the guard
+  // every week, freezing the lists with nobody told.
+  "sync-sanctions": async () => {
+    const result = await syncSanctions();
+    const refused = result.results.filter((r) => r.skippedImplausibleChurn).map((r) => `${r.list}: churn guard refused the update (upstream IDs or format changed?)`);
+    const problems = [...result.errors, ...refused];
+    if (problems.length > 0) throw new Error(`Sanctions sync: ${problems.join("; ")}\n${JSON.stringify(result)}`);
+    return result;
+  },
   // One-off / on-demand: refresh the GeoNames settlement table the
   // exposure model counts against. Not scheduled -- settlements do not
   // move. See src/lib/exposure.ts.

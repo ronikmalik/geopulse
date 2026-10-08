@@ -1,8 +1,9 @@
-import { and, gt, inArray, isNotNull, isNull, like, lt, notLike, or, eq } from "drizzle-orm";
+import { and, asc, gt, inArray, isNotNull, isNull, like, lt, notLike, or, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { events } from "@/db/schema";
 import { splitAttribution } from "./displayText";
 import { recordModelRun } from "./modelRegistry";
+import { selectInIdPages } from "./pagedSelect";
 
 // The gate student (2026-09-28): a local model trained on the review
 // gate's own past decisions, measuring how much of that judgment a model
@@ -362,28 +363,39 @@ export const GATE_STUDENT_MODEL_ID = `${GATE_STUDENT_FAMILY}:${GATE_STUDENT_VARI
 
 export async function loadGateExamples(): Promise<GateExample[]> {
   const db = getDb();
-  const rows = await db
-    .select({
-      title: events.title,
-      summary: events.summary,
-      source: events.source,
-      category: events.category,
-      reviewStatus: events.reviewStatus,
-      createdAt: events.createdAt,
-    })
-    .from(events)
-    .where(
-      and(
-        or(like(events.source, "rss:%"), eq(events.source, "gdelt"), like(events.source, "telegram:%")),
-        gt(events.createdAt, GATE_LABELS_SINCE),
-        inArray(events.reviewStatus, ["approved", "rejected"]),
-        isNotNull(events.reviewReasoning),
-        notLike(events.reviewReasoning, "Withheld:%"),
-        // Its own outage decisions are not labels: learning from them would
-        // only teach it to agree with itself.
-        or(isNull(events.reviewModel), notLike(events.reviewModel, `${GATE_STUDENT_FAMILY}%`)),
-      ),
-    );
+  // Paged (2026-10-08): the label history only grows, and one response
+  // over 64 MB fails outright on Neon's HTTP driver (see pagedSelect.ts).
+  // Text-only rows, so pages are larger than for embeddings.
+  const rows = await selectInIdPages(
+    (afterId, limit) =>
+      db
+        .select({
+          id: events.id,
+          title: events.title,
+          summary: events.summary,
+          source: events.source,
+          category: events.category,
+          reviewStatus: events.reviewStatus,
+          createdAt: events.createdAt,
+        })
+        .from(events)
+        .where(
+          and(
+            or(like(events.source, "rss:%"), eq(events.source, "gdelt"), like(events.source, "telegram:%")),
+            gt(events.createdAt, GATE_LABELS_SINCE),
+            inArray(events.reviewStatus, ["approved", "rejected"]),
+            isNotNull(events.reviewReasoning),
+            notLike(events.reviewReasoning, "Withheld:%"),
+            // Its own outage decisions are not labels: learning from them would
+            // only teach it to agree with itself.
+            or(isNull(events.reviewModel), notLike(events.reviewModel, `${GATE_STUDENT_FAMILY}%`)),
+            gt(events.id, afterId),
+          ),
+        )
+        .orderBy(asc(events.id))
+        .limit(limit),
+    10_000,
+  );
   return rows.map((r) => {
     return {
       text: gateText(r),

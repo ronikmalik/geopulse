@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull } from "drizzle-orm";
 import { getDb } from "@/db";
 import { recordModelRun } from "@/lib/modelRegistry";
 import { classificationArchive, classifierAudit, textClassifierRuns } from "@/db/schema";
@@ -14,6 +14,13 @@ import { selectInIdPages } from "@/lib/pagedSelect";
 // authorize automatic promotion.
 const K_CANDIDATES = [5, 10, 15, 20, 25];
 const MIN_TRAINING_SAMPLE = 100;
+// The reference pool is the newest this-many embedded rows (2026-10-08).
+// Every row travels as ~9 KB of vector text, the archive gains ~1,500 a
+// week, and Neon Free allows 5 GB of transfer a month (exceeding it
+// suspends the database): uncapped, this weekly read alone would pass
+// 1.5 GB/month within six months. 15,000 is ~140 MB a run. The archive
+// itself keeps every row; only this shadow model's pool is bounded.
+const MAX_REFERENCE_POOL = 15_000;
 // Promotion criterion (2026-09-20), replacing the permanent
 // `promoted = false`: once at least this many gate decisions have been
 // graded by a human (gate_review_samples, see gateReview.ts), the shadow
@@ -35,6 +42,14 @@ interface RawLabeledRow {
 
 async function fetchLabeledExamplesWithEmbeddings(): Promise<LabeledExample[]> {
   const db = getDb();
+  const [floor] = await db
+    .select({ id: classificationArchive.id })
+    .from(classificationArchive)
+    .where(isNotNull(classificationArchive.embedding))
+    .orderBy(desc(classificationArchive.id))
+    .offset(MAX_REFERENCE_POOL - 1)
+    .limit(1);
+  const firstId = floor?.id ?? 0;
   const rows = await selectInIdPages((afterId, limit) =>
     db
       .select({
@@ -45,7 +60,7 @@ async function fetchLabeledExamplesWithEmbeddings(): Promise<LabeledExample[]> {
         severity: classificationArchive.severity,
       })
       .from(classificationArchive)
-      .where(and(isNotNull(classificationArchive.embedding), gt(classificationArchive.id, afterId)))
+      .where(and(isNotNull(classificationArchive.embedding), gt(classificationArchive.id, Math.max(afterId, firstId - 1))))
       .orderBy(asc(classificationArchive.id))
       .limit(limit),
   );

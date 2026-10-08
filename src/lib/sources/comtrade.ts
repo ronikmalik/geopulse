@@ -94,8 +94,15 @@ function iso2ToM49(reporters: ReporterRef[], iso2: string): ReporterRef | null {
 // year (2025 data was already available when checked live in September
 // 2026), and annual figures are a steadier "who trades with whom" signal
 // than any single month for a ranked-partners display.
-function mostRecentAnnualPeriod(): string {
-  return String(new Date().getUTCFullYear() - 1);
+//
+// The year before that is the fallback (2026-10-08): on January 1 the
+// "last full year" moves to one nobody has filed yet, and every reporter
+// would come back empty for months. Only one year back, so a reporter that
+// stopped publishing (Russia, below) still shows as empty rather than as
+// years-old figures.
+function recentAnnualPeriods(): string[] {
+  const year = new Date().getUTCFullYear();
+  return [String(year - 1), String(year - 2)];
 }
 
 // Some reporters simply have no self-reported data for recent years —
@@ -116,7 +123,21 @@ export async function fetchTopTradePartners(
   const reporter = iso2ToM49(reporters, iso2);
   if (!reporter) return null;
 
-  const period = mostRecentAnnualPeriod();
+  let summary: CountryTradeSummary | null = null;
+  for (const period of recentAnnualPeriods()) {
+    summary = await fetchTopTradePartnersForPeriod(iso2, reporter, partners, period, limit);
+    if (!summary || summary.topPartners.length > 0) return summary;
+  }
+  return summary;
+}
+
+async function fetchTopTradePartnersForPeriod(
+  iso2: string,
+  reporter: ReporterRef,
+  partners: PartnerRef[],
+  period: string,
+  limit: number,
+): Promise<CountryTradeSummary | null> {
   const params = new URLSearchParams({
     reporterCode: String(reporter.reporterCode),
     period,
