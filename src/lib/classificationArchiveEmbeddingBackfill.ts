@@ -1,8 +1,9 @@
-import { isNull, isNotNull, eq, desc, and, sql, notLike } from "drizzle-orm";
+import { isNull, isNotNull, eq, desc, and, sql, notLike, notInArray } from "drizzle-orm";
 import { getDb } from "@/db";
-import { classificationArchive } from "@/db/schema";
+import { classificationArchive, feedArchive } from "@/db/schema";
 import { embedBatch } from "./embeddings";
 import { getEmbeddingBudget } from "./aiUsage";
+import { STRUCTURAL_SOURCES } from "./structuralSources";
 
 // Project 3's own embedding backfill for classification_archive — separate
 // from embeddingBackfill.ts (feed_archive) because feed_archive only ever
@@ -60,6 +61,39 @@ const MAX_DROPPED_PER_KEPT = 2;
 // one would spend a call of a budget that is already the bottleneck.
 const SYNTHESIZED_GDELT_MARKER = "%Reported via GDELT%";
 
+export function isSynthesizedGdeltSnippet(snippet: string): boolean {
+  return snippet.includes("Reported via GDELT");
+}
+
+// One vector per item, shared with feed_archive (2026-10-13, measured).
+// Every published item has a row here too (13,198 of 13,198 matched by
+// url), and for GDELT and RSS — 93% of volume — feed_archive's summary is
+// just the headline again, so its own embedding was "title\ntitle": a
+// second call per item for a vector carrying less text than this one.
+// With both archives embedding separately, arrivals needed ~950-1,050
+// calls a day against the 900 cap, and kept rows fell 60-280 a day behind.
+// Same item, two texts: median cosine 0.93 (GDELT), 0.91 (RSS), 0.99
+// (Telegram), against 0.85 for an item's nearest OTHER item — so the swap
+// changes little for "similar events" and narrative clustering, and the
+// existing feed vectors with a counterpart here were swapped the same day
+// (scripts/share-archive-embeddings.ts) so the corpus stays one style.
+export function archiveEmbeddingText(row: { title: string; snippet: string }): string {
+  return `${row.title}\n${row.snippet}`.slice(0, MAX_INPUT_CHARS);
+}
+
+// Stores a vector on its classification_archive row and on the published
+// feed_archive row for the same url, if there is one — overwriting an older
+// title+summary vector there, so draining this table's historical tail
+// converts those feed rows too.
+export async function storeArchiveEmbedding(id: number, url: string, embedding: number[]): Promise<void> {
+  const db = getDb();
+  await db.update(classificationArchive).set({ embedding }).where(eq(classificationArchive.id, id));
+  await db
+    .update(feedArchive)
+    .set({ embedding })
+    .where(and(eq(feedArchive.url, url), notInArray(feedArchive.source, [...STRUCTURAL_SOURCES])));
+}
+
 // Throughput, measured 2026-09-24: the 900/day budget is paced evenly
 // (~19 calls per 30-minute cycle); published events take ~8 of them and
 // kept rows now arrive at ~400/day, up from ~270 once GDELT stopped
@@ -97,7 +131,12 @@ export async function backfillClassificationArchiveEmbeddings(): Promise<Classif
       .where(isNotNull(classificationArchive.embedding));
     const wantDropped = (pool?.dropped ?? 0) < MAX_DROPPED_PER_KEPT * (pool?.kept ?? 0);
     const rows = await db
-      .select({ id: classificationArchive.id, title: classificationArchive.title, snippet: classificationArchive.snippet })
+      .select({
+        id: classificationArchive.id,
+        url: classificationArchive.url,
+        title: classificationArchive.title,
+        snippet: classificationArchive.snippet,
+      })
       .from(classificationArchive)
       .where(
         and(
@@ -111,18 +150,13 @@ export async function backfillClassificationArchiveEmbeddings(): Promise<Classif
 
     if (rows.length === 0) return { processed: 0, skipped: false };
 
-    const texts = rows.map((r) => `${r.title}
-${r.snippet}`.slice(0, MAX_INPUT_CHARS));
-    const embeddings = await embedBatch(texts);
+    const embeddings = await embedBatch(rows.map(archiveEmbeddingText));
     if (!embeddings) return { processed: 0, skipped: true };
 
     let processed = 0;
     for (let i = 0; i < rows.length; i++) {
       if (!embeddings[i]) continue;
-      await db
-        .update(classificationArchive)
-        .set({ embedding: embeddings[i]! })
-        .where(eq(classificationArchive.id, rows[i].id));
+      await storeArchiveEmbedding(rows[i].id, rows[i].url, embeddings[i]!);
       processed++;
     }
 

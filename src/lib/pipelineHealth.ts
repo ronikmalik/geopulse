@@ -93,9 +93,6 @@ export function evaluatePipelineHealth(m: PipelineMetrics): string[] {
   if (m.feedEmbeddingBacklog > L.feedEmbeddingBacklog) {
     failures.push(`${m.feedEmbeddingBacklog} published events have no embedding (limit ${L.feedEmbeddingBacklog}) — the embedding backfill is falling behind.`);
   }
-  if (m.keptArchiveFallingBehind > L.keptArchiveFallingBehind) {
-    failures.push(`${m.keptArchiveFallingBehind} kept classifier rows from the last few days still have no embedding (limit ${L.keptArchiveFallingBehind}) — the daily embedding budget no longer covers new arrivals.`);
-  }
   if (m.embeddingsToday < L.minEmbeddingsToday) {
     failures.push(`No embedding calls today — check the Gemini key (GitHub secret GEMINI_API_KEY) and quota.`);
   }
@@ -127,6 +124,20 @@ export function evaluatePipelineHealth(m: PipelineMetrics): string[] {
     failures.push(`The ingest pipeline last ran ${m.hoursSinceLastIngest.toFixed(1)} h ago (limit ${L.maxHoursSinceLastIngest} h) — the ingest.yml chain and its cron backstop have both stopped; check the Actions tab.`);
   }
   return failures;
+}
+
+// Reported, never failing (2026-10-13, owner decision). The free Gemini
+// embedding quota is a ceiling, not a fault: when kept rows outrun it
+// the training archive lags, nothing is lost (rows wait unembedded), and
+// paying for embeddings was declined — so a red run every day would only
+// teach the owner to ignore the alarm. Shown as a run annotation instead.
+export function evaluatePipelineWarnings(m: PipelineMetrics): string[] {
+  const L = HEALTH_LIMITS;
+  const warnings: string[] = [];
+  if (m.keptArchiveFallingBehind > L.keptArchiveFallingBehind) {
+    warnings.push(`${m.keptArchiveFallingBehind} kept classifier rows from the last few days still have no embedding (limit ${L.keptArchiveFallingBehind}) — the free embedding quota no longer covers new arrivals; the training archive is lagging.`);
+  }
+  return warnings;
 }
 
 export async function gatherPipelineMetrics(): Promise<PipelineMetrics> {
@@ -189,6 +200,7 @@ export async function gatherPipelineMetrics(): Promise<PipelineMetrics> {
 export async function checkPipelineHealth(): Promise<PipelineMetrics> {
   const metrics = await gatherPipelineMetrics();
   const failures = evaluatePipelineHealth(metrics);
+  for (const warning of evaluatePipelineWarnings(metrics)) console.log(`::warning title=Pipeline health::${warning}`);
   if (failures.length > 0) {
     throw new Error(`Pipeline health: ${failures.length} check(s) failed\n- ${failures.join("\n- ")}\n${JSON.stringify(metrics)}`);
   }

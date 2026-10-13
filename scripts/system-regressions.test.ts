@@ -638,7 +638,12 @@ test("the pipeline alarm stays quiet on a healthy day and names each quiet failu
   // A large historical tail is context, not a fault; recent rows being
   // left behind is.
   assert.deepEqual(evaluatePipelineHealth({ ...healthy, keptArchiveBacklogTotal: 50_000 }), []);
-  assert.match(evaluatePipelineHealth({ ...healthy, keptArchiveFallingBehind: 400 }).join(), /no longer covers new arrivals/);
+  // 2026-10-13: the training archive lagging the free embedding quota is
+  // reported as a warning, not a failed run (owner declined paid embeddings).
+  const { evaluatePipelineWarnings } = await import("../src/lib/pipelineHealth");
+  assert.deepEqual(evaluatePipelineHealth({ ...healthy, keptArchiveFallingBehind: 400 }), []);
+  assert.match(evaluatePipelineWarnings({ ...healthy, keptArchiveFallingBehind: 400 }).join(), /no longer covers new arrivals/);
+  assert.deepEqual(evaluatePipelineWarnings(healthy), []);
   // No pending items at all is healthy, not "unknown".
   assert.deepEqual(evaluatePipelineHealth({ ...healthy, oldestPendingReviewHours: null }), []);
 });
@@ -728,6 +733,14 @@ test("Telegram posts are embedded as their content, not their channel label", as
   // News keeps its title + summary exactly as before.
   assert.equal(embeddingText({ source: "rss:bbc-world", title: "T", summary: "S" }), "T\nS");
   assert.equal(embeddingText({ source: "gdelt", title: "T", summary: "S" }), "T\nS");
+});
+
+test("a feed row shares its classifier row's vector text, and synthesized GDELT rows are never embedded", async () => {
+  const { archiveEmbeddingText, isSynthesizedGdeltSnippet } = await import("../src/lib/classificationArchiveEmbeddingBackfill");
+  assert.equal(archiveEmbeddingText({ title: "T", snippet: "S" }), "T\nS");
+  assert.equal(archiveEmbeddingText({ title: "T", snippet: "x".repeat(5000) }).length, 2000);
+  assert.equal(isSynthesizedGdeltSnippet("FIGHT: Ottawa ... Reported via GDELT's structured event data"), true);
+  assert.equal(isSynthesizedGdeltSnippet("Gunmen ambushed a convoy of traders"), false);
 });
 
 test("the Trends chart ends on the live score, standing in for today's snapshot", () => {

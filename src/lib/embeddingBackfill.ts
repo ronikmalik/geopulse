@@ -1,10 +1,15 @@
-import { isNull, eq, desc, notInArray, and } from "drizzle-orm";
+import { isNull, eq, desc, notInArray, and, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { feedArchive } from "@/db/schema";
+import { classificationArchive, feedArchive } from "@/db/schema";
 import { STRUCTURAL_SOURCES } from "./structuralSources";
 import { embedBatch } from "./embeddings";
 import { getEmbeddingBudget } from "./aiUsage";
 import { splitAttribution } from "./displayText";
+import {
+  archiveEmbeddingText,
+  isSynthesizedGdeltSnippet,
+  storeArchiveEmbedding,
+} from "./classificationArchiveEmbeddingBackfill";
 
 // Deliberately decoupled from the insert path (src/lib/feedArchive.ts's
 // archiveFeedItems) rather than embedding inline at insert time — ingest
@@ -69,6 +74,10 @@ const MAX_INPUT_CHARS = 2000;
 // it is stripped here; the card still shows it. Rows embedded before this
 // keep their old vectors: re-embedding them would cost roughly a day of the
 // 900/day budget, and similarEvents.ts excludes same-channel matches anyway.
+//
+// Since 2026-10-13 this is only the fallback for a feed row with no usable
+// classification_archive counterpart; normally the feed row shares that
+// row's vector — see archiveEmbeddingText for why.
 export function embeddingText(row: { source: string; title: string; summary: string }): string {
   if (!row.source.startsWith("telegram:")) return `${row.title}\n${row.summary}`;
   return splitAttribution(row.summary, row.source).body;
@@ -82,22 +91,51 @@ export interface BackfillResult {
 export async function backfillFeedArchiveEmbeddings(): Promise<BackfillResult> {
   try {
     const db = getDb();
+    const structural = sql.raw([...STRUCTURAL_SOURCES].map((s) => `'${s}'`).join(", "));
+
+    // Free first: feed rows whose classification_archive row already has
+    // a vector just take it — no Gemini call (see archiveEmbeddingText).
+    const copied = await db.execute(sql`
+      update feed_archive f set embedding = c.embedding
+      from classification_archive c
+      where c.url = f.url and f.embedding is null and c.embedding is not null
+        and f.source not in (${structural})
+      returning f.id`);
+    let processed = copied.rows.length;
+
     const budget = await getEmbeddingBudget();
     const take = Math.min(MAX_PER_CYCLE, budget.remainingRightNow, budget.remainingToday);
-    if (take <= 0) return { processed: 0, skipped: true };
+    if (take <= 0) return { processed, skipped: true };
     const rows = await db
-      .select({ id: feedArchive.id, source: feedArchive.source, title: feedArchive.title, summary: feedArchive.summary })
+      .select({
+        id: feedArchive.id,
+        url: feedArchive.url,
+        source: feedArchive.source,
+        title: feedArchive.title,
+        summary: feedArchive.summary,
+        archiveId: classificationArchive.id,
+        archiveTitle: classificationArchive.title,
+        archiveSnippet: classificationArchive.snippet,
+      })
       .from(feedArchive)
+      .leftJoin(classificationArchive, eq(classificationArchive.url, feedArchive.url))
       // Structural sources are never embedded — see structuralSources.ts.
       .where(and(isNull(feedArchive.embedding), notInArray(feedArchive.source, [...STRUCTURAL_SOURCES])))
       .orderBy(desc(feedArchive.id))
       .limit(take);
 
-    if (rows.length === 0) return { processed: 0, skipped: false };
+    if (rows.length === 0) return { processed, skipped: false };
 
-    const texts = rows.map((r) => embeddingText(r).slice(0, MAX_INPUT_CHARS));
+    // One call serves both archives when the item has a usable
+    // classification_archive row; the feed's own text is the fallback.
+    const shared = rows.map((r) =>
+      r.archiveId !== null && r.archiveTitle !== null && r.archiveSnippet !== null && !isSynthesizedGdeltSnippet(r.archiveSnippet)
+        ? { id: r.archiveId, title: r.archiveTitle, snippet: r.archiveSnippet }
+        : null,
+    );
+    const texts = rows.map((r, i) => (shared[i] ? archiveEmbeddingText(shared[i]) : embeddingText(r).slice(0, MAX_INPUT_CHARS)));
     const embeddings = await embedBatch(texts);
-    if (!embeddings) return { processed: 0, skipped: true };
+    if (!embeddings) return { processed, skipped: true };
 
     // Per-item nulls are expected now (one bad text shouldn't waste the
     // rest of the batch — see embedBatch's doc comment) — only rows that
@@ -106,13 +144,17 @@ export async function backfillFeedArchiveEmbeddings(): Promise<BackfillResult> {
     // in-memory list worth building raw SQL for — one UPDATE per row,
     // same as any other per-row enrichment pass in this codebase (see
     // recordSourceHealth).
-    let processed = 0;
     for (let i = 0; i < rows.length; i++) {
       if (!embeddings[i]) continue;
-      await db
-        .update(feedArchive)
-        .set({ embedding: embeddings[i]! })
-        .where(eq(feedArchive.id, rows[i].id));
+      const archive = shared[i];
+      if (archive) {
+        await storeArchiveEmbedding(archive.id, rows[i].url, embeddings[i]!);
+      } else {
+        await db
+          .update(feedArchive)
+          .set({ embedding: embeddings[i]! })
+          .where(eq(feedArchive.id, rows[i].id));
+      }
       processed++;
     }
 

@@ -912,8 +912,10 @@ export const feedArchive = pgTable(
     // Nullable, populated asynchronously by src/lib/embeddingBackfill.ts —
     // never blocks the ingest path that writes this row (see
     // src/lib/feedArchive.ts's "must never fail or slow down live ingest"
-    // rule, which this follows the same way). Semantic vector over
-    // title+summary; the vector-similarity search this enables (see GET
+    // rule, which this follows the same way). Since 2026-10-13 it is the
+    // same vector as the item's classification_archive row (title+snippet,
+    // one Gemini call for both — see archiveEmbeddingText); title+summary
+    // only when no such row exists. The vector-similarity search this enables (see GET
     // /api/events/[id]/similar) is scoped to this table rather than
     // `events` because feed_archive is the durable full corpus (including
     // rows that have since aged out of events' 30-day window or were
