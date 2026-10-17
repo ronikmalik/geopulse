@@ -88,6 +88,11 @@ Type=oneshot
 User=geopulse
 EnvironmentFile=/etc/geopulse/env
 Environment=NODE_ENV=production GEOPULSE_UNIT=$name
+# The subnet has no IPv6, and Node's happy-eyeballs gives each address
+# 250 ms: on the 1/8-OCPU micro, a busy ingest event loop let that timer
+# win and RSS feeds failed with internalConnectMultipleTimeout ETIMEDOUT
+# (2026-10-17). IPv4 first, one plain connect, the parser's 10 s timeout.
+Environment="NODE_OPTIONS=--dns-result-order=ipv4first --no-network-family-autoselection"
 ExecStart=/bin/bash /opt/geopulse/app/deploy/oracle/run.sh $jobs
 TimeoutStartSec=50min
 Nice=5
