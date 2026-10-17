@@ -7,9 +7,10 @@ name: Train narrative clusters
 # In-process on the runner since 2026-09-19 (see _run-job.yml) — training
 # is the one place the old 55-120s Vercel maxDuration was actually tight;
 # the runner has no such clock.
+# 2026-10-17: manual-only. GitHub disabled Actions on this repo on 2026-10-14
+# and every schedule now runs as a systemd timer on the Oracle Always Free
+# VM (deploy/oracle/). Do not add a cron here: both hosts would run it.
 on:
-  schedule:
-    - cron: "30 12 * * 0"
   workflow_dispatch: {}
 
 permissions:

@@ -59,3 +59,26 @@ CRON_SECRET=             APP_ORIGIN=https://geopulse-green.vercel.app
 # Optional dead-man's-switch ping URLs, one per unit name:
 # HC_PING_cycle=  HC_PING_snapshot=
 ```
+
+## What exists (built 2026-10-17)
+
+- **Tenancy:** `ronikmalik`, home region us-ashburn-1. The account was
+  still provisioning, so the Pay As You Go upgrade is pending for the
+  owner.
+- **VM:** `geopulse-pipeline`, VM.Standard.E2.1.Micro (AMD, 1 GB RAM plus
+  2 GB swap), Ubuntu 24.04, 50 GB boot volume, in zone GObk:US-ASHBURN-AD-2.
+  Public IP 129.153.156.38 (ephemeral). SSH as `ubuntu` with the owner's
+  `~/.ssh/geopulse_oracle` key.
+  - Free A1.Flex (Arm, 2 OCPU / 12 GB) was "Out of host capacity" in all
+    three zones. Move to it when it frees up; the quota already allows it.
+  - On the micro a full cycle took 75 s.
+- **Network:** `geopulse-vcn` 10.0.0.0/16 with an internet gateway and
+  subnet `geopulse-public` 10.0.0.0/24. The default security list allows
+  only SSH (22) and ICMP inbound.
+- **Quota `geopulse-free-only`:** A1 is capped at 2 cores and 12 GB, E2
+  micro at 2 cores, all other compute-core and compute-memory quotas are
+  0, block storage is capped at 200 GB and backups at 5. Verified with
+  `oci limits resource-availability get`: E4, E5, Standard3, E2 and A10
+  all show 0 available.
+- **Budget `geopulse-zero-dollar`:** $1/month on the tenancy, with ACTUAL
+  and FORECAST alert rules at 1% ($0.01) that email the owner.

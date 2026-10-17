@@ -11,11 +11,10 @@ name: Daily snapshots
 #   snapshot-flights  18:30 UTC  aircraft/GPS-jamming baselines + anomaly scan
 #   audit-classifier  20:00 UTC  Gemini backlog audit sweep (lowest priority
 #                                consumer of the shared audit budget)
+# 2026-10-17: manual-only. GitHub disabled Actions on this repo on 2026-10-14
+# and every schedule now runs as a systemd timer on the Oracle Always Free
+# VM (deploy/oracle/). Do not add a cron here: both hosts would run it.
 on:
-  schedule:
-    - cron: "0 18 * * *"
-    - cron: "30 18 * * *"
-    - cron: "0 20 * * *"
   workflow_dispatch:
     inputs:
       job:

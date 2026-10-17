@@ -15,9 +15,10 @@ name: Sync sanctions lists
 # docs/ARCHITECTURE.md §12). One weekly run costs roughly a minute of
 # database time; the download itself is Actions bandwidth, which is free
 # on a public repo.
+# 2026-10-17: manual-only. GitHub disabled Actions on this repo on 2026-10-14
+# and every schedule now runs as a systemd timer on the Oracle Always Free
+# VM (deploy/oracle/). Do not add a cron here: both hosts would run it.
 on:
-  schedule:
-    - cron: "0 17 * * 3"
   workflow_dispatch: {}
 
 permissions:

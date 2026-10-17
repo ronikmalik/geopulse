@@ -54,9 +54,10 @@ name: Ingest live events
 # of files (gdeltBulk.ts), the title drain takes 200 a cycle against ~160
 # new, RSS feeds keep hours of items, and every Gemini cap is per day.
 # Minutes :07/:37 keep clear of the top of the hour, GitHub's busiest slot.
+# 2026-10-17: manual-only. GitHub disabled Actions on this repo on 2026-10-14
+# and every schedule now runs as a systemd timer on the Oracle Always Free
+# VM (deploy/oracle/). Do not add a cron here: both hosts would run it.
 on:
-  schedule:
-    - cron: "7,37 * * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -103,77 +104,3 @@ jobs:
       job: generate-briefs
       timeout-minutes: 6
     secrets: inherit
-
-  # Self-dispatch (2026-10-08). GitHub's scheduler delayed this repo's
-  # cron triggers by 3-7 hours for days at a time (daily-snapshots' 18:00
-  # slot started at 22:25-23:56 the same week), but workflow_dispatch
-  # starts within seconds. So each run queues its successor for 30 minutes
-  # after its own start; the cron above stays as the backstop that
-  # restarts the chain if a run is cancelled or GitHub drops a dispatch.
-  # Waiting on the runner costs nothing on a public repo. Skipped when
-  # another ingest run is already waiting, so there is only ever one
-  # chain. Off switch: set the repo variable INGEST_CHAIN to "off".
-  #
-  # It also keeps the repo's schedules alive while nobody commits. GitHub
-  # disables scheduled workflows in a public repo after 60 days without
-  # repository activity, silently, and a disabled workflow cannot be
-  # dispatched either, so this chain would stop with them. Two layers:
-  # re-enable every workflow GitHub did not see disabled by hand (the
-  # enable call is what keepalive actions use, and it also revives one
-  # already disabled for inactivity), and if the branch has had no commit
-  # for 50 days, commit a one-line date stamp to .github/keepalive.
-  next:
-    needs: generate-briefs
-    if: ${{ !cancelled() && vars.INGEST_CHAIN != 'off' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    permissions:
-      actions: write
-      contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-    steps:
-      - name: Keep workflows enabled
-        continue-on-error: true
-        run: |
-          gh api "repos/$GH_REPO/actions/workflows" --paginate \
-            --jq '.workflows[] | select(.state != "disabled_manually") | "\(.id) \(.state) \(.path)"' |
-          while read -r id state path; do
-            if gh api -X PUT "repos/$GH_REPO/actions/workflows/$id/enable" >/dev/null; then
-              [ "$state" = "active" ] || echo "re-enabled $path (was $state)"
-            else
-              echo "::warning::could not enable $path"
-            fi
-          done
-      - name: Commit a keepalive stamp after 50 quiet days
-        continue-on-error: true
-        run: |
-          branch="${{ github.ref_name }}"
-          last=$(gh api "repos/$GH_REPO/commits?sha=$branch&per_page=1" --jq '.[0].commit.committer.date')
-          age=$(( ($(date +%s) - $(date -d "$last" +%s)) / 86400 ))
-          echo "last commit on $branch: $last ($age days ago)"
-          if [ "$age" -ge 50 ]; then
-            sha=$(gh api "repos/$GH_REPO/contents/.github/keepalive?ref=$branch" --jq .sha 2>/dev/null || true)
-            gh api -X PUT "repos/$GH_REPO/contents/.github/keepalive" \
-              -f message="Keepalive: $age days without a commit (GitHub disables schedules at 60)" \
-              -f content="$(date -u +%Y-%m-%dT%H:%M:%SZ | base64)" \
-              -f branch="$branch" ${sha:+-f sha="$sha"} >/dev/null
-            echo "committed .github/keepalive"
-          fi
-      - name: Wait until 30 minutes after this run started
-        run: |
-          started=$(gh api "repos/$GH_REPO/actions/runs/${{ github.run_id }}" --jq .run_started_at)
-          wait=$(( $(date -d "$started" +%s) + 1800 - $(date +%s) ))
-          echo "run started $started; waiting ${wait}s"
-          if [ "$wait" -gt 0 ]; then sleep "$wait"; fi
-      - name: Dispatch the next run unless one is already waiting
-        run: |
-          others=$(gh run list --workflow ingest.yml --limit 20 --json databaseId,status \
-            --jq "[.[] | select(.databaseId != ${{ github.run_id }}) | select(.status != \"completed\")] | length")
-          if [ "$others" -gt 0 ]; then
-            echo "$others other ingest run(s) queued or running; not dispatching"
-          else
-            gh workflow run ingest.yml --ref "${{ github.ref_name }}"
-            echo "dispatched the next ingest run"
-          fi
