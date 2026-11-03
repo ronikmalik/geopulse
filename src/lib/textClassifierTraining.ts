@@ -115,6 +115,7 @@ export interface TextClassifierRunResult {
   sampleSize: number;
   k: number;
   cvAccuracy: number;
+  cvMajorityBaseline?: number;
   backtestSampleSize: number;
   backtestAgreementRate: number;
   promoted: boolean;
@@ -141,6 +142,13 @@ export async function trainAndEvaluateTextClassifier(): Promise<TextClassifierRu
     return result;
   }
   const kSelection = chooseBestK(training, K_CANDIDATES.filter((k) => k < training.length));
+  // What "always predict the commoner class" scores on the same pool. CV
+  // agreement means nothing without it: until mid-October only kept rows
+  // were embedded (99.9% kept), so ~90% CV agreement was near-trivial; once
+  // dropped rows entered the pool (39% kept on 2026-11-03) the headline
+  // number fell to 74% while the margin over this baseline grew.
+  const keptShare = training.filter((example) => example.kept).length / training.length;
+  const cvMajorityBaseline = Math.max(keptShare, 1 - keptShare);
   let correct = 0;
   let evaluated = 0;
   for (const f of auditCorrections) {
@@ -168,7 +176,7 @@ export async function trainAndEvaluateTextClassifier(): Promise<TextClassifierRu
   const promoted = human.evaluated >= HUMAN_EVAL_MIN_SAMPLE && human.knnAccuracy > human.gateAccuracy;
 
   const notes =
-    `trained k=${kSelection.k} (${kSelection.weighting} vote weighting, selected jointly with k by 3-fold CV) on ${training.length} labeled examples (CV agreement with archived labels ${(kSelection.accuracy * 100).toFixed(1)}%). ` +
+    `trained k=${kSelection.k} (${kSelection.weighting} vote weighting, selected jointly with k by 3-fold CV) on ${training.length} labeled examples (CV agreement with archived labels ${(kSelection.accuracy * 100).toFixed(1)}% vs ${(cvMajorityBaseline * 100).toFixed(1)}% for always predicting the majority class; ${(keptShare * 100).toFixed(1)}% of the pool is kept). ` +
     `Evaluated on ${evaluated} audit corrections (may include automatic reviews) — ` +
     `agreement with audit decisions: ${(backtestAgreementRate * 100).toFixed(1)}%. ` +
     `Human-graded evaluation: ${human.evaluated} gate decision(s) graded by a person${human.evaluated > 0 ? ` — k-NN accuracy ${(human.knnAccuracy * 100).toFixed(1)}% vs the live gate's ${(human.gateAccuracy * 100).toFixed(1)}% on the same rows` : ""}. ` +
@@ -183,6 +191,7 @@ export async function trainAndEvaluateTextClassifier(): Promise<TextClassifierRu
     sampleSize: training.length,
     k: kSelection.k,
     cvAccuracy: kSelection.accuracy,
+    cvMajorityBaseline,
     backtestSampleSize: evaluated,
     backtestAgreementRate,
     promoted,
@@ -250,7 +259,11 @@ async function recordRun(r: TextClassifierRunResult): Promise<void> {
     sampleSize: r.sampleSize,
     backtestSampleSize: r.backtestSampleSize,
     featureNames: ["embedding(768)"],
-    metrics: { cvAccuracy: r.cvAccuracy, auditAgreementRate: r.backtestAgreementRate },
+    metrics: {
+      cvAccuracy: r.cvAccuracy,
+      ...(r.cvMajorityBaseline !== undefined ? { cvMajorityBaseline: r.cvMajorityBaseline } : {}),
+      auditAgreementRate: r.backtestAgreementRate,
+    },
     baseline: { name: "live Gemini gate (human-graded rows)", note: "promotion requires beating it on ≥ 50 graded rows" },
     trained: r.trained,
     promoted: r.promoted,
