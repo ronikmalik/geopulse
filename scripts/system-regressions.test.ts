@@ -601,8 +601,8 @@ test("GDELT discovery reads every 15-minute file in its window, not just the new
   assert.deepEqual(urls.map((u) => u.slice(-29, -15)), [
     "20260923231500", "20260923230000", "20260923224500", "20260923223000", "20260923221500",
   ]);
-  // HTTPS: the plain-HTTP host 301s every request.
-  assert.ok(urls.every((u) => u.startsWith("https://data.gdeltproject.org/gdeltv2/")));
+  // HTTPS, and the bucket path rather than the CDN host that caches early 404s.
+  assert.ok(urls.every((u) => u.startsWith("https://storage.googleapis.com/data.gdeltproject.org/gdeltv2/")));
   // Across midnight and a month boundary, slots still step back 15 minutes.
   const midnight = recentExportCsvUrls("https://data.gdeltproject.org/gdeltv2/20261001000000.export.CSV.zip", 2);
   assert.ok(midnight[1].endsWith("20260930234500.export.CSV.zip"));

@@ -53,8 +53,21 @@ import {
 // HTTPS: as of 2026-09-23 the plain-HTTP host answers every request with
 // a 301 to HTTPS — fetch follows it, but that is a wasted round trip per
 // file, and lastupdate.txt itself still lists http:// URLs.
-const LAST_UPDATE_URL = "https://data.gdeltproject.org/gdeltv2/lastupdate.txt";
-const FILE_BASE_URL = "https://data.gdeltproject.org/gdeltv2/";
+//
+// Direct Cloud Storage path, not the data.gdeltproject.org website host
+// (CHANGED 2026-11-03): that host is the same GCS bucket behind Google's
+// CDN, and its 404 page carries `Cache-Control: public, max-age=3600`. Since
+// about 2026-10-24, some client somewhere asks for each new file just before
+// GDELT uploads it, the edge caches that 404 for an hour, and every reader
+// then gets 404 for the newest file (and often the next two) while
+// lastupdate.txt already lists it: on 2026-11-03 at 16:06 UTC the 15:30,
+// 15:45 and 16:00 exports all 404'd with Age ~1-48 min, while the same
+// objects via storage.googleapis.com returned the bytes whose md5 matches
+// lastupdate.txt. Discovery failed in 47 of 48 cycles on 2026-10-30. The
+// bucket path answers a missing object with `private, max-age=0`, so an early
+// miss is never cached.
+const LAST_UPDATE_URL = "https://storage.googleapis.com/data.gdeltproject.org/gdeltv2/lastupdate.txt";
+const FILE_BASE_URL = "https://storage.googleapis.com/data.gdeltproject.org/gdeltv2/";
 
 // How many of GDELT's 15-minute export files each ingest reads: the newest
 // and the four before it, i.e. a 75-minute window.
@@ -206,18 +219,22 @@ const COL = {
 // from drainPendingGdeltTitles below, once a real title exists.
 export async function discoverGdeltCandidates(): Promise<RawItem[]> {
   const urls = recentExportCsvUrls(await getLatestExportCsvUrl(), EXPORT_FILES_PER_CYCLE);
-  // Settled, not all-or-nothing: a missing or slow older file costs only
-  // itself, and the next windows read it again anyway. A failure on the
-  // newest file still throws, so a GDELT outage shows up in source_health
-  // instead of passing as a quiet cycle.
+  // Settled, not all-or-nothing: a missing or slow file costs only itself,
+  // and the next windows read it again anyway. A failure on the newest file
+  // still throws, so a GDELT outage shows up in source_health instead of
+  // passing as a quiet cycle — but only after the files that did arrive are
+  // queued (until 2026-11-03 it threw first, so one bad newest file
+  // discarded the whole window; see FILE_BASE_URL).
   const files = await Promise.allSettled(urls.map((u) => fetchAndUnzipCsv(u)));
-  if (files[0].status === "rejected") throw files[0].reason;
   const csvs = files.flatMap((f) => (f.status === "fulfilled" ? [f.value] : []));
 
-  await enqueuePendingGdeltTitles(parseExportCandidates(csvs)).catch((err) => {
-    console.error(`enqueuePendingGdeltTitles failed: ${err}`);
-  });
+  if (csvs.length > 0) {
+    await enqueuePendingGdeltTitles(parseExportCandidates(csvs)).catch((err) => {
+      console.error(`enqueuePendingGdeltTitles failed: ${err}`);
+    });
+  }
 
+  if (files[0].status === "rejected") throw files[0].reason;
   return [];
 }
 
