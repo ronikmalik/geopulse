@@ -6,7 +6,7 @@ import { splitByAvailableOutcome, predictionTargetAt } from "../src/lib/temporal
 import { buildRegressionExamples, findClosestSnapshot, type Snapshot } from "../src/lib/riskModel";
 import { trainLinearRegression, predict } from "../src/lib/linearRegression";
 import { SlidingWindowLimiter } from "../src/lib/slidingWindowLimiter";
-import { trainGradientBoostedTrees, predictGbm } from "../src/lib/gradientBoostedTrees";
+import { trainGradientBoostedTrees, predictGbm, buildTree, type TreeNode } from "../src/lib/gradientBoostedTrees";
 import { isCronAuthorized } from "../src/lib/cronAuth";
 import { parseCountryParam, parseIdParam, parseCategoriesParam, parseBoundedInt, cachedJson } from "../src/lib/apiParams";
 import { getDuplicatesOf } from "../src/lib/eventDedup";
@@ -102,6 +102,45 @@ test("both forecasting models fit finite predictions with a purged inner split",
   const gbm = trainGradientBoostedTrees(x, y, undefined, split).model;
   assert.ok(Math.abs(predict(linear, [20, 1]) - 43) < 3);
   assert.ok(Math.abs(predictGbm(gbm, [20, 1]) - 43) < 8);
+});
+
+test("the sorted-sweep tree split picks the same splits as a brute-force rescan", () => {
+  // 2026-11-03: buildTree went from an O(n²) rescan per threshold to one
+  // sorted sweep per feature. The reference below is the old algorithm.
+  const sse = (v: number[]) => {
+    const m = v.reduce((s, a) => s + a, 0) / (v.length || 1);
+    return v.reduce((s, a) => s + (a - m) ** 2, 0);
+  };
+  const reference = (x: number[][], y: number[], cfg: { maxDepth: number; minSamplesLeaf: number }, depth = 0): TreeNode => {
+    const leaf = (): TreeNode => ({ isLeaf: true, value: y.reduce((s, a) => s + a, 0) / (y.length || 1), featureIndex: -1, threshold: 0, left: null, right: null });
+    if (depth >= cfg.maxDepth || x.length < 2 * cfg.minSamplesLeaf) return leaf();
+    let best = { f: -1, t: 0, sse: sse(y), l: [] as number[], r: [] as number[] };
+    for (let f = 0; f < x[0].length; f++) {
+      const u = [...new Set(x.map((row) => row[f]))].sort((a, b) => a - b);
+      for (let i = 0; i < u.length - 1; i++) {
+        const t = (u[i] + u[i + 1]) / 2;
+        const l: number[] = [], r: number[] = [];
+        x.forEach((row, j) => (row[f] <= t ? l : r).push(j));
+        if (l.length < cfg.minSamplesLeaf || r.length < cfg.minSamplesLeaf) continue;
+        const c = sse(l.map((j) => y[j])) + sse(r.map((j) => y[j]));
+        if (c < best.sse) best = { f, t, sse: c, l, r };
+      }
+    }
+    if (best.f === -1) return leaf();
+    return {
+      isLeaf: false, value: 0, featureIndex: best.f, threshold: best.t,
+      left: reference(best.l.map((i) => x[i]), best.l.map((i) => y[i]), cfg, depth + 1),
+      right: reference(best.r.map((i) => x[i]), best.r.map((i) => y[i]), cfg, depth + 1),
+    };
+  };
+  let seed = 7;
+  const rand = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+  // Integer-valued columns force ties; the heavy-tailed target mimics risk scores.
+  const x = Array.from({ length: 300 }, () => [Math.floor(rand() * 4), rand() * 100, Math.floor(rand() * 20), rand() < 0.5 ? -1 : 1]);
+  const y = x.map(([a, b, c, d]) => a * 3 + (b > 60 ? 40 : 0) + c * d + rand() * 5 + (rand() < 0.02 ? 900 : 0));
+  for (const cfg of [{ maxDepth: 1, minSamplesLeaf: 3 }, { maxDepth: 3, minSamplesLeaf: 3 }, { maxDepth: 4, minSamplesLeaf: 10 }]) {
+    assert.deepEqual(buildTree(x, y, cfg), reference(x, y, cfg));
+  }
 });
 
 test("closed-form ridge recovers an exact linear relation and the largest L2 still fits, not zeroes", () => {

@@ -52,41 +52,74 @@ function makeLeaf(value: number): TreeNode {
 // (tens of examples per horizon even at maturity) — without it, a tree
 // this deep would happily carve out a single-point leaf per training
 // example, memorizing rather than learning.
+//
+// One sorted sweep per feature (2026-11-03), not a rescan per threshold:
+// rows are sorted once by the feature, and each threshold's two child SSEs
+// come from running sums (SSE = Σy² − (Σy)²/n, on y centred at the node
+// mean to keep the subtraction well-conditioned). Same candidate thresholds,
+// same visiting order, same strict-improvement rule — O(n log n) per
+// feature instead of O(n²). The rescan version took 187 s on a fast desktop
+// for the 1-day horizon's ~6,700 rows, and on the 1/8-OCPU Oracle VM the
+// weekly train-risk-model job ran past its 14-minute ceiling from
+// 2026-10-25 on.
 export function buildTree(x: number[][], y: number[], config: TreeConfig, depth = 0): TreeNode {
   if (depth >= config.maxDepth || x.length < 2 * config.minSamplesLeaf) {
     return makeLeaf(mean(y));
   }
 
+  const n = x.length;
   const nFeatures = x[0]?.length ?? 0;
+  const yMean = mean(y);
+  const yc = y.map((v) => v - yMean);
+  let totalSum = 0;
+  let totalSq = 0;
+  for (const v of yc) {
+    totalSum += v;
+    totalSq += v * v;
+  }
+
   let bestFeature = -1;
   let bestThreshold = 0;
   let bestSse = sse(y); // a "split" that doesn't improve on the unsplit SSE is never chosen
-  let bestLeftIdx: number[] = [];
-  let bestRightIdx: number[] = [];
 
+  const order = Array.from({ length: n }, (_, j) => j);
   for (let f = 0; f < nFeatures; f++) {
-    const uniqueSorted = [...new Set(x.map((row) => row[f]))].sort((a, b) => a - b);
-    for (let i = 0; i < uniqueSorted.length - 1; i++) {
-      const threshold = (uniqueSorted[i] + uniqueSorted[i + 1]) / 2;
-      const leftIdx: number[] = [];
-      const rightIdx: number[] = [];
-      for (let j = 0; j < x.length; j++) {
-        (x[j][f] <= threshold ? leftIdx : rightIdx).push(j);
-      }
-      if (leftIdx.length < config.minSamplesLeaf || rightIdx.length < config.minSamplesLeaf) continue;
+    order.sort((a, b) => x[a][f] - x[b][f]);
+    let leftCount = 0;
+    let leftSum = 0;
+    let leftSq = 0;
+    for (let k = 0; k < n - 1; k++) {
+      const j = order[k];
+      leftCount++;
+      leftSum += yc[j];
+      leftSq += yc[j] * yc[j];
+      const value = x[j][f];
+      const next = x[order[k + 1]][f];
+      if (value === next) continue; // thresholds sit only between distinct values
+      const rightCount = n - leftCount;
+      if (leftCount < config.minSamplesLeaf || rightCount < config.minSamplesLeaf) continue;
 
-      const candidateSse = sse(leftIdx.map((j) => y[j])) + sse(rightIdx.map((j) => y[j]));
+      const rightSum = totalSum - leftSum;
+      const rightSq = totalSq - leftSq;
+      const candidateSse =
+        Math.max(0, leftSq - (leftSum * leftSum) / leftCount) +
+        Math.max(0, rightSq - (rightSum * rightSum) / rightCount);
       if (candidateSse < bestSse) {
         bestSse = candidateSse;
         bestFeature = f;
-        bestThreshold = threshold;
-        bestLeftIdx = leftIdx;
-        bestRightIdx = rightIdx;
+        bestThreshold = (value + next) / 2;
       }
     }
   }
 
   if (bestFeature === -1) return makeLeaf(mean(y)); // no split improves on a leaf here
+
+  // Partitioned by the same `<= threshold` test predictTree applies.
+  const bestLeftIdx: number[] = [];
+  const bestRightIdx: number[] = [];
+  for (let j = 0; j < n; j++) {
+    (x[j][bestFeature] <= bestThreshold ? bestLeftIdx : bestRightIdx).push(j);
+  }
 
   return {
     isLeaf: false,
@@ -188,11 +221,13 @@ export function trainGradientBoostedTrees(
   const innerTrainY: number[] = [];
   const valX: number[][] = [];
   const valY: number[] = [];
+  const valIdx = validationSplit ? new Set(validationSplit.test) : null;
+  const trainIdx = validationSplit ? new Set(validationSplit.train) : null;
   for (let i = 0; i < n; i++) {
-    if (validationSplit ? validationSplit.test.includes(i) : i % step === 0) {
+    if (valIdx ? valIdx.has(i) : i % step === 0) {
       valX.push(x[i]);
       valY.push(y[i]);
-    } else if (!validationSplit || validationSplit.train.includes(i)) {
+    } else if (!trainIdx || trainIdx.has(i)) {
       innerTrainX.push(x[i]);
       innerTrainY.push(y[i]);
     }
