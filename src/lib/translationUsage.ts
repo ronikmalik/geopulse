@@ -159,6 +159,17 @@ export function translationMonthReady(now: Date): boolean {
   return now.getUTCDate() !== 1 || now.getUTCHours() >= 8;
 }
 
+// The most one call may reserve right now: the same limits
+// reserveTranslationBytes applies, read without reserving. Lets a caller
+// trim its batch to fit instead of sending it whole and being refused.
+export async function translationAllowanceNow(): Promise<number> {
+  const now = new Date();
+  if (!translationMonthReady(now)) return 0;
+  const budget = await getUsageBudget(now);
+  return Math.max(0, Math.min(budget.remainingRightNow, budget.remainingToday,
+    Math.floor(budget.dailyBudget / MAX_CHARS_PER_CALL_FRACTION), MONTHLY_BYTE_CAP - budget.monthUsed));
+}
+
 export async function reserveTranslationBytes(bytes: number): Promise<boolean> {
   if (!Number.isSafeInteger(bytes) || bytes <= 0) return false;
   const now = new Date();

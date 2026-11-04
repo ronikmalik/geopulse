@@ -1,7 +1,8 @@
 import { classifyByKeywords, type ClassifiedItem } from "./classify";
 import type { CredibilityLookup } from "./sourceCredibility";
 import { resolveCountryFromText } from "./countryNames";
-import { translateBatch } from "./translate";
+import { byteLength, translateBatch } from "./translate";
+import { translationAllowanceNow } from "./translationUsage";
 import type { RawItem } from "./sources/gdelt";
 
 // Translation-fallback retry for RSS/GDELT items that fail classification
@@ -39,23 +40,77 @@ export interface TranslationRetryResult {
 
 const MAX_INPUT_CHARS = 500; // title+snippet are already short; caps a single pathological item from claiming a disproportionate share of one call's budget
 
+// Function words of the languages GDELT's article pages most often arrive
+// in, minus any that are also English words ("die", "a", "in", "on"...).
+// Measured 2026-11-04: of 3,786 retry candidates in seven days, every one
+// read as English when inspected, so the retry was sending English text to
+// be "translated" into English, billed at full rate, from the same daily
+// pool Telegram's non-English channels depend on.
+const FOREIGN_FUNCTION_WORDS = new Set(
+  (
+    "el la los las del y que por para con una se al su sus lo como más pero sin sobre entre " + // es
+    "le les des du et une pour dans sur avec est au aux contre selon cette ces qui ont été " + // fr
+    "der das und im mit von ist nicht ein eine auf für bei nach zum zur gegen wird sich dem den " + // de
+    "il di che della per gli nel alla dei delle sono è anche " + // it
+    "os da do das dos em não uma com pelo pela são " + // pt
+    "het een van op voor niet zijn naar ook " + // nl
+    "dan yang di ke dari untuk dengan ini itu dalam pada " + // id
+    "ve bir ile için bu olarak"
+  ).split(" "),
+);
+const ENGLISH_FUNCTION_WORDS = new Set(
+  "the of and to in a is for on that with as by at from has was are will said after over its it be have an this not but who".split(" "),
+);
+
+// True when the text is plausibly NOT English: mostly non-Latin script, or
+// Latin script carrying more non-English than English function words (two
+// distinct ones at least, so a name like "de Blasio" or "La Paz" doesn't
+// count). Errs toward "English" — a skipped foreign item costs one missed
+// recovery, while a false "foreign" costs budget Telegram needed.
+export function looksNonEnglish(text: string): boolean {
+  const letters = text.match(/\p{L}/gu) ?? [];
+  if (letters.length === 0) return false;
+  const nonAscii = letters.filter((ch) => ch > "\u007f").length;
+  if (nonAscii / letters.length >= 0.3) return true;
+  const words = text.toLowerCase().match(/[\p{L}']+/gu) ?? [];
+  const foreign = new Set(words.filter((w) => FOREIGN_FUNCTION_WORDS.has(w)));
+  const english = words.filter((w) => ENGLISH_FUNCTION_WORDS.has(w)).length;
+  return foreign.size >= 2 && foreign.size > english;
+}
+
 export async function retryFailedClassificationsViaTranslation(
   failedItems: RawItem[],
   credibilityMap?: Map<string, CredibilityLookup>,
 ): Promise<TranslationRetryResult> {
-  const candidates = failedItems.filter((item) => {
+  const eligible = failedItems.filter((item) => {
     const text = `${item.title} ${item.snippet}`;
-    return resolveCountryFromText(item.title) ?? resolveCountryFromText(text);
+    return looksNonEnglish(text) && (resolveCountryFromText(item.title) ?? resolveCountryFromText(text));
   });
 
-  if (candidates.length === 0) {
+  if (eligible.length === 0) {
     return { recovered: [], recoveredItems: [], attempted: 0, skipped: false };
   }
 
-  const texts = candidates.flatMap((item) => [
-    item.title.slice(0, MAX_INPUT_CHARS),
-    item.snippet.slice(0, MAX_INPUT_CHARS),
-  ]);
+  // Send what fits this call's allowance, in arrival order, rather than
+  // the whole list: translate.ts refuses any request over the per-call
+  // limit outright, and a 20-item batch (6 KB, the median on 2026-11-04)
+  // was refused in 41 of 48 cycles, so nothing at all got through.
+  const allowance = await translationAllowanceNow().catch(() => 0);
+  const candidates: RawItem[] = [];
+  const texts: string[] = [];
+  let bytes = 0;
+  for (const item of eligible) {
+    const pair = [item.title.slice(0, MAX_INPUT_CHARS), item.snippet.slice(0, MAX_INPUT_CHARS)];
+    const pairBytes = byteLength(pair[0]) + byteLength(pair[1]);
+    if (bytes + pairBytes > allowance) continue;
+    bytes += pairBytes;
+    candidates.push(item);
+    texts.push(...pair);
+  }
+  if (candidates.length === 0) {
+    return { recovered: [], recoveredItems: [], attempted: 0, skipped: true };
+  }
+
   const translated = await translateBatch(texts, "auto");
   if (!translated) {
     return { recovered: [], recoveredItems: [], attempted: candidates.length, skipped: true };

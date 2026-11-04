@@ -12,7 +12,8 @@ import { fetchRecentPrimaries, promoteDuplicateAfterRejection } from "../src/lib
 import { runStoryDedupPass } from "../src/lib/storyDedup";
 import { insertDirectItems } from "../src/lib/ingest";
 import { reviewPendingEvents } from "../src/lib/classifierAudit";
-import { retryFailedClassificationsViaTranslation } from "../src/lib/classifyTranslated";
+import { looksNonEnglish, retryFailedClassificationsViaTranslation } from "../src/lib/classifyTranslated";
+import { translationAllowanceNow } from "../src/lib/translationUsage";
 import { runAnomalyScan } from "../src/lib/anomalyScan";
 import { runAlertEvaluation } from "../src/lib/alertEngine";
 import { snapshotAircraftCounts, snapshotCommercialAircraftCounts } from "../src/lib/flightBaseline";
@@ -190,7 +191,7 @@ test("translated retry preserves strict GDELT credibility and severity eligibili
   await fixture(t);
   process.env.GOOGLE_TRANSLATE_API_KEY = "test-only";
   t.mock.method(getDb(), "execute", async () => ({ rows: [{ characters: 1 }] }));
-  const original = { source: "gdelt", title: "Ukraine meldet Vorfall", snippet: "Ukraine", publishedAt: new Date(), url: "https://rated.example/story" };
+  const original = { source: "gdelt", title: "Ukraine meldet Vorfall an der Grenze mit Russland", snippet: "Ukraine", publishedAt: new Date(), url: "https://rated.example/story" };
   const translated = "Ukraine missile strike kills 10 soldiers and destroys ammunition depot";
   t.mock.method(globalThis, "fetch", async () => Response.json({ data: { translations: [{ translatedText: translated }, { translatedText: translated }] } }));
   const good = { domain: "rated.example", bias: "Least Biased", factualRating: "High", credibility: "High" };
@@ -200,6 +201,34 @@ test("translated retry preserves strict GDELT credibility and severity eligibili
   assert.equal((await retryFailedClassificationsViaTranslation([original], new Map([[good.domain, good]]))).recovered.length, 1);
   assert.equal((await retryFailedClassificationsViaTranslation([{ ...original, source: "rss:fixture" }], new Map())).recovered.length, 1);
   assert.equal((await retryFailedClassificationsViaTranslation([original], undefined)).recovered.length, 1);
+});
+
+test("translated retry sends only non-English items, trimmed to the call allowance", async (t) => {
+  await fixture(t);
+  process.env.GOOGLE_TRANSLATE_API_KEY = "test-only";
+  // Real 2026-11 candidates: English headlines are never sent; foreign
+  // snippets and non-Latin scripts are.
+  assert.equal(looksNonEnglish("Four Palestinians killed, dozens wounded in fresh Israeli attacks across Gaza"), false);
+  assert.equal(looksNonEnglish("Mayor de Blasio visits La Paz"), false);
+  assert.equal(looksNonEnglish("Le président Donald Trump a annoncé le jour des élections qu’il mettrait fin à une aide"), true);
+  assert.equal(looksNonEnglish("פרשת רע״מגייט היא רעידת אדמה"), true);
+  assert.equal(looksNonEnglish("Ukraine meldet Vorfall an der Grenze mit Russland"), true);
+
+  const sent: string[][] = [];
+  t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+    const q = new URLSearchParams(String(init.body)).getAll("q");
+    sent.push(q);
+    return Response.json({ data: { translations: q.map((text) => ({ translatedText: text })) } });
+  });
+  const english = { source: "rss:fixture", title: "Ukraine says talks with Russia will resume", snippet: "Ukraine", publishedAt: new Date(), url: "https://example.invalid/en" };
+  const german = (n: number) => ({ ...english, title: `Ukraine meldet Vorfall ${n} an der Grenze mit Russland`, url: `https://example.invalid/de${n}` });
+  // The per-call allowance is about 1.5 KB: a few dozen of these fit, 200 never would.
+  const allowance = await translationAllowanceNow();
+  const result = await retryFailedClassificationsViaTranslation([english, ...Array.from({ length: 200 }, (_, n) => german(n))]);
+  assert.equal(sent.length, 1);
+  assert.ok(!sent[0].includes(english.title));
+  assert.ok(result.attempted > 0 && result.attempted < 200);
+  assert.ok(sent[0].reduce((sum, text) => sum + Buffer.byteLength(text), 0) <= allowance);
 });
 
 test("successful empty anomaly scans supersede findings; failed scans preserve the last generation", async (t) => {
